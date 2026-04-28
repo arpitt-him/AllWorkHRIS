@@ -9,15 +9,19 @@ using AllWorkHRIS.Core;
 using AllWorkHRIS.Core.Composition;
 using AllWorkHRIS.Core.Data;
 using AllWorkHRIS.Core.Events;
+using AllWorkHRIS.Core.Temporal;
 using AllWorkHRIS.Host;
 using AllWorkHRIS.Host.Components;
+using AllWorkHRIS.Host.Hris.Domain;
+using AllWorkHRIS.Host.Hris.Repositories;
+using AllWorkHRIS.Host.Hris.Services;
 
 // ---------------------------------------------------------------------------
-// 1. Syncfusion license — must be before CreateBuilder so no component
+// 1. Syncfusion license — must be immediately after CreateBuilder so no component
 //    can render before the license is registered. We read from user secrets
 //    via the configuration system, which requires CreateBuilder first.
 //    Safe to place immediately after CreateBuilder — no components render
-//    during the builder phase.
+//    during the CreateBuilder event.
 // ---------------------------------------------------------------------------
 var builder = WebApplication.CreateBuilder(args);
 
@@ -61,20 +65,123 @@ builder.Host.ConfigureContainer<ContainerBuilder>(autofacBuilder =>
                   .As<IEventPublisher>()
                   .SingleInstance();
 
+    // Temporal context
+    autofacBuilder.RegisterType<SystemTemporalContext>()
+                  .As<ITemporalContext>()
+                  .SingleInstance();
+
+    // -----------------------------------------------------------------------
+    // HRIS core — always registered; no module discovery required
+    // -----------------------------------------------------------------------
+
+    // Repositories
+    autofacBuilder.RegisterType<PersonRepository>()
+                  .As<IPersonRepository>()
+                  .InstancePerLifetimeScope();
+
+    autofacBuilder.RegisterType<EmploymentRepository>()
+                  .As<IEmploymentRepository>()
+                  .InstancePerLifetimeScope();
+
+    autofacBuilder.RegisterType<AssignmentRepository>()
+                  .As<IAssignmentRepository>()
+                  .InstancePerLifetimeScope();
+
+    autofacBuilder.RegisterType<CompensationRepository>()
+                  .As<ICompensationRepository>()
+                  .InstancePerLifetimeScope();
+
+    autofacBuilder.RegisterType<OrgUnitRepository>()
+                  .As<IOrgUnitRepository>()
+                  .InstancePerLifetimeScope();
+
+    autofacBuilder.RegisterType<JobRepository>()
+                  .As<IJobRepository>()
+                  .InstancePerLifetimeScope();
+
+    autofacBuilder.RegisterType<PositionRepository>()
+                  .As<IPositionRepository>()
+                  .InstancePerLifetimeScope();
+
+    autofacBuilder.RegisterType<EmployeeEventRepository>()
+                  .As<IEmployeeEventRepository>()
+                  .InstancePerLifetimeScope();
+
+    // Services
+    autofacBuilder.RegisterType<PersonService>()
+                  .As<IPersonService>()
+                  .InstancePerLifetimeScope();
+
+    autofacBuilder.RegisterType<EmploymentService>()
+                  .As<IEmploymentService>()
+                  .InstancePerLifetimeScope();
+
+    autofacBuilder.RegisterType<LifecycleEventService>()
+                  .As<ILifecycleEventService>()
+                  .InstancePerLifetimeScope();
+
+    autofacBuilder.RegisterType<CompensationService>()
+                  .As<ICompensationService>()
+                  .InstancePerLifetimeScope();
+
+    autofacBuilder.RegisterType<OrgStructureService>()
+                  .As<IOrgStructureService>()
+                  .InstancePerLifetimeScope();
+
     // Register each discovered module's services
     foreach (var module in platformModules)
         module.Register(autofacBuilder);
 });
 
 // ---------------------------------------------------------------------------
-// 5. Collect menu contributions and register as singleton
+// 5. Collect menu contributions — HRIS first, then module-discovered
 // ---------------------------------------------------------------------------
-var menuContributions = platformModules
-    .SelectMany(m => m.GetMenuContributions())
+var hrisMenuItems = new List<MenuContribution>
+{
+    new MenuContribution
+    {
+        Label        = "Employees",
+        Icon         = "HrisIcon",
+        SortOrder    = 10,
+        AccentColor  = "var(--module-hris)",
+        BadgeLabel   = "HRIS",
+        RequiredRole = "HrisViewer"
+    },
+    new MenuContribution
+    {
+        Label        = "Employees",
+        Href         = "/hris/employees",
+        Icon         = "HrisIcon",
+        SortOrder    = 1,
+        ParentLabel  = "Employees",
+        RequiredRole = "HrisViewer"
+    },
+    new MenuContribution
+    {
+        Label        = "Organisation",
+        Href         = "/hris/org",
+        Icon         = "HrisIcon",
+        SortOrder    = 2,
+        ParentLabel  = "Employees",
+        RequiredRole = "HrisViewer"
+    },
+    new MenuContribution
+    {
+        Label        = "Jobs & Positions",
+        Href         = "/hris/jobs",
+        Icon         = "HrisIcon",
+        SortOrder    = 3,
+        ParentLabel  = "Employees",
+        RequiredRole = "HrisAdmin"
+    }
+};
+
+var allMenuItems = hrisMenuItems
+    .Concat(platformModules.SelectMany(m => m.GetMenuContributions()))
     .OrderBy(c => c.SortOrder)
     .ToList();
 
-builder.Services.AddSingleton<IReadOnlyList<MenuContribution>>(menuContributions);
+builder.Services.AddSingleton<IReadOnlyList<MenuContribution>>(allMenuItems);
 
 // ---------------------------------------------------------------------------
 // 6. Tenant registry — single dev tenant for Phase 1
@@ -85,7 +192,7 @@ var tenantRegistry = new TenantRegistry(
 [
     new TenantConfig
     {
-        TenantId   = "00000000-0000-0000-0000-000000000001",
+        TenantId          = "00000000-0000-0000-0000-000000000001",
         ConnectionFactory = devConnectionFactory
     }
 ]);
@@ -126,10 +233,10 @@ builder.Services.AddAuthentication(options =>
     options.TokenValidationParameters = new TokenValidationParameters
     {
         RoleClaimType = "roles",
-        ClockSkew = TimeSpan.FromMinutes(2)
+        ClockSkew     = TimeSpan.FromMinutes(2)
     };
 
-    options.MapInboundClaims = false;
+    options.MapInboundClaims    = false;
     options.RequireHttpsMetadata = false;
 });
 

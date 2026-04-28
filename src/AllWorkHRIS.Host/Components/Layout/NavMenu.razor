@@ -1,25 +1,30 @@
 @* AllWorkHRIS.Host/Components/Layout/NavMenu.razor *@
 @inject AuthenticationStateProvider AuthStateProvider
+@using AllWorkHRIS.Core.Composition
+@using Microsoft.AspNetCore.Components.Authorization
 
-@foreach (var parent in TopLevelItems)
+@if (_user is not null)
 {
-    <div class="nav-group">
-        <div class="nav-item nav-parent">
-            <span class="nav-label">@parent.Label</span>
-            @if (parent.BadgeLabel is not null)
+    @foreach (var parent in TopLevelItems)
+    {
+        <div class="nav-group">
+            <div class="nav-item nav-parent">
+                <span class="nav-label">@parent.Label</span>
+                @if (parent.BadgeLabel is not null)
+                {
+                    <span class="nav-badge" style="background-color: @parent.AccentColor">
+                        @parent.BadgeLabel
+                    </span>
+                }
+            </div>
+            @foreach (var child in ChildrenOf(parent.Label))
             {
-                <span class="nav-badge" style="background-color: @parent.AccentColor">
-                    @parent.BadgeLabel
-                </span>
+                <NavLink class="nav-item nav-child" href="@child.Href" Match="NavLinkMatch.Prefix">
+                    <span class="nav-label">@child.Label</span>
+                </NavLink>
             }
         </div>
-        @foreach (var child in ChildrenOf(parent.Label))
-        {
-            <NavLink class="nav-item nav-child" href="@child.Href" Match="NavLinkMatch.Prefix">
-                <span class="nav-label">@child.Label</span>
-            </NavLink>
-        }
-    </div>
+    }
 }
 
 @code {
@@ -33,12 +38,14 @@
         _user = authState.User;
     }
 
-    private IEnumerable<MenuContribution> TopLevelItems =>
-        Items.Where(i => i.ParentLabel is null && IsAuthorised(i));
+    
+	private IEnumerable<MenuContribution> TopLevelItems =>
+    Items.Where(i => i.ParentLabel is null);
 
     private IEnumerable<MenuContribution> ChildrenOf(string parentLabel) =>
         Items.Where(i => i.ParentLabel == parentLabel && IsAuthorised(i));
 
     private bool IsAuthorised(MenuContribution item) =>
-        item.RequiredRole is null || (_user?.IsInRole(item.RequiredRole) ?? false);
+		item.RequiredRole is null || 
+			(_user?.Claims.Any(c => c.Type == "roles" && c.Value == item.RequiredRole) ?? false);
 }
