@@ -1,0 +1,26 @@
+@* AllWorkHRIS.Host/Components/Layout/TopBar.razor *@
+@using AllWorkHRIS.Core.Security
+@inject AuthenticationStateProvider AuthStateProvider
+
+<div class="shell-topbar">
+    <div class="shell-topbar-left">
+        @AppDisplayName
+    </div>
+    <div class="shell-topbar-right">
+        <span class="shell-user-name">@_displayName</span>
+        <a href="/account/logout" class="shell-logout-link">Sign out</a>
+    </div>
+</div>
+
+@code {
+    private string _displayName = string.Empty;
+
+    private string AppDisplayName =>
+        Environment.GetEnvironmentVariable("APP_DISPLAY_NAME") ?? "AllWorkHRIS";
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        _displayName = authState.User.GetDisplayName();
+    }
+}

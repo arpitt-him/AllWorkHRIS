@@ -1,0 +1,34 @@
+@* AllWorkHRIS.Host/Components/Layout/MainLayout.razor *@
+@inherits LayoutComponentBase
+@inject IReadOnlyList<MenuContribution> MenuItems
+
+<div class="shell-container">
+    <nav class="shell-sidebar">
+        <div class="shell-brand">
+            <span class="shell-brand-name">@AppDisplayName</span>
+        </div>
+        <NavMenu Items="MenuItems" />
+    </nav>
+
+    <div class="shell-main">
+        <TopBar />
+        <div class="shell-content">
+            <ErrorBoundary>
+                <ChildContent>
+                    @Body
+                </ChildContent>
+                <ErrorContent Context="ex">
+                    <div class="error-display">
+                        <h3>An error occurred</h3>
+                        <p>@ex.Message</p>
+                    </div>
+                </ErrorContent>
+            </ErrorBoundary>
+        </div>
+    </div>
+</div>
+
+@code {
+    private string AppDisplayName =>
+        Environment.GetEnvironmentVariable("APP_DISPLAY_NAME") ?? "AllWorkHRIS";
+}

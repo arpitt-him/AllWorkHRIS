@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json.schemastore.org/launchsettings.json",
+    "profiles": {
+      "https": {
+        "commandName": "Project",
+        "dotnetRunMessages": true,
+        "launchBrowser": true,
+        "applicationUrl": "https://localhost:5001;http://localhost:5000",
+        "environmentVariables": {
+          "ASPNETCORE_ENVIRONMENT": "Development",
+		  "DATABASE_CONNECTION_STRING": "Host=localhost;Database=allworkhris_dev;Username=postgres;Password=dev",
+		  "DATABASE_PROVIDER": "postgresql",
+		  "APP_ENVIRONMENT": "Development",
+		  "AUTH_AUTHORITY": "http://localhost:8080/realms/allworkhris",
+		  "AUTH_CLIENT_ID": "allworkhris-app",
+		  "AUTH_CLIENT_SECRET": "JqiuAlM6mZLvmCpOARlJ2Lk7AwL0vRx2",
+		  "TEMPORAL_OVERRIDE_ENABLED": "true"
+        }
+      }
+    }
+}

@@ -1,0 +1,75 @@
+@page "/error"
+@using Microsoft.AspNetCore.Diagnostics
+
+<PageTitle>Error — AllWork HRIS</PageTitle>
+
+<div class="error-container">
+    <div class="error-brand">
+        <img src="/images/allworkhr-icon.png"
+             alt="AllWork HRIS"
+             class="error-icon" />
+        <h1 class="error-title">Something went wrong</h1>
+        <p class="error-message">
+            An unexpected error has occurred. If the problem persists, please contact your system administrator.
+        </p>
+        <a href="/" class="error-home-link">Return to Home</a>
+    </div>
+</div>
+
+@code {
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+}
+
+<style>
+    .error-container {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: calc(100vh - var(--topbar-height));
+    }
+
+    .error-brand {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: var(--space-4);
+        max-width: 400px;
+        text-align: center;
+    }
+
+    .error-icon {
+        width: 80px;
+        height: 80px;
+        object-fit: contain;
+        opacity: 0.6;
+    }
+
+    .error-title {
+        font-family: var(--font-family-base);
+        font-size: var(--font-size-lg);
+        font-weight: var(--font-weight-semibold);
+        color: var(--aw-navy);
+        margin: 0;
+    }
+
+    .error-message {
+        font-family: var(--font-family-base);
+        font-size: var(--font-size-base);
+        color: #6B7280;
+        margin: 0;
+        line-height: 1.6;
+    }
+
+    .error-home-link {
+        font-family: var(--font-family-base);
+        font-size: var(--font-size-base);
+        font-weight: var(--font-weight-medium);
+        color: var(--aw-teal);
+        text-decoration: none;
+    }
+
+    .error-home-link:hover {
+        text-decoration: underline;
+    }
+</style>

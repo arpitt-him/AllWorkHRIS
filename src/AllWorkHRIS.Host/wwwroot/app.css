@@ -1,0 +1,270 @@
+/* app.css — AllWorkHRIS design tokens and shell layout */
+
+:root {
+    /* Brand palette */
+    --aw-brown:   #8A5A38;
+    --aw-blue:    #5B87A5;
+    --aw-green:   #6AAE63;
+    --aw-coral:   #E9836B;
+    --aw-purple:  #6657B5;
+    --aw-teal:    #2F9C9E;
+    --aw-gold:    #C79A55;
+    --aw-navy:    #2F4350;
+
+    /* Module accent assignments */
+    --module-hris:        var(--aw-teal);
+    --module-payroll:     var(--aw-coral);
+    --module-ta:          var(--aw-blue);
+    --module-benefits:    var(--aw-green);
+    --module-reporting:   var(--aw-gold);
+    --module-recruiting:  var(--aw-purple);
+    --module-performance: var(--aw-brown);
+
+    /* Semantic colours */
+    --color-success: #6AAE63;
+    --color-warning: #C79A55;
+    --color-danger:  #E9836B;
+    --color-info:    #5B87A5;
+
+    /* Shell layout */
+    --sidebar-bg:          var(--aw-navy);
+    --sidebar-width:       220px;
+    --sidebar-text:        #CBD5E0;
+    --sidebar-text-active: #FFFFFF;
+    --sidebar-item-hover:  #3D5464;
+    --topbar-bg:           #FFFFFF;
+    --topbar-height:       56px;
+    --content-bg:          #F7F9FC;
+
+    /* Typography */
+    --font-family-base:     'Inter', 'Segoe UI', system-ui, sans-serif;
+    --font-size-base:       14px;
+    --font-size-sm:         12px;
+    --font-size-lg:         16px;
+    --font-weight-normal:   400;
+    --font-weight-medium:   500;
+    --font-weight-semibold: 600;
+
+    /* Spacing scale */
+    --space-1:  4px;
+    --space-2:  8px;
+    --space-3:  12px;
+    --space-4:  16px;
+    --space-5:  20px;
+    --space-6:  24px;
+    --space-8:  32px;
+    --space-10: 40px;
+
+    /* Border radius */
+    --radius-sm: 4px;
+    --radius-md: 6px;
+    --radius-lg: 8px;
+    --radius-xl: 12px;
+
+    /* Elevation */
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.08);
+    --shadow-md: 0 2px 8px rgba(0,0,0,0.12);
+    --shadow-lg: 0 4px 16px rgba(0,0,0,0.16);
+
+    /* Syncfusion theme alignment */
+    --sf-primary: var(--aw-teal);
+
+    /* Icon background opacity */
+    --icon-bg-opacity: 0.15;
+}
+
+/* ------------------------------------------------------------------ */
+/* Reset / base                                                         */
+/* ------------------------------------------------------------------ */
+*, *::before, *::after {
+    box-sizing: border-box;
+}
+
+html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    font-family: var(--font-family-base);
+    font-size: var(--font-size-base);
+    background-color: var(--content-bg);
+    color: #1A202C;
+}
+
+/* ------------------------------------------------------------------ */
+/* Shell layout                                                         */
+/* ------------------------------------------------------------------ */
+.shell-container {
+    display: flex;
+    height: 100vh;
+    overflow: hidden;
+}
+
+.shell-sidebar {
+    width: var(--sidebar-width);
+    min-width: var(--sidebar-width);
+    background-color: var(--sidebar-bg);
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow-y: auto;
+}
+
+.shell-brand {
+    padding: var(--space-4) var(--space-4);
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+    min-height: var(--topbar-height);
+    display: flex;
+    align-items: center;
+}
+
+.shell-brand-name {
+    color: var(--sidebar-text-active);
+    font-size: var(--font-size-lg);
+    font-weight: var(--font-weight-semibold);
+    letter-spacing: 0.01em;
+}
+
+.shell-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.shell-topbar {
+    height: var(--topbar-height);
+    background-color: var(--topbar-bg);
+    border-bottom: 1px solid #E2E8F0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 var(--space-6);
+    box-shadow: var(--shadow-sm);
+    flex-shrink: 0;
+}
+
+.shell-topbar-left {
+    font-weight: var(--font-weight-semibold);
+    color: var(--aw-navy);
+    font-size: var(--font-size-lg);
+}
+
+.shell-topbar-right {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+}
+
+.shell-user-name {
+    color: #4A5568;
+    font-size: var(--font-size-sm);
+}
+
+.shell-logout-link {
+    color: var(--aw-teal);
+    font-size: var(--font-size-sm);
+    text-decoration: none;
+}
+
+.shell-logout-link:hover {
+    text-decoration: underline;
+}
+
+.shell-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--space-6);
+    background-color: var(--content-bg);
+}
+
+/* ------------------------------------------------------------------ */
+/* Navigation                                                           */
+/* ------------------------------------------------------------------ */
+.nav-group {
+    margin-bottom: var(--space-1);
+}
+
+.nav-parent {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-3) var(--space-4);
+    color: var(--sidebar-text);
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-semibold);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    cursor: default;
+}
+
+.nav-item {
+    display: flex;
+    align-items: center;
+    padding: var(--space-2) var(--space-4) var(--space-2) var(--space-6);
+    color: var(--sidebar-text);
+    text-decoration: none;
+    font-size: var(--font-size-base);
+    transition: background-color 0.15s ease;
+}
+
+.nav-item:hover {
+    background-color: var(--sidebar-item-hover);
+    color: var(--sidebar-text-active);
+}
+
+.nav-item.active {
+    background-color: var(--sidebar-item-hover);
+    color: var(--sidebar-text-active);
+}
+
+.nav-label {
+    flex: 1;
+}
+
+.nav-badge {
+    font-size: 10px;
+    font-weight: var(--font-weight-semibold);
+    padding: 2px 6px;
+    border-radius: var(--radius-sm);
+    color: #FFFFFF;
+    letter-spacing: 0.03em;
+}
+
+/* ------------------------------------------------------------------ */
+/* Error display                                                        */
+/* ------------------------------------------------------------------ */
+.error-display {
+    background-color: #FFF5F5;
+    border: 1px solid var(--color-danger);
+    border-radius: var(--radius-md);
+    padding: var(--space-6);
+    color: #742A2A;
+}
+
+#blazor-error-ui {
+    background: lightyellow;
+    bottom: 0;
+    box-shadow: 0 -1px 2px rgba(0,0,0,0.2);
+    display: none;
+    left: 0;
+    padding: 0.6rem 1.25rem 0.7rem 1.25rem;
+    position: fixed;
+    width: 100%;
+    z-index: 1000;
+}
+
+/* ------------------------------------------------------------------ */
+/* Validation                                                           */
+/* ------------------------------------------------------------------ */
+.valid.modified:not([type=checkbox]) {
+    outline: 1px solid var(--color-success);
+}
+
+.invalid {
+    outline: 1px solid var(--color-danger);
+}
+
+.validation-message {
+    color: var(--color-danger);
+    font-size: var(--font-size-sm);
+}
