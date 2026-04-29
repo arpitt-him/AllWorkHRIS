@@ -1,5 +1,7 @@
+using System.Data;
 using Autofac;
 using Autofac.Extensions.DependencyInjection;
+using Dapper;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
@@ -9,28 +11,36 @@ using AllWorkHRIS.Core;
 using AllWorkHRIS.Core.Composition;
 using AllWorkHRIS.Core.Data;
 using AllWorkHRIS.Core.Events;
+using AllWorkHRIS.Core.Lookups;
 using AllWorkHRIS.Core.Temporal;
 using AllWorkHRIS.Host;
 using AllWorkHRIS.Host.Components;
-using AllWorkHRIS.Host.Hris.Domain;
 using AllWorkHRIS.Host.Hris.Repositories;
 using AllWorkHRIS.Host.Hris.Services;
 
-// ---------------------------------------------------------------------------
-// 1. Syncfusion license — must be immediately after CreateBuilder so no component
-//    can render before the license is registered. We read from user secrets
-//    via the configuration system, which requires CreateBuilder first.
-//    Safe to place immediately after CreateBuilder — no components render
-//    during the CreateBuilder event.
-// ---------------------------------------------------------------------------
 var builder = WebApplication.CreateBuilder(args);
 
+// ---------------------------------------------------------------------------
+// 1. Syncfusion license — must be executed immediately after CreateBuilder so 
+//    no component can render before the license is registered. We read from 
+//    user secrets via the configuration system, which requires CreateBuilder 
+//    first.  Safe to place immediately after CreateBuilder — no components 
+//    render during the CreateBuilder event.
+// ---------------------------------------------------------------------------
 var syncfusionKey = builder.Configuration["Syncfusion:LicenseKey"]
     ?? throw new InvalidOperationException(
         "Syncfusion license key not set. " +
         "Add it via: dotnet user-secrets set \"Syncfusion:LicenseKey\" \"your-key\"");
 
 Syncfusion.Licensing.SyncfusionLicenseProvider.RegisterLicense(syncfusionKey);
+
+// ---------------------------------------------------------------------------
+// 1b. Dapper — column mapping and DateOnly type handlers
+// ---------------------------------------------------------------------------
+DefaultTypeMap.MatchNamesWithUnderscores = true;
+
+SqlMapper.AddTypeHandler(new DateOnlyTypeHandler());
+SqlMapper.AddTypeHandler(new NullableDateOnlyTypeHandler());
 
 // ---------------------------------------------------------------------------
 // 2. Validate required environment variables — fail fast before any wiring
@@ -70,6 +80,11 @@ builder.Host.ConfigureContainer<ContainerBuilder>(autofacBuilder =>
                   .As<ITemporalContext>()
                   .SingleInstance();
 
+    // Lookup cache — must be singleton so it is initialised once and shared
+    autofacBuilder.RegisterType<LookupCache>()
+                  .As<ILookupCache>()
+                  .SingleInstance();
+
     // -----------------------------------------------------------------------
     // HRIS core — always registered; no module discovery required
     // -----------------------------------------------------------------------
@@ -77,6 +92,10 @@ builder.Host.ConfigureContainer<ContainerBuilder>(autofacBuilder =>
     // Repositories
     autofacBuilder.RegisterType<PersonRepository>()
                   .As<IPersonRepository>()
+                  .InstancePerLifetimeScope();
+
+    autofacBuilder.RegisterType<PersonAddressRepository>()
+                  .As<IPersonAddressRepository>()
                   .InstancePerLifetimeScope();
 
     autofacBuilder.RegisterType<EmploymentRepository>()
@@ -252,6 +271,11 @@ builder.Services.AddCascadingAuthenticationState();
 var app = builder.Build();
 
 // ---------------------------------------------------------------------------
+// 10b. Initialise lookup cache — must run before any request is served
+// ---------------------------------------------------------------------------
+await app.Services.GetRequiredService<ILookupCache>().RefreshAsync();
+
+// ---------------------------------------------------------------------------
 // 11. Middleware pipeline
 // ---------------------------------------------------------------------------
 if (!app.Environment.IsDevelopment())
@@ -296,3 +320,36 @@ app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
 app.Run();
+
+// Maps DateOnly ↔ PostgreSQL date. Npgsql returns date columns as DateTime when using
+// NpgsqlConnection directly (not NpgsqlDataSource), so Parse handles both types.
+file sealed class DateOnlyTypeHandler : SqlMapper.TypeHandler<DateOnly>
+{
+    public override void SetValue(IDbDataParameter parameter, DateOnly value)
+        => parameter.Value = value.ToDateTime(TimeOnly.MinValue);
+
+    public override DateOnly Parse(object value) => value switch
+    {
+        DateOnly d  => d,
+        DateTime dt => DateOnly.FromDateTime(dt),
+        _           => DateOnly.FromDateTime(Convert.ToDateTime(value))
+    };
+}
+
+file sealed class NullableDateOnlyTypeHandler : SqlMapper.TypeHandler<DateOnly?>
+{
+    public override void SetValue(IDbDataParameter parameter, DateOnly? value)
+        => parameter.Value = value.HasValue ? value.Value.ToDateTime(TimeOnly.MinValue) : DBNull.Value;
+
+    public override DateOnly? Parse(object value)
+    {
+        if (value is DBNull || value is null) return null;
+        return value switch
+        {
+            DateOnly d  => d,
+            DateTime dt => DateOnly.FromDateTime(dt),
+            _           => DateOnly.FromDateTime(Convert.ToDateTime(value))
+        };
+    }
+}
+

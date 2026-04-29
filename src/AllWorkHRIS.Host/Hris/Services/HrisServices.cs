@@ -1,5 +1,6 @@
 using AllWorkHRIS.Core.Data;
 using AllWorkHRIS.Core.Events;
+using AllWorkHRIS.Core.Lookups;
 using AllWorkHRIS.Core.Temporal;
 using AllWorkHRIS.Host.Hris.Commands;
 using AllWorkHRIS.Host.Hris.Domain;
@@ -33,75 +34,97 @@ public interface IEmploymentService
     Task              TerminateEmployeeAsync(TerminateEmployeeCommand command);
     Task<Employment?> GetByIdAsync(Guid employmentId);
     Task<Employment?> GetActiveEmploymentAsync(Guid employmentId, DateOnly? asOf = null);
+    Task<PagedResult<EmploymentListItem>> GetPagedListAsync(EmployeeListQuery query);
+    Task<EmployeeStatCards>               GetStatCardsAsync(DateOnly asOf);
 }
 
 public sealed class EmploymentService : IEmploymentService
 {
-    private readonly IConnectionFactory       _connectionFactory;
-    private readonly IPersonRepository        _personRepository;
-    private readonly IEmploymentRepository    _employmentRepository;
-    private readonly IAssignmentRepository    _assignmentRepository;
-    private readonly ICompensationRepository  _compensationRepository;
-    private readonly IEmployeeEventRepository _eventRepository;
-    private readonly IEventPublisher          _eventPublisher;
-    private readonly ITemporalContext         _temporalContext;
+    private readonly IConnectionFactory         _connectionFactory;
+    private readonly IPersonRepository          _personRepository;
+    private readonly IPersonAddressRepository   _personAddressRepository;
+    private readonly IEmploymentRepository      _employmentRepository;
+    private readonly IAssignmentRepository      _assignmentRepository;
+    private readonly ICompensationRepository    _compensationRepository;
+    private readonly IEmployeeEventRepository   _eventRepository;
+    private readonly IEventPublisher            _eventPublisher;
+    private readonly ITemporalContext           _temporalContext;
+    private readonly ILookupCache               _lookupCache;
+
+    private readonly int _activeStatusId;
+    private readonly int _terminatedStatusId;
+    private readonly int _closedStatusId;
+    private readonly int _onLeaveStatusId;
+    private readonly int _regularTempStatusId;
+    private readonly int _primaryAssignmentTypeId;
+    private readonly int _activeAssignmentStatusId;
+    private readonly int _activeCompStatusId;
+    private readonly int _approvedApprovalStatusId;
 
     public EmploymentService(
-        IConnectionFactory       connectionFactory,
-        IPersonRepository        personRepository,
-        IEmploymentRepository    employmentRepository,
-        IAssignmentRepository    assignmentRepository,
-        ICompensationRepository  compensationRepository,
-        IEmployeeEventRepository eventRepository,
-        IEventPublisher          eventPublisher,
-        ITemporalContext         temporalContext)
+        IConnectionFactory         connectionFactory,
+        IPersonRepository          personRepository,
+        IPersonAddressRepository   personAddressRepository,
+        IEmploymentRepository      employmentRepository,
+        IAssignmentRepository      assignmentRepository,
+        ICompensationRepository    compensationRepository,
+        IEmployeeEventRepository   eventRepository,
+        IEventPublisher            eventPublisher,
+        ITemporalContext           temporalContext,
+        ILookupCache               lookupCache)
     {
-        _connectionFactory      = connectionFactory;
-        _personRepository       = personRepository;
-        _employmentRepository   = employmentRepository;
-        _assignmentRepository   = assignmentRepository;
-        _compensationRepository = compensationRepository;
-        _eventRepository        = eventRepository;
-        _eventPublisher         = eventPublisher;
-        _temporalContext        = temporalContext;
+        _connectionFactory       = connectionFactory;
+        _personRepository        = personRepository;
+        _personAddressRepository = personAddressRepository;
+        _employmentRepository    = employmentRepository;
+        _assignmentRepository    = assignmentRepository;
+        _compensationRepository  = compensationRepository;
+        _eventRepository         = eventRepository;
+        _eventPublisher          = eventPublisher;
+        _temporalContext         = temporalContext;
+        _lookupCache             = lookupCache;
+
+        _activeStatusId           = lookupCache.GetId(LookupTables.EmploymentStatus,    "ACTIVE");
+        _terminatedStatusId       = lookupCache.GetId(LookupTables.EmploymentStatus,    "TERMINATED");
+        _closedStatusId           = lookupCache.GetId(LookupTables.EmploymentStatus,    "CLOSED");
+        _onLeaveStatusId          = lookupCache.GetId(LookupTables.EmploymentStatus,    "ON_LEAVE");
+        _regularTempStatusId      = lookupCache.GetId(LookupTables.RegularTemporaryStatus, "REGULAR");
+        _primaryAssignmentTypeId  = lookupCache.GetId(LookupTables.AssignmentType,      "PRIMARY");
+        _activeAssignmentStatusId = lookupCache.GetId(LookupTables.AssignmentStatus,    "ACTIVE");
+        _activeCompStatusId       = lookupCache.GetId(LookupTables.CompensationStatus,  "ACTIVE");
+        _approvedApprovalStatusId = lookupCache.GetId(LookupTables.ApprovalStatus,      "APPROVED");
     }
 
     public async Task<HireResult> HireEmployeeAsync(HireEmployeeCommand command)
     {
-        // 1. Validate command
         ValidateHireCommand(command);
 
-        // 2. Check for duplicate employee number
         if (await _employmentRepository.ExistsWithNumberAsync(command.EmployeeNumber))
             throw new DomainException($"Employee number {command.EmployeeNumber} already exists.");
 
         using var uow = new UnitOfWork(_connectionFactory);
         try
         {
-            // 3. Create Person
-            var person   = Person.CreateNew(command);
-            var personId = await _personRepository.InsertAsync(person, uow);
+            var person       = Person.CreateNew(command, _lookupCache);
+            var personId     = await _personRepository.InsertAsync(person, uow);
 
-            // 4. Create Employment
-            var employment   = Employment.CreateFromHire(command, personId);
+            var address      = PersonAddress.CreateFromHire(command, personId);
+            await _personAddressRepository.InsertAsync(address, uow);
+
+            var employment   = Employment.CreateFromHire(command, personId, _lookupCache);
             var employmentId = await _employmentRepository.InsertAsync(employment, uow);
 
-            // 5. Create initial Assignment
-            var assignment = Assignment.CreateInitial(command, employmentId);
+            var assignment   = Assignment.CreateInitial(command, employmentId, _lookupCache);
             await _assignmentRepository.InsertAsync(assignment, uow);
 
-            // 6. Create initial Compensation Record
-            var compensation = CompensationRecord.CreateInitial(command, employmentId);
+            var compensation = CompensationRecord.CreateInitial(command, employmentId, _lookupCache);
             await _compensationRepository.InsertAsync(compensation, uow);
 
-            // 7. Record lifecycle event
-            var hireEvent = EmployeeEvent.CreateHire(personId, employmentId, command);
+            var hireEvent = EmployeeEvent.CreateHire(employmentId, command, _lookupCache);
             var eventId   = await _eventRepository.InsertAsync(hireEvent, uow);
 
-            // 8. Commit all writes atomically
             uow.Commit();
 
-            // 9. Publish AFTER commit — never before
             await _eventPublisher.PublishAsync(new HireEventPayload
             {
                 EmploymentId     = employmentId,
@@ -110,7 +133,7 @@ public sealed class EmploymentService : IEmploymentService
                 TenantId         = Guid.Empty,
                 EffectiveDate    = command.EmploymentStartDate,
                 LegalEntityId    = command.LegalEntityId,
-                FlsaStatus       = command.FlsaStatus,
+                FlsaStatus       = _lookupCache.GetCode(LookupTables.FlsaStatus, command.FlsaStatusId),
                 PayrollContextId = command.PayrollContextId,
                 EventTimestamp   = DateTimeOffset.UtcNow
             });
@@ -128,8 +151,8 @@ public sealed class EmploymentService : IEmploymentService
     {
         var priorEmployments = await _employmentRepository.GetByPersonIdAsync(personId);
         var activeEmployment = priorEmployments.FirstOrDefault(e =>
-            e.EmploymentStatus == EmploymentStatus.Active ||
-            e.EmploymentStatus == EmploymentStatus.OnLeave);
+            e.EmploymentStatusId == _activeStatusId ||
+            e.EmploymentStatusId == _onLeaveStatusId);
 
         if (activeEmployment is not null)
             throw new DomainException("Cannot rehire — person has an active employment record.");
@@ -141,6 +164,8 @@ public sealed class EmploymentService : IEmploymentService
         using var uow = new UnitOfWork(_connectionFactory);
         try
         {
+            var now = DateTimeOffset.UtcNow;
+
             var employment = new Employment
             {
                 EmploymentId             = Guid.NewGuid(),
@@ -148,13 +173,13 @@ public sealed class EmploymentService : IEmploymentService
                 LegalEntityId            = command.LegalEntityId,
                 EmployerId               = command.LegalEntityId,
                 EmployeeNumber           = command.EmployeeNumber,
-                EmploymentType           = Enum.Parse<EmploymentType>(command.EmploymentType, ignoreCase: true),
+                EmploymentTypeId         = command.EmploymentTypeId,
                 EmploymentStartDate      = command.EmploymentStartDate,
                 OriginalHireDate         = priorEmployment?.OriginalHireDate ?? command.EmploymentStartDate,
-                EmploymentStatus         = EmploymentStatus.Active,
-                FullOrPartTimeStatus     = Enum.Parse<FullPartTimeStatus>(command.FullOrPartTimeStatus, ignoreCase: true),
-                RegularOrTemporaryStatus = RegularTemporaryStatus.Regular,
-                FlsaStatus               = Enum.Parse<FlsaStatus>(command.FlsaStatus, ignoreCase: true),
+                EmploymentStatusId       = _activeStatusId,
+                FullPartTimeStatusId     = command.FullPartTimeStatusId,
+                RegularTemporaryStatusId = _regularTempStatusId,
+                FlsaStatusId             = command.FlsaStatusId,
                 PayrollContextId         = command.PayrollContextId,
                 PrimaryWorkLocationId    = command.LocationId,
                 PrimaryDepartmentId      = command.DepartmentId,
@@ -165,8 +190,8 @@ public sealed class EmploymentService : IEmploymentService
                 PayrollEligibilityFlag   = true,
                 BenefitsEligibilityFlag  = true,
                 TimeTrackingRequiredFlag = false,
-                CreationTimestamp        = DateTimeOffset.UtcNow,
-                LastUpdateTimestamp      = DateTimeOffset.UtcNow,
+                CreationTimestamp        = now,
+                LastUpdateTimestamp      = now,
                 LastUpdatedBy            = command.InitiatedBy.ToString()
             };
 
@@ -180,51 +205,44 @@ public sealed class EmploymentService : IEmploymentService
                 PositionId          = command.PositionId,
                 DepartmentId        = command.DepartmentId,
                 LocationId          = command.LocationId,
-                PayrollContextId    = command.PayrollContextId ?? Guid.Empty,
-                AssignmentType      = AssignmentType.Primary,
-                AssignmentStatus    = AssignmentStatus.Active,
+                PayrollContextId    = command.PayrollContextId,
+                AssignmentTypeId    = _primaryAssignmentTypeId,
+                AssignmentStatusId  = _activeAssignmentStatusId,
                 AssignmentStartDate = command.EmploymentStartDate,
                 CreatedBy           = command.InitiatedBy,
-                CreationTimestamp   = DateTimeOffset.UtcNow,
+                CreationTimestamp   = now,
                 LastUpdatedBy       = command.InitiatedBy,
-                LastUpdateTimestamp = DateTimeOffset.UtcNow
+                LastUpdateTimestamp = now
             };
 
             await _assignmentRepository.InsertAsync(assignment, uow);
 
+            var rateTypeCode = _lookupCache.GetCode(LookupTables.CompensationRateType, command.RateTypeId);
+            var freqCode     = _lookupCache.GetCode(LookupTables.PayFrequency,          command.PayFrequencyId);
             var compensation = new CompensationRecord
             {
-                CompensationId      = Guid.NewGuid(),
-                EmploymentId        = employmentId,
-                RateType            = Enum.Parse<CompensationRateType>(command.RateType, ignoreCase: true),
-                BaseRate            = command.BaseRate,
-                RateCurrency        = "USD",
-                PayFrequency        = Enum.Parse<PayFrequency>(command.PayFrequency, ignoreCase: true),
-                EffectiveStartDate  = command.EmploymentStartDate,
-                CompensationStatus  = CompensationStatus.Active,
-                ChangeReasonCode    = command.ChangeReasonCode,
-                ApprovalStatus      = ApprovalStatus.Approved,
-                PrimaryRateFlag     = true,
-                CreatedBy           = command.InitiatedBy,
-                CreationTimestamp   = DateTimeOffset.UtcNow,
-                LastUpdatedBy       = command.InitiatedBy,
-                LastUpdateTimestamp = DateTimeOffset.UtcNow
+                CompensationId       = Guid.NewGuid(),
+                EmploymentId         = employmentId,
+                RateTypeId           = command.RateTypeId,
+                BaseRate             = command.BaseRate,
+                RateCurrency         = "USD",
+                AnnualEquivalent     = CompensationRecord.ComputeAnnualEquivalent(rateTypeCode, command.BaseRate, freqCode),
+                PayFrequencyId       = command.PayFrequencyId,
+                EffectiveStartDate   = command.EmploymentStartDate,
+                CompensationStatusId = _activeCompStatusId,
+                ChangeReasonCode     = command.ChangeReasonCode,
+                ApprovalStatusId     = _approvedApprovalStatusId,
+                PrimaryRateFlag      = true,
+                CreatedBy            = command.InitiatedBy,
+                CreationTimestamp    = now,
+                LastUpdatedBy        = command.InitiatedBy,
+                LastUpdateTimestamp  = now
             };
 
             await _compensationRepository.InsertAsync(compensation, uow);
 
-            var rehireEvent = new EmployeeEvent
-            {
-                EventId           = Guid.NewGuid(),
-                EmploymentId      = employmentId,
-                EventType         = EmployeeEventType.Rehire,
-                EffectiveDate     = command.EmploymentStartDate,
-                EventReason       = command.ChangeReasonCode,
-                InitiatedBy       = command.InitiatedBy,
-                CreationTimestamp = DateTimeOffset.UtcNow
-            };
-
-            var eventId = await _eventRepository.InsertAsync(rehireEvent, uow);
+            var rehireEvent = EmployeeEvent.CreateRehire(employmentId, command, _lookupCache);
+            var eventId     = await _eventRepository.InsertAsync(rehireEvent, uow);
 
             uow.Commit();
 
@@ -254,17 +272,17 @@ public sealed class EmploymentService : IEmploymentService
         var employment = await _employmentRepository.GetByIdAsync(command.EmploymentId)
             ?? throw new DomainException($"Employment {command.EmploymentId} not found.");
 
-        if (employment.EmploymentStatus == EmploymentStatus.Terminated ||
-            employment.EmploymentStatus == EmploymentStatus.Closed)
+        if (employment.EmploymentStatusId == _terminatedStatusId ||
+            employment.EmploymentStatusId == _closedStatusId)
             throw new DomainException("Employment is already terminated.");
 
         using var uow = new UnitOfWork(_connectionFactory);
         try
         {
             await _employmentRepository.UpdateStatusAsync(
-                command.EmploymentId, "TERMINATED", command.TerminationDate, uow);
+                command.EmploymentId, _terminatedStatusId, command.TerminationDate, uow);
 
-            var terminationEvent = EmployeeEvent.CreateTermination(command.EmploymentId, command);
+            var terminationEvent = EmployeeEvent.CreateTermination(command.EmploymentId, command, _lookupCache);
             var eventId = await _eventRepository.InsertAsync(terminationEvent, uow);
 
             uow.Commit();
@@ -276,7 +294,7 @@ public sealed class EmploymentService : IEmploymentService
                 EventId         = eventId,
                 TenantId        = Guid.Empty,
                 TerminationDate = command.TerminationDate,
-                EventType       = command.EventType,
+                EventType       = "TERMINATION",
                 ReasonCode      = command.ReasonCode,
                 EventTimestamp  = DateTimeOffset.UtcNow
             });
@@ -299,11 +317,17 @@ public sealed class EmploymentService : IEmploymentService
         if (employment is null) return null;
         if (employment.EmploymentStartDate > effectiveDate) return null;
         if (employment.EmploymentEndDate.HasValue && employment.EmploymentEndDate < effectiveDate) return null;
-        if (employment.EmploymentStatus == EmploymentStatus.Terminated ||
-            employment.EmploymentStatus == EmploymentStatus.Closed) return null;
+        if (employment.EmploymentStatusId == _terminatedStatusId ||
+            employment.EmploymentStatusId == _closedStatusId) return null;
 
         return employment;
     }
+
+    public async Task<PagedResult<EmploymentListItem>> GetPagedListAsync(EmployeeListQuery query)
+        => await _employmentRepository.GetPagedListAsync(query);
+
+    public async Task<EmployeeStatCards> GetStatCardsAsync(DateOnly asOf)
+        => await _employmentRepository.GetStatCardsAsync(asOf);
 
     private static void ValidateHireCommand(HireEmployeeCommand command)
     {
@@ -406,19 +430,28 @@ public sealed class CompensationService : ICompensationService
     private readonly IEmployeeEventRepository _eventRepository;
     private readonly IEventPublisher          _eventPublisher;
     private readonly ITemporalContext         _temporalContext;
+    private readonly ILookupCache             _lookupCache;
+
+    private readonly int _activeCompStatusId;
+    private readonly int _approvedApprovalStatusId;
 
     public CompensationService(
         IConnectionFactory       connectionFactory,
         ICompensationRepository  compensationRepository,
         IEmployeeEventRepository eventRepository,
         IEventPublisher          eventPublisher,
-        ITemporalContext         temporalContext)
+        ITemporalContext         temporalContext,
+        ILookupCache             lookupCache)
     {
         _connectionFactory      = connectionFactory;
         _compensationRepository = compensationRepository;
         _eventRepository        = eventRepository;
         _eventPublisher         = eventPublisher;
         _temporalContext        = temporalContext;
+        _lookupCache            = lookupCache;
+
+        _activeCompStatusId       = lookupCache.GetId(LookupTables.CompensationStatus, "ACTIVE");
+        _approvedApprovalStatusId = lookupCache.GetId(LookupTables.ApprovalStatus,     "APPROVED");
     }
 
     public async Task<Guid> ChangeCompensationAsync(ChangeCompensationCommand command)
@@ -432,28 +465,32 @@ public sealed class CompensationService : ICompensationService
             await _compensationRepository.CloseCurrentAsync(
                 command.EmploymentId, command.EffectiveDate.AddDays(-1), uow);
 
+            var now          = DateTimeOffset.UtcNow;
+            var rateTypeCode = _lookupCache.GetCode(LookupTables.CompensationRateType, command.RateTypeId);
+            var freqCode     = _lookupCache.GetCode(LookupTables.PayFrequency,          command.PayFrequencyId);
             var newRecord = new CompensationRecord
             {
-                CompensationId      = Guid.NewGuid(),
-                EmploymentId        = command.EmploymentId,
-                RateType            = Enum.Parse<CompensationRateType>(command.RateType, ignoreCase: true),
-                BaseRate            = command.NewBaseRate,
-                RateCurrency        = "USD",
-                PayFrequency        = Enum.Parse<PayFrequency>(command.PayFrequency, ignoreCase: true),
-                EffectiveStartDate  = command.EffectiveDate,
-                CompensationStatus  = CompensationStatus.Active,
-                ChangeReasonCode    = command.ChangeReasonCode,
-                ApprovalStatus      = ApprovalStatus.Approved,
-                PrimaryRateFlag     = true,
-                CreatedBy           = command.InitiatedBy,
-                CreationTimestamp   = DateTimeOffset.UtcNow,
-                LastUpdatedBy       = command.InitiatedBy,
-                LastUpdateTimestamp = DateTimeOffset.UtcNow
+                CompensationId       = Guid.NewGuid(),
+                EmploymentId         = command.EmploymentId,
+                RateTypeId           = command.RateTypeId,
+                BaseRate             = command.NewBaseRate,
+                RateCurrency         = "USD",
+                AnnualEquivalent     = CompensationRecord.ComputeAnnualEquivalent(rateTypeCode, command.NewBaseRate, freqCode),
+                PayFrequencyId       = command.PayFrequencyId,
+                EffectiveStartDate   = command.EffectiveDate,
+                CompensationStatusId = _activeCompStatusId,
+                ChangeReasonCode     = command.ChangeReasonCode,
+                ApprovalStatusId     = _approvedApprovalStatusId,
+                PrimaryRateFlag      = true,
+                CreatedBy            = command.InitiatedBy,
+                CreationTimestamp    = now,
+                LastUpdatedBy        = command.InitiatedBy,
+                LastUpdateTimestamp  = now
             };
 
             await _compensationRepository.InsertAsync(newRecord, uow);
 
-            var compEvent = EmployeeEvent.CreateCompensationChange(command.EmploymentId, command);
+            var compEvent = EmployeeEvent.CreateCompensationChange(command.EmploymentId, command, _lookupCache);
             var eventId   = await _eventRepository.InsertAsync(compEvent, uow);
 
             uow.Commit();
@@ -465,11 +502,11 @@ public sealed class CompensationService : ICompensationService
                 EventId        = eventId,
                 TenantId       = Guid.Empty,
                 EffectiveDate  = command.EffectiveDate,
-                RateType       = command.RateType,
+                RateType       = _lookupCache.GetCode(LookupTables.CompensationRateType, command.RateTypeId),
                 NewBaseRate    = command.NewBaseRate,
-                PayFrequency   = command.PayFrequency,
+                PayFrequency   = _lookupCache.GetCode(LookupTables.PayFrequency, command.PayFrequencyId),
                 IsRetroactive  = isRetroactive,
-                EventTimestamp = DateTimeOffset.UtcNow
+                EventTimestamp = now
             });
 
             return eventId;
@@ -494,11 +531,11 @@ public sealed class CompensationService : ICompensationService
 
 public interface ILifecycleEventService
 {
-    Task<EmployeeEvent>  InitiateEventAsync(Guid employmentId, string eventType,
+    Task<EmployeeEvent>  InitiateEventAsync(Guid employmentId, int eventTypeId,
                              string reasonCode, Guid initiatedBy);
     Task                 ApproveEventAsync(Guid eventId, Guid approvedBy);
     Task                 RejectEventAsync(Guid eventId, Guid rejectedBy, string reason);
-    Task<EmployeeEvent?> GetPendingEventAsync(Guid employmentId, string eventType);
+    Task<EmployeeEvent?> GetPendingEventAsync(Guid employmentId, int eventTypeId);
 }
 
 public sealed class LifecycleEventService : ILifecycleEventService
@@ -514,14 +551,14 @@ public sealed class LifecycleEventService : ILifecycleEventService
         _eventRepository   = eventRepository;
     }
 
-    public async Task<EmployeeEvent> InitiateEventAsync(Guid employmentId, string eventType,
+    public async Task<EmployeeEvent> InitiateEventAsync(Guid employmentId, int eventTypeId,
         string reasonCode, Guid initiatedBy)
     {
         var employeeEvent = new EmployeeEvent
         {
             EventId           = Guid.NewGuid(),
             EmploymentId      = employmentId,
-            EventType         = Enum.Parse<EmployeeEventType>(eventType, ignoreCase: true),
+            EventTypeId       = eventTypeId,
             EffectiveDate     = DateOnly.FromDateTime(DateTime.UtcNow),
             EventReason       = reasonCode,
             InitiatedBy       = initiatedBy,
@@ -549,11 +586,10 @@ public sealed class LifecycleEventService : ILifecycleEventService
     public Task RejectEventAsync(Guid eventId, Guid rejectedBy, string reason)
         => throw new NotImplementedException("Workflow rejection implemented in Phase 3.");
 
-    public async Task<EmployeeEvent?> GetPendingEventAsync(Guid employmentId, string eventType)
+    public async Task<EmployeeEvent?> GetPendingEventAsync(Guid employmentId, int eventTypeId)
     {
         var events = await _eventRepository.GetByEmploymentIdAsync(employmentId);
-        var parsedType = Enum.Parse<EmployeeEventType>(eventType, ignoreCase: true);
-        return events.FirstOrDefault(e => e.EventType == parsedType);
+        return events.FirstOrDefault(e => e.EventTypeId == eventTypeId);
     }
 }
 
@@ -575,20 +611,29 @@ public sealed class OrgStructureService : IOrgStructureService
 {
     private readonly IOrgUnitRepository _orgUnitRepository;
 
-    public OrgStructureService(IOrgUnitRepository orgUnitRepository)
-        => _orgUnitRepository = orgUnitRepository;
+    private readonly int _legalEntityTypeId;
+    private readonly int _departmentTypeId;
+    private readonly int _locationTypeId;
+
+    public OrgStructureService(IOrgUnitRepository orgUnitRepository, ILookupCache lookupCache)
+    {
+        _orgUnitRepository  = orgUnitRepository;
+        _legalEntityTypeId  = lookupCache.GetId(LookupTables.OrgUnitType, "LEGAL_ENTITY");
+        _departmentTypeId   = lookupCache.GetId(LookupTables.OrgUnitType, "DEPARTMENT");
+        _locationTypeId     = lookupCache.GetId(LookupTables.OrgUnitType, "LOCATION");
+    }
 
     public async Task<OrgUnit?> GetOrgUnitByIdAsync(Guid orgUnitId)
         => await _orgUnitRepository.GetByIdAsync(orgUnitId);
 
     public async Task<IEnumerable<OrgUnit>> GetLegalEntitiesAsync()
-        => await _orgUnitRepository.GetByTypeAsync(OrgUnitType.LegalEntity);
+        => await _orgUnitRepository.GetByTypeAsync(_legalEntityTypeId);
 
     public async Task<IEnumerable<OrgUnit>> GetDepartmentsAsync()
-        => await _orgUnitRepository.GetByTypeAsync(OrgUnitType.Department);
+        => await _orgUnitRepository.GetByTypeAsync(_departmentTypeId);
 
     public async Task<IEnumerable<OrgUnit>> GetLocationsAsync()
-        => await _orgUnitRepository.GetByTypeAsync(OrgUnitType.Location);
+        => await _orgUnitRepository.GetByTypeAsync(_locationTypeId);
 
     public async Task<IEnumerable<OrgUnit>> GetChildrenAsync(Guid parentOrgUnitId)
         => await _orgUnitRepository.GetChildrenAsync(parentOrgUnitId);

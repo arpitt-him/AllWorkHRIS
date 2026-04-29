@@ -15,7 +15,92 @@
 
 <body>
     <Routes />
-    <script src="_framework/blazor.web.js"></script>
+
+    <div id="components-reconnect-modal">
+        <div class="reconnect-card">
+            <div class="reconnect-spinner"></div>
+            <div class="reconnect-text">
+                <strong>Connection lost</strong>
+                <span id="reconnect-status">Attempting to reconnect…</span>
+                <span id="reconnect-countdown"></span>
+            </div>
+        </div>
+    </div>
+
+    <script src="_framework/blazor.web.js" autostart="false"></script>
+    <script>
+        (function () {
+            var modal       = document.getElementById('components-reconnect-modal');
+            var statusEl    = document.getElementById('reconnect-status');
+            var countdownEl = document.getElementById('reconnect-countdown');
+            if (!modal) return;
+
+            // Seconds to wait before each retry attempt (index = previousAttempts)
+            // Attempt 1 is immediate; subsequent waits ramp up to match Blazor's backoff
+            var SCHEDULE    = [0, 7, 12, 17, 22, 27];
+            var MAX_RETRIES = SCHEDULE.length;
+            var countdownTimer = null;
+
+            function clearTimer() {
+                clearInterval(countdownTimer);
+                countdownTimer = null;
+            }
+
+            function showConnecting(attemptNum) {
+                clearTimer();
+                statusEl.textContent    = 'Attempt ' + attemptNum + ' of ' + MAX_RETRIES;
+                countdownEl.textContent = 'Connecting…';
+            }
+
+            function startCountdown(failedAttempt, waitSecs) {
+                clearTimer();
+                statusEl.textContent    = 'Attempt ' + failedAttempt + ' failed';
+                countdownEl.textContent = 'Retrying in ' + waitSecs + 's…';
+                var secs = waitSecs;
+                countdownTimer = setInterval(function () {
+                    secs--;
+                    if (secs <= 0) {
+                        clearTimer();
+                        showConnecting(failedAttempt + 1);
+                    } else {
+                        countdownEl.textContent = 'Retrying in ' + secs + 's…';
+                    }
+                }, 1000);
+            }
+
+            // Handle failed / rejected states via MutationObserver
+            new MutationObserver(function () {
+                if (modal.classList.contains('components-reconnect-failed') ||
+                    modal.classList.contains('components-reconnect-rejected')) {
+                    clearTimer();
+                    statusEl.textContent    = 'Could not reconnect.';
+                    countdownEl.textContent = 'Please reload the page.';
+                } else if (!modal.classList.contains('components-reconnect-show')) {
+                    clearTimer();
+                    statusEl.textContent    = 'Attempting to reconnect…';
+                    countdownEl.textContent = '';
+                }
+            }).observe(modal, { attributes: true, attributeFilter: ['class'] });
+
+            Blazor.start({
+                circuit: {
+                    reconnectionOptions: {
+                        maxRetries: MAX_RETRIES,
+                        retryIntervalMilliseconds: function (previousAttempts) {
+                            if (previousAttempts >= MAX_RETRIES) return null;
+                            var waitSecs = SCHEDULE[previousAttempts];
+                            if (waitSecs === 0) {
+                                showConnecting(1);
+                            } else {
+                                startCountdown(previousAttempts, waitSecs);
+                            }
+                            return waitSecs * 1000;
+                        }
+                    }
+                }
+            });
+        })();
+    </script>
 </body>
 
 </html>

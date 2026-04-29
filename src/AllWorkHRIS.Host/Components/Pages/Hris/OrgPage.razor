@@ -1,0 +1,346 @@
+@page "/hris/org"
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = "HrisViewer,HrisAdmin")]
+@using Microsoft.AspNetCore.Authorization
+@using AllWorkHRIS.Core.Lookups
+@using AllWorkHRIS.Host.Hris.Services
+@using AllWorkHRIS.Host.Hris.Domain
+@inject IOrgStructureService OrgStructureService
+@inject ILookupCache LookupCache
+
+<PageTitle>Organisation — AllWork HRIS</PageTitle>
+
+<div class="page-container">
+
+    <div class="page-header">
+        <h2 class="page-title">Organisation</h2>
+        <AuthorizeView Roles="HrisAdmin">
+            <Authorized>
+                <button class="btn-primary" @onclick="OpenAddOrgUnitPanel">+ Add Org Unit</button>
+            </Authorized>
+        </AuthorizeView>
+    </div>
+
+    @* View toggle *@
+    <div class="view-toggle">
+        <button class="toggle-btn @(_activeView == "hierarchy" ? "active" : "")"
+                @onclick='() => _activeView = "hierarchy"'>
+            Hierarchy
+        </button>
+        <button class="toggle-btn @(_activeView == "list" ? "active" : "")"
+                @onclick='() => _activeView = "list"'>
+            List
+        </button>
+    </div>
+
+    @if (_loading)
+    {
+        <p class="loading-text">Loading organisation...</p>
+    }
+    else if (_activeView == "hierarchy")
+    {
+        <div class="org-tree-container">
+            @if (!_orgUnits.Any())
+            {
+                <div class="empty-state">
+                    <p>No org units found.</p>
+                    <AuthorizeView Roles="HrisAdmin">
+                        <Authorized>
+                            <p>Click <strong>+ Add Org Unit</strong> to create the first org unit.</p>
+                        </Authorized>
+                    </AuthorizeView>
+                </div>
+            }
+            else
+            {
+                @foreach (var root in RootUnits)
+                {
+                    <div class="org-tree-node">
+                        <div class="org-node-header" @onclick="() => ToggleNode(root.OrgUnitId)">
+                            <span class="org-node-toggle">@(IsExpanded(root.OrgUnitId) ? "▾" : "▸")</span>
+                            <span class="org-type-badge">@LookupLabel(LookupTables.OrgUnitType, root.OrgUnitTypeId)</span>
+                            <span class="org-node-name">@root.OrgUnitName</span>
+                            <span class="org-node-code">@root.OrgUnitCode</span>
+                        </div>
+                        @if (IsExpanded(root.OrgUnitId))
+                        {
+                            <div class="org-node-children">
+                                @foreach (var child in ChildrenOf(root.OrgUnitId))
+                                {
+                                    <div class="org-tree-node org-tree-node--child">
+                                        <div class="org-node-header">
+                                            <span class="org-node-toggle">&nbsp;&nbsp;</span>
+                                            <span class="org-type-badge">@LookupLabel(LookupTables.OrgUnitType, child.OrgUnitTypeId)</span>
+                                            <span class="org-node-name">@child.OrgUnitName</span>
+                                            <span class="org-node-code">@child.OrgUnitCode</span>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+            }
+        </div>
+    }
+    else
+    {
+        <div class="grid-container">
+            @if (!_orgUnits.Any())
+            {
+                <div class="empty-state">
+                    <p>No org units found.</p>
+                </div>
+            }
+            else
+            {
+                <table class="org-table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Code</th>
+                            <th>Type</th>
+                            <th>Status</th>
+                            <th>Effective Start</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var unit in _orgUnits.OrderBy(u => u.OrgUnitTypeId).ThenBy(u => u.OrgUnitName))
+                        {
+                            <tr>
+                                <td>@unit.OrgUnitName</td>
+                                <td>@unit.OrgUnitCode</td>
+                                <td><span class="org-type-badge">@LookupLabel(LookupTables.OrgUnitType, unit.OrgUnitTypeId)</span></td>
+                                <td><span class="status-badge status-@LookupCode(LookupTables.OrgStatus, unit.OrgStatusId)">@LookupLabel(LookupTables.OrgStatus, unit.OrgStatusId)</span></td>
+                                <td>@unit.EffectiveStartDate.ToString("yyyy-MM-dd")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+    }
+
+</div>
+
+@if (_showAddPanel)
+{
+    <div class="panel-overlay" @onclick="CloseAddOrgUnitPanel">
+        <div class="panel-content" @onclick:stopPropagation>
+            <p>Add Org Unit panel — implemented in Phase 2 completion.</p>
+            <button @onclick="CloseAddOrgUnitPanel">Close</button>
+        </div>
+    </div>
+}
+
+@code {
+    private bool              _loading     = true;
+    private string            _activeView  = "hierarchy";
+    private bool              _showAddPanel = false;
+    private List<OrgUnit>     _orgUnits    = [];
+    private HashSet<Guid>     _expanded    = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loading = true;
+        try
+        {
+            var units = await OrgStructureService.GetAllActiveAsync();
+            _orgUnits = units.ToList();
+            // Expand root nodes by default
+            foreach (var root in RootUnits)
+                _expanded.Add(root.OrgUnitId);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private IEnumerable<OrgUnit> RootUnits =>
+        _orgUnits.Where(u => u.ParentOrgUnitId is null);
+
+    private IEnumerable<OrgUnit> ChildrenOf(Guid parentId) =>
+        _orgUnits.Where(u => u.ParentOrgUnitId == parentId);
+
+    private bool IsExpanded(Guid id) => _expanded.Contains(id);
+
+    private void ToggleNode(Guid id)
+    {
+        if (_expanded.Contains(id)) _expanded.Remove(id);
+        else _expanded.Add(id);
+    }
+
+    private void OpenAddOrgUnitPanel()  => _showAddPanel = true;
+    private void CloseAddOrgUnitPanel() => _showAddPanel = false;
+
+    private string LookupLabel(string tableName, int id)
+        => LookupCache.GetAll(tableName).FirstOrDefault(e => e.Id == id)?.Label ?? id.ToString();
+
+    private string LookupCode(string tableName, int id)
+        => LookupCache.GetCode(tableName, id).ToLower();
+}
+
+<style>
+    .page-container { padding: var(--space-6); }
+
+    .page-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: var(--space-4);
+    }
+
+    .page-title {
+        font-size: var(--font-size-lg);
+        font-weight: var(--font-weight-semibold);
+        color: var(--aw-navy);
+        margin: 0;
+    }
+
+    .view-toggle {
+        display: flex;
+        gap: 0;
+        border: 1px solid #E5E7EB;
+        border-radius: var(--radius-md);
+        overflow: hidden;
+        margin-bottom: var(--space-6);
+        width: fit-content;
+    }
+
+    .toggle-btn {
+        padding: var(--space-2) var(--space-4);
+        background: white;
+        border: none;
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-medium);
+        color: #6B7280;
+        cursor: pointer;
+    }
+
+    .toggle-btn.active {
+        background: var(--aw-teal);
+        color: white;
+    }
+
+    .org-tree-container, .grid-container {
+        background: white;
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-sm);
+        padding: var(--space-4);
+    }
+
+    .org-tree-node { margin-bottom: var(--space-2); }
+
+    .org-tree-node--child { margin-left: var(--space-8); }
+
+    .org-node-header {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        padding: var(--space-2) var(--space-3);
+        border-radius: var(--radius-md);
+        cursor: pointer;
+    }
+
+    .org-node-header:hover { background: #F9FAFB; }
+
+    .org-node-toggle {
+        width: 16px;
+        color: #6B7280;
+        font-size: var(--font-size-sm);
+    }
+
+    .org-node-name {
+        font-weight: var(--font-weight-medium);
+        color: var(--aw-navy);
+    }
+
+    .org-node-code {
+        font-size: var(--font-size-sm);
+        color: #6B7280;
+    }
+
+    .org-node-children { margin-top: var(--space-1); }
+
+    .org-type-badge {
+        background: #EFF6FF;
+        color: #1D4ED8;
+        padding: 2px var(--space-2);
+        border-radius: var(--radius-sm);
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-medium);
+        white-space: nowrap;
+    }
+
+    .org-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: var(--font-size-base);
+    }
+
+    .org-table th {
+        background: #F9FAFB;
+        padding: var(--space-3) var(--space-4);
+        text-align: left;
+        font-weight: var(--font-weight-medium);
+        color: #6B7280;
+        font-size: var(--font-size-sm);
+        border-bottom: 1px solid #E5E7EB;
+    }
+
+    .org-table td {
+        padding: var(--space-3) var(--space-4);
+        border-bottom: 1px solid #F3F4F6;
+        color: var(--aw-navy);
+    }
+
+    .status-badge {
+        padding: 2px var(--space-2);
+        border-radius: var(--radius-sm);
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-medium);
+    }
+
+    .status-active   { background: #D1FAE5; color: #065F46; }
+    .status-inactive { background: #FEE2E2; color: #991B1B; }
+    .status-archived { background: #F3F4F6; color: #6B7280; }
+
+    .loading-text { padding: var(--space-6); color: #6B7280; text-align: center; }
+
+    .empty-state {
+        padding: var(--space-10);
+        text-align: center;
+        color: #6B7280;
+    }
+
+    .btn-primary {
+        background-color: var(--aw-teal);
+        color: white;
+        border: none;
+        border-radius: var(--radius-md);
+        padding: var(--space-2) var(--space-4);
+        font-size: var(--font-size-base);
+        font-weight: var(--font-weight-medium);
+        cursor: pointer;
+    }
+
+    .btn-primary:hover { opacity: 0.9; }
+
+    .panel-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,0.4);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+    }
+
+    .panel-content {
+        background: white;
+        border-radius: var(--radius-lg);
+        padding: var(--space-6);
+        min-width: 400px;
+    }
+</style>

@@ -1,0 +1,449 @@
+@page "/hris/employees/{EmploymentId:guid}"
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = "HrisViewer,HrisAdmin")]
+@using Microsoft.AspNetCore.Authorization
+@using AllWorkHRIS.Core.Lookups
+@using AllWorkHRIS.Host.Hris.Services
+@using AllWorkHRIS.Host.Hris.Domain
+@inject IEmploymentService  EmploymentService
+@inject IPersonService      PersonService
+@inject ICompensationService CompensationService
+@inject ILookupCache        LookupCache
+@inject NavigationManager   Navigation
+
+<PageTitle>@_pageTitle — AllWork HRIS</PageTitle>
+
+@if (_loading)
+{
+    <div class="page-container">
+        <p class="loading-text">Loading employee...</p>
+    </div>
+}
+else if (_employment is null)
+{
+    <div class="page-container">
+        <p class="error-text">Employee not found.</p>
+        <a href="/hris/employees" class="btn-link">Back to Employees</a>
+    </div>
+}
+else
+{
+    <div class="page-container">
+
+        @* Page header *@
+        <div class="page-header">
+            <div class="employee-header-info">
+                <span class="avatar-lg">@_initials</span>
+                <div>
+                    <h2 class="page-title">@_person?.LegalFirstName @_person?.LegalLastName</h2>
+                    <span class="employee-number">@_employment.EmployeeNumber</span>
+                    <span class="status-badge status-@LookupCode(LookupTables.EmploymentStatus, _employment.EmploymentStatusId)">
+                        @LookupLabel(LookupTables.EmploymentStatus, _employment.EmploymentStatusId)
+                    </span>
+                </div>
+            </div>
+            <AuthorizeView Roles="HrisAdmin">
+                <Authorized>
+                    <div class="action-buttons">
+                        @if (_employment.EmploymentStatusId == _activeStatusId)
+                        {
+                            <button class="btn-secondary">Change Compensation</button>
+                            <button class="btn-secondary">Transfer</button>
+                            <button class="btn-secondary">Change Manager</button>
+                            <button class="btn-secondary">Place on Leave</button>
+                            <button class="btn-danger">Terminate</button>
+                        }
+                        else if (_employment.EmploymentStatusId == _onLeaveStatusId)
+                        {
+                            <button class="btn-secondary">Return from Leave</button>
+                            <button class="btn-danger">Terminate</button>
+                        }
+                    </div>
+                </Authorized>
+            </AuthorizeView>
+        </div>
+
+        @* Tabs *@
+        <div class="tab-bar">
+            @foreach (var tab in _tabs)
+            {
+                <button class="tab-btn @(_activeTab == tab ? "active" : "")"
+                        @onclick="() => _activeTab = tab">
+                    @tab
+                </button>
+            }
+        </div>
+
+        @* Tab content *@
+        <div class="tab-content">
+            @switch (_activeTab)
+            {
+                case "Profile":
+                    <div class="detail-section">
+                        <h3 class="section-title">Personal Information</h3>
+                        <div class="detail-grid">
+                            <div class="detail-item">
+                                <span class="detail-label">Legal Name</span>
+                                <span class="detail-value">@_person?.LegalFirstName @_person?.LegalMiddleName @_person?.LegalLastName</span>
+                            </div>
+                            <div class="detail-item">
+                                <span class="detail-label">Preferred Name</span>
+                                <span class="detail-value">@(_person?.PreferredName ?? "—")</span>
+                            </div>
+                            <div class="detail-item">
+                                <span class="detail-label">Date of Birth</span>
+                                <span class="detail-value">@_person?.DateOfBirth.ToString("yyyy-MM-dd")</span>
+                            </div>
+                            <div class="detail-item">
+                                <span class="detail-label">Gender</span>
+                                <span class="detail-value">@(_person?.Gender ?? "—")</span>
+                            </div>
+                            <div class="detail-item">
+                                <span class="detail-label">Pronouns</span>
+                                <span class="detail-value">@(_person?.Pronouns ?? "—")</span>
+                            </div>
+                            <div class="detail-item">
+                                <span class="detail-label">Marital Status</span>
+                                <span class="detail-value">@(_person?.MaritalStatus ?? "—")</span>
+                            </div>
+                        </div>
+                    </div>
+                    break;
+
+                case "Employment":
+                    <div class="detail-section">
+                        <h3 class="section-title">Employment Details</h3>
+                        <div class="detail-grid">
+                            <div class="detail-item">
+                                <span class="detail-label">Employee Number</span>
+                                <span class="detail-value">@_employment.EmployeeNumber</span>
+                            </div>
+                            <div class="detail-item">
+                                <span class="detail-label">Employment Type</span>
+                                <span class="detail-value">@LookupLabel(LookupTables.EmploymentType, _employment.EmploymentTypeId)</span>
+                            </div>
+                            <div class="detail-item">
+                                <span class="detail-label">Status</span>
+                                <span class="detail-value">@LookupLabel(LookupTables.EmploymentStatus, _employment.EmploymentStatusId)</span>
+                            </div>
+                            <div class="detail-item">
+                                <span class="detail-label">FLSA Status</span>
+                                <span class="detail-value">@LookupLabel(LookupTables.FlsaStatus, _employment.FlsaStatusId)</span>
+                            </div>
+                            <div class="detail-item">
+                                <span class="detail-label">Full / Part Time</span>
+                                <span class="detail-value">@LookupLabel(LookupTables.FullPartTimeStatus, _employment.FullPartTimeStatusId)</span>
+                            </div>
+                            <div class="detail-item">
+                                <span class="detail-label">Start Date</span>
+                                <span class="detail-value">@_employment.EmploymentStartDate.ToString("yyyy-MM-dd")</span>
+                            </div>
+                            @if (_employment.TerminationDate.HasValue)
+                            {
+                                <div class="detail-item">
+                                    <span class="detail-label">Termination Date</span>
+                                    <span class="detail-value">@_employment.TerminationDate.Value.ToString("yyyy-MM-dd")</span>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                    break;
+
+                case "Assignment":
+                    <div class="detail-section">
+                        <h3 class="section-title">Current Assignment</h3>
+                        <p class="placeholder-text">Assignment details — populated in Phase 2 completion.</p>
+                    </div>
+                    break;
+
+                case "Compensation":
+                    <AuthorizeView Roles="HrisAdmin">
+                        <Authorized>
+                            <div class="detail-section">
+                                <h3 class="section-title">Current Compensation</h3>
+                                @if (_compensation is not null)
+                                {
+                                    <div class="detail-grid">
+                                        <div class="detail-item">
+                                            <span class="detail-label">Rate Type</span>
+                                            <span class="detail-value">@LookupLabel(LookupTables.CompensationRateType, _compensation.RateTypeId)</span>
+                                        </div>
+                                        <div class="detail-item">
+                                            <span class="detail-label">Base Rate</span>
+                                            <span class="detail-value">@_compensation.BaseRate.ToString("C") @_compensation.RateCurrency</span>
+                                        </div>
+                                        <div class="detail-item">
+                                            <span class="detail-label">Pay Frequency</span>
+                                            <span class="detail-value">@LookupLabel(LookupTables.PayFrequency, _compensation.PayFrequencyId)</span>
+                                        </div>
+                                        <div class="detail-item">
+                                            <span class="detail-label">Effective Date</span>
+                                            <span class="detail-value">@_compensation.EffectiveStartDate.ToString("yyyy-MM-dd")</span>
+                                        </div>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <p class="placeholder-text">No active compensation record.</p>
+                                }
+                            </div>
+                        </Authorized>
+                        <NotAuthorized>
+                            <p class="placeholder-text">You do not have permission to view compensation details.</p>
+                        </NotAuthorized>
+                    </AuthorizeView>
+                    break;
+
+                case "Leave":
+                    <div class="detail-section">
+                        <h3 class="section-title">Leave Balances</h3>
+                        <p class="placeholder-text">Leave management — implemented in Phase 3.</p>
+                    </div>
+                    break;
+
+                case "Documents":
+                    <AuthorizeView Roles="HrisAdmin">
+                        <Authorized>
+                            <div class="detail-section">
+                                <h3 class="section-title">Documents</h3>
+                                <p class="placeholder-text">Document management — implemented in Phase 3.</p>
+                            </div>
+                        </Authorized>
+                    </AuthorizeView>
+                    break;
+
+                case "History":
+                    <div class="detail-section">
+                        <h3 class="section-title">Lifecycle Event History</h3>
+                        <p class="placeholder-text">Event history — populated as lifecycle events are recorded.</p>
+                    </div>
+                    break;
+            }
+        </div>
+
+    </div>
+}
+
+@code {
+    [Parameter] public Guid EmploymentId { get; set; }
+
+    private bool              _loading     = true;
+    private string            _activeTab   = "Profile";
+    private string            _pageTitle   = "Employee";
+    private string            _initials    = "??";
+    private Employment?       _employment;
+    private Person?           _person;
+    private CompensationRecord? _compensation;
+
+    private int _activeStatusId;
+    private int _onLeaveStatusId;
+
+    private static readonly string[] _tabs =
+        ["Profile", "Employment", "Assignment", "Compensation", "Leave", "Documents", "History"];
+
+    private string LookupLabel(string tableName, int id)
+        => LookupCache.GetAll(tableName).FirstOrDefault(e => e.Id == id)?.Label ?? id.ToString();
+
+    private string LookupCode(string tableName, int id)
+        => LookupCache.GetCode(tableName, id).ToLower();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _activeStatusId  = LookupCache.GetId(LookupTables.EmploymentStatus, "ACTIVE");
+        _onLeaveStatusId = LookupCache.GetId(LookupTables.EmploymentStatus, "ON_LEAVE");
+
+        _loading = true;
+        try
+        {
+            _employment = await EmploymentService.GetByIdAsync(EmploymentId);
+            if (_employment is not null)
+            {
+                _person = await PersonService.GetByEmploymentIdAsync(EmploymentId);
+                _compensation = await CompensationService.GetCurrentRateAsync(
+                    EmploymentId, DateOnly.FromDateTime(DateTime.UtcNow));
+
+                if (_person is not null)
+                {
+                    _pageTitle = $"{_person.LegalFirstName} {_person.LegalLastName}";
+                    _initials  = $"{_person.LegalFirstName.FirstOrDefault()}{_person.LegalLastName.FirstOrDefault()}".ToUpper();
+                }
+            }
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+}
+
+<style>
+    .page-container { padding: var(--space-6); }
+
+    .page-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: var(--space-6);
+    }
+
+    .employee-header-info {
+        display: flex;
+        align-items: center;
+        gap: var(--space-4);
+    }
+
+    .avatar-lg {
+        width: 56px;
+        height: 56px;
+        border-radius: 50%;
+        background-color: var(--aw-teal);
+        color: white;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.25rem;
+        font-weight: var(--font-weight-semibold);
+        flex-shrink: 0;
+    }
+
+    .page-title {
+        font-size: var(--font-size-lg);
+        font-weight: var(--font-weight-semibold);
+        color: var(--aw-navy);
+        margin: 0 0 var(--space-1) 0;
+    }
+
+    .employee-number {
+        font-size: var(--font-size-sm);
+        color: #6B7280;
+        margin-right: var(--space-2);
+    }
+
+    .action-buttons {
+        display: flex;
+        gap: var(--space-2);
+        flex-wrap: wrap;
+        justify-content: flex-end;
+    }
+
+    .tab-bar {
+        display: flex;
+        gap: 0;
+        border-bottom: 2px solid #E5E7EB;
+        margin-bottom: var(--space-6);
+    }
+
+    .tab-btn {
+        padding: var(--space-3) var(--space-4);
+        background: none;
+        border: none;
+        border-bottom: 2px solid transparent;
+        margin-bottom: -2px;
+        font-size: var(--font-size-base);
+        font-weight: var(--font-weight-medium);
+        color: #6B7280;
+        cursor: pointer;
+        transition: color 0.15s, border-color 0.15s;
+    }
+
+    .tab-btn.active {
+        color: var(--aw-teal);
+        border-bottom-color: var(--aw-teal);
+    }
+
+    .tab-btn:hover:not(.active) { color: var(--aw-navy); }
+
+    .tab-content {
+        background: white;
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-sm);
+        padding: var(--space-6);
+    }
+
+    .detail-section { }
+
+    .section-title {
+        font-size: var(--font-size-base);
+        font-weight: var(--font-weight-semibold);
+        color: var(--aw-navy);
+        margin: 0 0 var(--space-4) 0;
+    }
+
+    .detail-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+        gap: var(--space-4);
+    }
+
+    .detail-item {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-1);
+    }
+
+    .detail-label {
+        font-size: var(--font-size-sm);
+        color: #6B7280;
+        font-weight: var(--font-weight-medium);
+    }
+
+    .detail-value {
+        font-size: var(--font-size-base);
+        color: var(--aw-navy);
+    }
+
+    .placeholder-text {
+        color: #6B7280;
+        font-style: italic;
+    }
+
+    .loading-text, .error-text {
+        padding: var(--space-6);
+        color: #6B7280;
+        text-align: center;
+    }
+
+    .status-badge {
+        padding: 2px var(--space-2);
+        border-radius: var(--radius-sm);
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-medium);
+    }
+
+    .status-active     { background: #D1FAE5; color: #065F46; }
+    .status-onleave    { background: #FEF3C7; color: #92400E; }
+    .status-suspended  { background: #FEE2E2; color: #991B1B; }
+    .status-terminated { background: #F3F4F6; color: #6B7280; }
+
+    .btn-secondary {
+        background: white;
+        color: var(--aw-navy);
+        border: 1px solid #D1D5DB;
+        border-radius: var(--radius-md);
+        padding: var(--space-2) var(--space-3);
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-medium);
+        cursor: pointer;
+    }
+
+    .btn-secondary:hover { background: #F9FAFB; }
+
+    .btn-danger {
+        background: white;
+        color: #DC2626;
+        border: 1px solid #FCA5A5;
+        border-radius: var(--radius-md);
+        padding: var(--space-2) var(--space-3);
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-medium);
+        cursor: pointer;
+    }
+
+    .btn-danger:hover { background: #FEF2F2; }
+
+    .btn-link {
+        color: var(--aw-teal);
+        text-decoration: none;
+        font-weight: var(--font-weight-medium);
+    }
+</style>

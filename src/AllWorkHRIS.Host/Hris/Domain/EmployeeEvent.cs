@@ -1,27 +1,13 @@
+using AllWorkHRIS.Core.Lookups;
 using AllWorkHRIS.Host.Hris.Commands;
 
 namespace AllWorkHRIS.Host.Hris.Domain;
-
-public enum EmployeeEventType
-{
-    Hire,
-    Rehire,
-    Termination,
-    CompensationChange,
-    AssignmentChange,
-    Transfer,
-    LeaveStart,
-    LeaveReturn,
-    StatusChange,
-    ManagerChange,
-    Correction
-}
 
 public sealed record EmployeeEvent
 {
     public Guid EventId { get; init; }
     public Guid EmploymentId { get; init; }
-    public EmployeeEventType EventType { get; init; }
+    public int EventTypeId { get; init; }
     public DateOnly EffectiveDate { get; init; }
     public string? EventReason { get; init; }
     public string? Notes { get; init; }
@@ -30,13 +16,14 @@ public sealed record EmployeeEvent
     public DateTimeOffset? ApprovalTimestamp { get; init; }
     public DateTimeOffset CreationTimestamp { get; init; }
 
-    public static EmployeeEvent CreateHire(Guid personId, Guid employmentId, HireEmployeeCommand command)
+    public static EmployeeEvent CreateHire(
+        Guid employmentId, HireEmployeeCommand command, ILookupCache lookupCache)
     {
         return new EmployeeEvent
         {
             EventId           = Guid.NewGuid(),
             EmploymentId      = employmentId,
-            EventType         = EmployeeEventType.Hire,
+            EventTypeId       = lookupCache.GetId(LookupTables.EmployeeEventType, "HIRE"),
             EffectiveDate     = command.EmploymentStartDate,
             EventReason       = command.ChangeReasonCode,
             InitiatedBy       = command.InitiatedBy,
@@ -44,13 +31,29 @@ public sealed record EmployeeEvent
         };
     }
 
-    public static EmployeeEvent CreateTermination(Guid employmentId, TerminateEmployeeCommand command)
+    public static EmployeeEvent CreateRehire(
+        Guid employmentId, RehireEmployeeCommand command, ILookupCache lookupCache)
     {
         return new EmployeeEvent
         {
             EventId           = Guid.NewGuid(),
             EmploymentId      = employmentId,
-            EventType         = EmployeeEventType.Termination,
+            EventTypeId       = lookupCache.GetId(LookupTables.EmployeeEventType, "REHIRE"),
+            EffectiveDate     = command.EmploymentStartDate,
+            EventReason       = command.ChangeReasonCode,
+            InitiatedBy       = command.InitiatedBy,
+            CreationTimestamp = DateTimeOffset.UtcNow
+        };
+    }
+
+    public static EmployeeEvent CreateTermination(
+        Guid employmentId, TerminateEmployeeCommand command, ILookupCache lookupCache)
+    {
+        return new EmployeeEvent
+        {
+            EventId           = Guid.NewGuid(),
+            EmploymentId      = employmentId,
+            EventTypeId       = lookupCache.GetId(LookupTables.EmployeeEventType, "TERMINATION"),
             EffectiveDate     = command.TerminationDate,
             EventReason       = command.ReasonCode,
             Notes             = command.Notes,
@@ -59,13 +62,14 @@ public sealed record EmployeeEvent
         };
     }
 
-    public static EmployeeEvent CreateCompensationChange(Guid employmentId, ChangeCompensationCommand command)
+    public static EmployeeEvent CreateCompensationChange(
+        Guid employmentId, ChangeCompensationCommand command, ILookupCache lookupCache)
     {
         return new EmployeeEvent
         {
             EventId           = Guid.NewGuid(),
             EmploymentId      = employmentId,
-            EventType         = EmployeeEventType.CompensationChange,
+            EventTypeId       = lookupCache.GetId(LookupTables.EmployeeEventType, "COMPENSATION_CHANGE"),
             EffectiveDate     = command.EffectiveDate,
             EventReason       = command.ChangeReasonCode,
             InitiatedBy       = command.InitiatedBy,

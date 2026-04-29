@@ -1,0 +1,776 @@
+@* AllWorkHRIS.Host/Components/Pages/Hris/HireEmployeePanel.razor *@
+@* Multi-step hire form — embedded as a panel overlay *@
+@using AllWorkHRIS.Core.Lookups
+@using AllWorkHRIS.Host.Hris.Commands
+@using AllWorkHRIS.Host.Hris.Domain
+@using AllWorkHRIS.Host.Hris.Repositories
+@using AllWorkHRIS.Host.Hris.Services
+@inject IEmploymentService    EmploymentService
+@inject IOrgStructureService  OrgStructureService
+@inject IJobRepository        JobRepository
+@inject ILookupCache          LookupCache
+@inject AuthenticationStateProvider AuthStateProvider
+
+<div class="panel-overlay" @onclick="OnOverlayClick">
+    <div class="hire-panel" @onclick:stopPropagation>
+
+        @* Panel header *@
+        <div class="hire-panel-header">
+            <h3 class="hire-panel-title">Add Employee</h3>
+            <button class="panel-close-btn" @onclick="OnCancel">✕</button>
+        </div>
+
+        @* Step indicator *@
+        <div class="step-indicator">
+            @for (int i = 1; i <= _totalSteps; i++)
+            {
+                var step = i;
+                <div class="step @(step == _currentStep ? "active" : step < _currentStep ? "complete" : "")">
+                    <span class="step-number">@(step < _currentStep ? "✓" : step.ToString())</span>
+                    <span class="step-label">@StepLabel(step)</span>
+                </div>
+                @if (i < _totalSteps)
+                {
+                    <div class="step-connector @(step < _currentStep ? "complete" : "")"></div>
+                }
+            }
+        </div>
+
+        @* Error message *@
+        @if (!string.IsNullOrWhiteSpace(_errorMessage))
+        {
+            <div class="error-banner">@_errorMessage</div>
+        }
+
+        @* Step content *@
+        <div class="hire-panel-body">
+
+            @if (_currentStep == 1)
+            {
+                <h4 class="step-title">Step 1 — Identity</h4>
+                <div class="form-grid">
+                    <div class="form-field">
+                        <label>Legal First Name <span class="required">*</span></label>
+                        <input @bind="_cmd.LegalFirstName" placeholder="First name" />
+                    </div>
+                    <div class="form-field">
+                        <label>Legal Middle Name</label>
+                        <input @bind="_cmd.LegalMiddleName" placeholder="Middle name (optional)" />
+                    </div>
+                    <div class="form-field">
+                        <label>Legal Last Name <span class="required">*</span></label>
+                        <input @bind="_cmd.LegalLastName" placeholder="Last name" />
+                    </div>
+                    <div class="form-field">
+                        <label>Preferred Name</label>
+                        <input @bind="_cmd.PreferredName" placeholder="Preferred name (optional)" />
+                    </div>
+                    <div class="form-field">
+                        <label>Date of Birth <span class="required">*</span></label>
+                        <input type="date" @bind="_dateOfBirth" />
+                    </div>
+                    <div class="form-field">
+                        <label>National Identifier (SSN) <span class="required">*</span></label>
+                        <input type="password" @bind="_cmd.NationalIdentifier" placeholder="SSN" autocomplete="off" />
+                    </div>
+                </div>
+            }
+
+            @if (_currentStep == 2)
+            {
+                <h4 class="step-title">Step 2 — Contact</h4>
+                <div class="form-grid">
+                    <div class="form-field">
+                        <label>Primary Phone</label>
+                        <input @bind="_cmd.PhonePrimary" placeholder="e.g. (555) 123-4567" />
+                    </div>
+                    <div class="form-field">
+                        <label>Personal Email</label>
+                        <input type="email" @bind="_cmd.EmailPersonal" placeholder="name@example.com" />
+                    </div>
+                    <div class="form-field form-field-full">
+                        <label>Address Line 1 <span class="required">*</span></label>
+                        <input @bind="_cmd.AddressLine1" placeholder="Street address" />
+                    </div>
+                    <div class="form-field form-field-full">
+                        <label>Address Line 2</label>
+                        <input @bind="_cmd.AddressLine2" placeholder="Apt, Suite, etc. (optional)" />
+                    </div>
+                    <div class="form-field">
+                        <label>City <span class="required">*</span></label>
+                        <input @bind="_cmd.City" placeholder="City" />
+                    </div>
+                    <div class="form-field">
+                        <label>State <span class="required">*</span></label>
+                        <input @bind="_cmd.StateCode" placeholder="e.g. CA" maxlength="10" />
+                    </div>
+                    <div class="form-field">
+                        <label>Postal Code <span class="required">*</span></label>
+                        <input @bind="_cmd.PostalCode" placeholder="e.g. 90210" />
+                    </div>
+                    <div class="form-field">
+                        <label>Country</label>
+                        <input @bind="_cmd.CountryCode" placeholder="US" maxlength="5" />
+                    </div>
+                </div>
+            }
+
+            @if (_currentStep == 3)
+            {
+                <h4 class="step-title">Step 3 — Employment</h4>
+                <div class="form-grid">
+                    <div class="form-field">
+                        <label>Legal Entity <span class="required">*</span></label>
+                        <select @bind="_legalEntityId">
+                            <option value="">— Select —</option>
+                            @foreach (var le in _legalEntities)
+                            {
+                                <option value="@le.OrgUnitId">@le.OrgUnitName</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="form-field">
+                        <label>Employee Number <span class="required">*</span></label>
+                        <input @bind="_cmd.EmployeeNumber" placeholder="e.g. EMP-001" />
+                    </div>
+                    <div class="form-field">
+                        <label>Employment Type <span class="required">*</span></label>
+                        <select @bind="_cmd.EmploymentTypeId">
+                            <option value="0">— Select —</option>
+                            @foreach (var entry in _employmentTypes)
+                            {
+                                <option value="@entry.Id">@entry.Label</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="form-field">
+                        <label>Start Date <span class="required">*</span></label>
+                        <input type="date" @bind="_employmentStartDate" />
+                    </div>
+                    <div class="form-field">
+                        <label>FLSA Status <span class="required">*</span></label>
+                        <select @bind="_cmd.FlsaStatusId">
+                            <option value="0">— Select —</option>
+                            @foreach (var entry in _flsaStatuses)
+                            {
+                                <option value="@entry.Id">@entry.Label</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="form-field">
+                        <label>Full / Part Time <span class="required">*</span></label>
+                        <select @bind="_cmd.FullPartTimeStatusId">
+                            <option value="0">— Select —</option>
+                            @foreach (var entry in _fullPartTimeStatuses)
+                            {
+                                <option value="@entry.Id">@entry.Label</option>
+                            }
+                        </select>
+                    </div>
+                </div>
+            }
+
+            @if (_currentStep == 4)
+            {
+                <h4 class="step-title">Step 4 — Assignment</h4>
+                <div class="form-grid">
+                    <div class="form-field">
+                        <label>Job <span class="required">*</span></label>
+                        <select @bind="_jobId">
+                            <option value="">— Select —</option>
+                            @foreach (var job in _jobs)
+                            {
+                                <option value="@job.JobId">@job.JobTitle (@job.JobCode)</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="form-field">
+                        <label>Department <span class="required">*</span></label>
+                        <select @bind="_departmentId">
+                            <option value="">— Select —</option>
+                            @foreach (var dept in _departments)
+                            {
+                                <option value="@dept.OrgUnitId">@dept.OrgUnitName</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="form-field">
+                        <label>Location <span class="required">*</span></label>
+                        <select @bind="_locationId">
+                            <option value="">— Select —</option>
+                            @foreach (var loc in _locations)
+                            {
+                                <option value="@loc.OrgUnitId">@loc.OrgUnitName</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="form-field">
+                        <label>Manager (optional)</label>
+                        <input @bind="_cmd.ManagerEmploymentIdStr" placeholder="Manager employment ID (optional)" />
+                    </div>
+                </div>
+            }
+
+            @if (_currentStep == 5)
+            {
+                <h4 class="step-title">Step 5 — Compensation</h4>
+                <div class="form-grid">
+                    <div class="form-field">
+                        <label>Rate Type <span class="required">*</span></label>
+                        <select @bind="_cmd.RateTypeId">
+                            <option value="0">— Select —</option>
+                            @foreach (var entry in _rateTypes)
+                            {
+                                <option value="@entry.Id">@entry.Label</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="form-field">
+                        <label>Base Rate <span class="required">*</span></label>
+                        <div class="input-with-hint">
+                            <input type="number" @bind="_cmd.BaseRate" placeholder="0.00" min="0" step="0.01" />
+                            @if (_cmd.RateTypeId != 0)
+                            {
+                                <span class="field-hint">@BaseRateHint(_cmd.RateTypeId)</span>
+                            }
+                        </div>
+                    </div>
+                    <div class="form-field">
+                        <label>Pay Frequency <span class="required">*</span></label>
+                        <select @bind="_cmd.PayFrequencyId">
+                            <option value="0">— Select —</option>
+                            @foreach (var entry in _payFrequencies)
+                            {
+                                <option value="@entry.Id">@entry.Label</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="form-field">
+                        <label>Change Reason <span class="required">*</span></label>
+                        <select @bind="_cmd.ChangeReasonCode">
+                            <option value="">— Select —</option>
+                            <option value="NEW_HIRE">New Hire</option>
+                            <option value="REHIRE">Rehire</option>
+                            <option value="PROMOTION">Promotion</option>
+                        </select>
+                    </div>
+                </div>
+            }
+
+            @if (_currentStep == 6)
+            {
+                <h4 class="step-title">Step 6 — Review</h4>
+                <div class="review-section">
+                    <div class="review-group">
+                        <h5>Identity</h5>
+                        <div class="review-row"><span>Name</span><span>@_cmd.LegalFirstName @_cmd.LegalMiddleName @_cmd.LegalLastName</span></div>
+                        <div class="review-row"><span>Date of Birth</span><span>@_dateOfBirth?.ToString("yyyy-MM-dd")</span></div>
+                    </div>
+                    <div class="review-group">
+                        <h5>Contact</h5>
+                        @if (!string.IsNullOrWhiteSpace(_cmd.PhonePrimary))
+                        {
+                            <div class="review-row"><span>Phone</span><span>@_cmd.PhonePrimary</span></div>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(_cmd.EmailPersonal))
+                        {
+                            <div class="review-row"><span>Email</span><span>@_cmd.EmailPersonal</span></div>
+                        }
+                        <div class="review-row"><span>Address</span><span>@_cmd.AddressLine1@(string.IsNullOrWhiteSpace(_cmd.AddressLine2) ? "" : ", " + _cmd.AddressLine2)</span></div>
+                        <div class="review-row"><span>City / State / Zip</span><span>@_cmd.City, @_cmd.StateCode @_cmd.PostalCode</span></div>
+                        <div class="review-row"><span>Country</span><span>@(string.IsNullOrWhiteSpace(_cmd.CountryCode) ? "US" : _cmd.CountryCode)</span></div>
+                    </div>
+                    <div class="review-group">
+                        <h5>Employment</h5>
+                        <div class="review-row"><span>Employee Number</span><span>@_cmd.EmployeeNumber</span></div>
+                        <div class="review-row"><span>Type</span><span>@LookupLabel(_employmentTypes, _cmd.EmploymentTypeId)</span></div>
+                        <div class="review-row"><span>Start Date</span><span>@_employmentStartDate?.ToString("yyyy-MM-dd")</span></div>
+                        <div class="review-row"><span>FLSA</span><span>@LookupLabel(_flsaStatuses, _cmd.FlsaStatusId)</span></div>
+                    </div>
+                    <div class="review-group">
+                        <h5>Assignment</h5>
+                        <div class="review-row"><span>Job</span><span>@(_jobs.FirstOrDefault(j => j.JobId.ToString() == _jobId)?.JobTitle ?? "—")</span></div>
+                        <div class="review-row"><span>Department</span><span>@(_departments.FirstOrDefault(d => d.OrgUnitId.ToString() == _departmentId)?.OrgUnitName ?? "—")</span></div>
+                        <div class="review-row"><span>Location</span><span>@(_locations.FirstOrDefault(l => l.OrgUnitId.ToString() == _locationId)?.OrgUnitName ?? "—")</span></div>
+                    </div>
+                    <div class="review-group">
+                        <h5>Compensation</h5>
+                        <div class="review-row"><span>Rate Type</span><span>@LookupLabel(_rateTypes, _cmd.RateTypeId)</span></div>
+                        <div class="review-row"><span>Base Rate</span><span>@(_cmd.BaseRate % 1 == 0 ? _cmd.BaseRate.ToString("C0") : _cmd.BaseRate.ToString("C"))</span></div>
+                        <div class="review-row"><span>Pay Frequency</span><span>@LookupLabel(_payFrequencies, _cmd.PayFrequencyId)</span></div>
+                    </div>
+                </div>
+            }
+
+        </div>
+
+        @* Navigation buttons *@
+        <div class="hire-panel-footer">
+            <button class="btn-secondary" @onclick="OnCancel">Cancel</button>
+            <div class="nav-buttons">
+                @if (_currentStep > 1)
+                {
+                    <button class="btn-secondary" @onclick="PreviousStep">← Back</button>
+                }
+                @if (_currentStep < _totalSteps)
+                {
+                    <button class="btn-primary" @onclick="NextStep">Next →</button>
+                }
+                else
+                {
+                    <button class="btn-primary" @onclick="SubmitHire" disabled="@_submitting">
+                        @(_submitting ? "Hiring..." : "Hire Employee")
+                    </button>
+                }
+            </div>
+        </div>
+
+    </div>
+</div>
+
+@code {
+    [Parameter] public EventCallback OnHireComplete { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private int  _currentStep = 1;
+    private int  _totalSteps  = 6;
+    private bool _submitting  = false;
+    private string _errorMessage = string.Empty;
+
+    // Form model — flat fields for binding
+    private HireFormModel _cmd = new();
+    private DateTime?  _dateOfBirth;
+    private DateTime?  _employmentStartDate;
+    private string     _legalEntityId = string.Empty;
+    private string     _jobId         = string.Empty;
+    private string     _departmentId  = string.Empty;
+    private string     _locationId    = string.Empty;
+
+    // Reference data — org/job loaded from DB
+    private List<OrgUnit> _legalEntities = [];
+    private List<OrgUnit> _departments   = [];
+    private List<OrgUnit> _locations     = [];
+    private List<Job>     _jobs          = [];
+
+    // Reference data — lookup dropdowns loaded from cache
+    private IReadOnlyList<LookupEntry> _employmentTypes      = [];
+    private IReadOnlyList<LookupEntry> _flsaStatuses         = [];
+    private IReadOnlyList<LookupEntry> _fullPartTimeStatuses  = [];
+    private IReadOnlyList<LookupEntry> _rateTypes            = [];
+    private IReadOnlyList<LookupEntry> _payFrequencies       = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        _legalEntities = (await OrgStructureService.GetLegalEntitiesAsync()).ToList();
+        _departments   = (await OrgStructureService.GetDepartmentsAsync()).ToList();
+        _locations     = (await OrgStructureService.GetLocationsAsync()).ToList();
+        _jobs          = (await JobRepository.GetAllActiveAsync()).ToList();
+
+        _employmentTypes     = LookupCache.GetAll(LookupTables.EmploymentType);
+        _flsaStatuses        = LookupCache.GetAll(LookupTables.FlsaStatus);
+        _fullPartTimeStatuses = LookupCache.GetAll(LookupTables.FullPartTimeStatus);
+        _rateTypes           = LookupCache.GetAll(LookupTables.CompensationRateType);
+        _payFrequencies      = LookupCache.GetAll(LookupTables.PayFrequency);
+    }
+
+    private void NextStep()
+    {
+        _errorMessage = string.Empty;
+        if (ValidateCurrentStep())
+            _currentStep++;
+    }
+
+    private void PreviousStep()
+    {
+        _errorMessage = string.Empty;
+        if (_currentStep > 1) _currentStep--;
+    }
+
+    private void OnOverlayClick() => OnCancel.InvokeAsync();
+
+    private bool ValidateCurrentStep()
+    {
+        switch (_currentStep)
+        {
+            case 1:
+                if (string.IsNullOrWhiteSpace(_cmd.LegalFirstName))     { _errorMessage = "Legal first name is required."; return false; }
+                if (string.IsNullOrWhiteSpace(_cmd.LegalLastName))      { _errorMessage = "Legal last name is required."; return false; }
+                if (_dateOfBirth is null)                                { _errorMessage = "Date of birth is required."; return false; }
+                if (string.IsNullOrWhiteSpace(_cmd.NationalIdentifier)) { _errorMessage = "National identifier is required."; return false; }
+                break;
+            case 2:
+                if (string.IsNullOrWhiteSpace(_cmd.AddressLine1)) { _errorMessage = "Address is required."; return false; }
+                if (string.IsNullOrWhiteSpace(_cmd.City))          { _errorMessage = "City is required."; return false; }
+                if (string.IsNullOrWhiteSpace(_cmd.StateCode))     { _errorMessage = "State is required."; return false; }
+                if (string.IsNullOrWhiteSpace(_cmd.PostalCode))    { _errorMessage = "Postal code is required."; return false; }
+                break;
+            case 3:
+                if (string.IsNullOrWhiteSpace(_legalEntityId))     { _errorMessage = "Legal entity is required."; return false; }
+                if (string.IsNullOrWhiteSpace(_cmd.EmployeeNumber)) { _errorMessage = "Employee number is required."; return false; }
+                if (_cmd.EmploymentTypeId == 0)                    { _errorMessage = "Employment type is required."; return false; }
+                if (_employmentStartDate is null)                  { _errorMessage = "Start date is required."; return false; }
+                if (_cmd.FlsaStatusId == 0)                        { _errorMessage = "FLSA status is required."; return false; }
+                if (_cmd.FullPartTimeStatusId == 0)                { _errorMessage = "Full/part time status is required."; return false; }
+                break;
+            case 4:
+                if (string.IsNullOrWhiteSpace(_jobId))        { _errorMessage = "Job is required."; return false; }
+                if (string.IsNullOrWhiteSpace(_departmentId)) { _errorMessage = "Department is required."; return false; }
+                if (string.IsNullOrWhiteSpace(_locationId))   { _errorMessage = "Location is required."; return false; }
+                break;
+            case 5:
+                if (_cmd.RateTypeId == 0)                             { _errorMessage = "Rate type is required."; return false; }
+                if (_cmd.BaseRate <= 0)                               { _errorMessage = "Base rate must be greater than zero."; return false; }
+                if (_cmd.PayFrequencyId == 0)                         { _errorMessage = "Pay frequency is required."; return false; }
+                if (string.IsNullOrWhiteSpace(_cmd.ChangeReasonCode)) { _errorMessage = "Change reason is required."; return false; }
+                break;
+        }
+        return true;
+    }
+
+    private async Task SubmitHire()
+    {
+        _errorMessage = string.Empty;
+        _submitting   = true;
+
+        try
+        {
+            var authState   = await AuthStateProvider.GetAuthenticationStateAsync();
+            var initiatedBy = authState.User.FindFirst("sub")?.Value ?? Guid.Empty.ToString();
+
+            var command = new HireEmployeeCommand
+            {
+                LegalFirstName       = _cmd.LegalFirstName!,
+                LegalLastName        = _cmd.LegalLastName!,
+                LegalMiddleName      = _cmd.LegalMiddleName,
+                PreferredName        = _cmd.PreferredName,
+                DateOfBirth          = DateOnly.FromDateTime(_dateOfBirth!.Value),
+                NationalIdentifier   = _cmd.NationalIdentifier!,
+                PhonePrimary         = _cmd.PhonePrimary,
+                EmailPersonal        = _cmd.EmailPersonal,
+                AddressLine1         = _cmd.AddressLine1!,
+                AddressLine2         = _cmd.AddressLine2,
+                City                 = _cmd.City!,
+                StateCode            = _cmd.StateCode!,
+                PostalCode           = _cmd.PostalCode!,
+                CountryCode          = string.IsNullOrWhiteSpace(_cmd.CountryCode) ? "US" : _cmd.CountryCode,
+                LegalEntityId        = Guid.Parse(_legalEntityId),
+                EmployeeNumber       = _cmd.EmployeeNumber!,
+                EmploymentTypeId     = _cmd.EmploymentTypeId,
+                EmploymentStartDate  = DateOnly.FromDateTime(_employmentStartDate!.Value),
+                FlsaStatusId         = _cmd.FlsaStatusId,
+                FullPartTimeStatusId = _cmd.FullPartTimeStatusId,
+                JobId                = Guid.Parse(_jobId),
+                DepartmentId         = Guid.Parse(_departmentId),
+                LocationId           = Guid.Parse(_locationId),
+                ManagerEmploymentId  = Guid.TryParse(_cmd.ManagerEmploymentIdStr, out var mgr) ? mgr : null,
+                RateTypeId           = _cmd.RateTypeId,
+                BaseRate             = _cmd.BaseRate,
+                PayFrequencyId       = _cmd.PayFrequencyId,
+                ChangeReasonCode     = _cmd.ChangeReasonCode!,
+                InitiatedBy          = Guid.TryParse(initiatedBy, out var uid) ? uid : Guid.Empty
+            };
+
+            await EmploymentService.HireEmployeeAsync(command);
+            await OnHireComplete.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = ex.Message;
+        }
+        finally
+        {
+            _submitting = false;
+        }
+    }
+
+    private static string LookupLabel(IReadOnlyList<LookupEntry> list, int id)
+        => list.FirstOrDefault(e => e.Id == id)?.Label ?? string.Empty;
+
+    private string BaseRateHint(int rateTypeId)
+    {
+        var code = LookupCache.GetCode(LookupTables.CompensationRateType, rateTypeId);
+        return code switch
+        {
+            "HOURLY"   => "Enter the hourly rate (e.g. 25.00). Payroll multiplies this by hours worked each period.",
+            "SALARY"   => "Enter the annual salary (e.g. 75000). Payroll divides this by the number of pay periods.",
+            "CONTRACT" => "Enter the contract rate agreed for this engagement.",
+            _          => string.Empty
+        };
+    }
+
+    private static string StepLabel(int step) => step switch
+    {
+        1 => "Identity",
+        2 => "Contact",
+        3 => "Employment",
+        4 => "Assignment",
+        5 => "Compensation",
+        6 => "Review",
+        _ => string.Empty
+    };
+
+    // Flat form model to avoid required record issues with two-way binding
+    private class HireFormModel
+    {
+        public string?  LegalFirstName         { get; set; }
+        public string?  LegalMiddleName        { get; set; }
+        public string?  LegalLastName          { get; set; }
+        public string?  PreferredName          { get; set; }
+        public string?  NationalIdentifier     { get; set; }
+        public string?  PhonePrimary           { get; set; }
+        public string?  EmailPersonal          { get; set; }
+        public string?  AddressLine1           { get; set; }
+        public string?  AddressLine2           { get; set; }
+        public string?  City                   { get; set; }
+        public string?  StateCode              { get; set; }
+        public string?  PostalCode             { get; set; }
+        public string   CountryCode            { get; set; } = "US";
+        public string?  EmployeeNumber         { get; set; }
+        public int      EmploymentTypeId       { get; set; }
+        public int      FlsaStatusId           { get; set; }
+        public int      FullPartTimeStatusId   { get; set; }
+        public int      RateTypeId             { get; set; }
+        public decimal  BaseRate               { get; set; }
+        public int      PayFrequencyId         { get; set; }
+        public string?  ChangeReasonCode       { get; set; }
+        public string?  ManagerEmploymentIdStr { get; set; }
+    }
+}
+
+<style>
+    .panel-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,0.5);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+    }
+
+    .hire-panel {
+        background: white;
+        border-radius: var(--radius-xl);
+        box-shadow: var(--shadow-lg);
+        width: 680px;
+        max-width: 95vw;
+        max-height: 90vh;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .hire-panel-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: var(--space-5) var(--space-6);
+        border-bottom: 1px solid #E5E7EB;
+    }
+
+    .hire-panel-title {
+        font-size: var(--font-size-lg);
+        font-weight: var(--font-weight-semibold);
+        color: var(--aw-navy);
+        margin: 0;
+    }
+
+    .panel-close-btn {
+        background: none;
+        border: none;
+        font-size: 1.2rem;
+        color: #6B7280;
+        cursor: pointer;
+        padding: var(--space-1);
+    }
+
+    .panel-close-btn:hover { color: var(--aw-navy); }
+
+    .step-indicator {
+        display: flex;
+        align-items: center;
+        padding: var(--space-4) var(--space-6);
+        border-bottom: 1px solid #E5E7EB;
+    }
+
+    .step {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        flex-shrink: 0;
+    }
+
+    .step-number {
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        background: #E5E7EB;
+        color: #6B7280;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-semibold);
+    }
+
+    .step.active .step-number  { background: var(--aw-teal); color: white; }
+    .step.complete .step-number { background: var(--aw-green); color: white; }
+
+    .step-label {
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-medium);
+        color: #6B7280;
+    }
+
+    .step.active .step-label  { color: var(--aw-teal); }
+    .step.complete .step-label { color: var(--aw-green); }
+
+    .step-connector {
+        flex: 1;
+        height: 1px;
+        background: #E5E7EB;
+        margin: 0 var(--space-2);
+    }
+
+    .step-connector.complete { background: var(--aw-green); }
+
+    .error-banner {
+        background: #FEE2E2;
+        color: #991B1B;
+        padding: var(--space-3) var(--space-6);
+        font-size: var(--font-size-sm);
+    }
+
+    .hire-panel-body {
+        flex: 1;
+        overflow-y: auto;
+        padding: var(--space-6);
+    }
+
+    .step-title {
+        font-size: var(--font-size-base);
+        font-weight: var(--font-weight-semibold);
+        color: var(--aw-navy);
+        margin: 0 0 var(--space-4) 0;
+    }
+
+    .form-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: var(--space-4);
+    }
+
+    .form-field {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-1);
+    }
+
+    .form-field-full {
+        grid-column: 1 / -1;
+    }
+
+    .form-field label {
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-medium);
+        color: #374151;
+    }
+
+    .form-field input, .form-field select {
+        padding: var(--space-2) var(--space-3);
+        border: 1px solid #D1D5DB;
+        border-radius: var(--radius-md);
+        font-size: var(--font-size-base);
+        color: var(--aw-navy);
+        background: white;
+    }
+
+    .form-field input:focus, .form-field select:focus {
+        outline: none;
+        border-color: var(--aw-teal);
+        box-shadow: 0 0 0 2px rgba(47,156,158,0.15);
+    }
+
+    .required { color: var(--color-danger); }
+
+    .input-with-hint {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+    }
+
+    .input-with-hint input { flex-shrink: 0; width: 120px; }
+
+    .field-hint {
+        font-size: var(--font-size-sm);
+        color: #6B7280;
+        font-style: italic;
+        line-height: 1.4;
+    }
+
+    .review-section { display: flex; flex-direction: column; gap: var(--space-4); }
+
+    .review-group {
+        background: #F9FAFB;
+        border-radius: var(--radius-md);
+        padding: var(--space-4);
+    }
+
+    .review-group h5 {
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-semibold);
+        color: var(--aw-teal);
+        margin: 0 0 var(--space-3) 0;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+
+    .review-row {
+        display: flex;
+        justify-content: space-between;
+        font-size: var(--font-size-sm);
+        padding: var(--space-1) 0;
+        border-bottom: 1px solid #E5E7EB;
+    }
+
+    .review-row:last-child { border-bottom: none; }
+
+    .review-row span:first-child { color: #6B7280; }
+    .review-row span:last-child  { color: var(--aw-navy); font-weight: var(--font-weight-medium); }
+
+    .hire-panel-footer {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: var(--space-4) var(--space-6);
+        border-top: 1px solid #E5E7EB;
+    }
+
+    .nav-buttons { display: flex; gap: var(--space-3); }
+
+    .btn-primary {
+        background-color: var(--aw-teal);
+        color: white;
+        border: none;
+        border-radius: var(--radius-md);
+        padding: var(--space-2) var(--space-5);
+        font-size: var(--font-size-base);
+        font-weight: var(--font-weight-medium);
+        cursor: pointer;
+    }
+
+    .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+    .btn-primary:hover:not(:disabled) { opacity: 0.9; }
+
+    .btn-secondary {
+        background: white;
+        color: var(--aw-navy);
+        border: 1px solid #D1D5DB;
+        border-radius: var(--radius-md);
+        padding: var(--space-2) var(--space-4);
+        font-size: var(--font-size-base);
+        font-weight: var(--font-weight-medium);
+        cursor: pointer;
+    }
+
+    .btn-secondary:hover { background: #F9FAFB; }
+</style>

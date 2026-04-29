@@ -1,3 +1,4 @@
+using AllWorkHRIS.Core.Lookups;
 using AllWorkHRIS.Host.Hris.Commands;
 
 namespace AllWorkHRIS.Host.Hris.Domain;
@@ -23,12 +24,12 @@ public sealed record Person
     public string? MaritalStatus { get; init; }
     public string? VeteranStatus { get; init; }
     public string? DisabilityStatus { get; init; }
-    public PersonStatus PersonStatus { get; init; }
+    public int PersonStatusId { get; init; }
     public DateTimeOffset CreationTimestamp { get; init; }
     public DateTimeOffset LastUpdateTimestamp { get; init; }
     public string LastUpdatedBy { get; init; } = default!;
 
-    public static Person CreateNew(HireEmployeeCommand command)
+    public static Person CreateNew(HireEmployeeCommand command, ILookupCache lookupCache)
     {
         var now = DateTimeOffset.UtcNow;
         return new Person
@@ -41,7 +42,7 @@ public sealed record Person
             DateOfBirth            = command.DateOfBirth,
             NationalIdentifier     = command.NationalIdentifier,
             NationalIdentifierType = "SSN",
-            PersonStatus           = PersonStatus.Active,
+            PersonStatusId         = lookupCache.GetId(LookupTables.PersonStatus, "ACTIVE"),
             CreationTimestamp      = now,
             LastUpdateTimestamp    = now,
             LastUpdatedBy          = command.InitiatedBy.ToString()
@@ -67,6 +68,25 @@ public sealed record PersonAddress
     public DateOnly? EffectiveEndDate { get; init; }
     public Guid CreatedBy { get; init; }
     public DateTimeOffset CreationTimestamp { get; init; }
+
+    public static PersonAddress CreateFromHire(HireEmployeeCommand command, Guid personId)
+        => new()
+        {
+            PersonAddressId    = Guid.NewGuid(),
+            PersonId           = personId,
+            AddressType        = "PRIMARY",
+            AddressLine1       = command.AddressLine1,
+            AddressLine2       = command.AddressLine2,
+            City               = command.City,
+            StateCode          = command.StateCode,
+            PostalCode         = command.PostalCode,
+            CountryCode        = command.CountryCode,
+            PhonePrimary       = command.PhonePrimary,
+            EmailPersonal      = command.EmailPersonal,
+            EffectiveStartDate = command.EmploymentStartDate,
+            CreatedBy          = command.InitiatedBy,
+            CreationTimestamp  = DateTimeOffset.UtcNow
+        };
 }
 
 public sealed record PersonEmergencyContact

@@ -1,0 +1,313 @@
+@page "/hris/employees"
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = "HrisViewer,HrisAdmin")]
+@using Microsoft.AspNetCore.Authorization
+@using AllWorkHRIS.Host.Hris.Services
+@using AllWorkHRIS.Host.Hris.Queries
+@inject IEmploymentService EmploymentService
+
+<PageTitle>Employees — AllWork HRIS</PageTitle>
+
+<div class="page-container">
+
+    <div class="page-header">
+        <h2 class="page-title">Employees</h2>
+        <AuthorizeView Roles="HrisAdmin">
+            <Authorized>
+                <button class="btn-primary" @onclick="OpenHirePanel">+ Add Employee</button>
+            </Authorized>
+        </AuthorizeView>
+		
+    </div>
+
+    @* Stat cards *@
+    <div class="stat-cards">
+        <div class="stat-card">
+            <span class="stat-label">Active</span>
+            <span class="stat-value">@_stats.Active</span>
+        </div>
+        <div class="stat-card">
+            <span class="stat-label">On Leave</span>
+            <span class="stat-value">@_stats.OnLeave</span>
+        </div>
+        <div class="stat-card">
+            <span class="stat-label">Contractors</span>
+            <span class="stat-value">@_stats.Contractors</span>
+        </div>
+        <div class="stat-card">
+            <span class="stat-label">Departments</span>
+            <span class="stat-value">@_stats.Departments</span>
+        </div>
+    </div>
+
+    @* Employee grid — placeholder until hire data exists *@
+    <div class="grid-container">
+        @if (_loading)
+        {
+            <p class="loading-text">Loading employees...</p>
+        }
+        else if (_employees.Count == 0)
+        {
+            <div class="empty-state">
+                <p>No employees found.</p>
+                <AuthorizeView Roles="HrisAdmin">
+                    <Authorized>
+                        <p>Click <strong>+ Add Employee</strong> to hire the first employee.</p>
+                    </Authorized>
+                </AuthorizeView>
+            </div>
+        }
+        else
+        {
+            <table class="employee-table">
+                <thead>
+                    <tr>
+                        <th>Employee</th>
+                        <th>Job Title</th>
+                        <th>Department</th>
+                        <th>Status</th>
+                        <th>Start Date</th>
+                        <AuthorizeView Roles="HrisAdmin">
+                            <Authorized>
+                                <th>Salary</th>
+                            </Authorized>
+                        </AuthorizeView>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var emp in _employees)
+                    {
+                        <tr>
+                            <td>
+                                <div class="employee-name-cell">
+                                    <span class="avatar">@GetInitials(emp)</span>
+                                    <a href="/hris/employees/@emp.EmploymentId">
+                                        @emp.LegalFirstName @emp.LegalLastName
+                                    </a>
+                                </div>
+                            </td>
+                            <td>@emp.JobTitle</td>
+                            <td>@emp.DepartmentName</td>
+                            <td><span class="status-badge status-@emp.EmploymentStatus.ToLower()">@emp.EmploymentStatus</span></td>
+                            <td>@emp.EmploymentStartDate.ToString("yyyy-MM-dd")</td>
+                            <AuthorizeView Roles="HrisAdmin">
+                                <Authorized>
+                                    <td>@(emp.BaseRate.HasValue ? emp.BaseRate.Value.ToString("C") : "—")</td>
+                                </Authorized>
+                            </AuthorizeView>
+                            <td><a href="/hris/employees/@emp.EmploymentId" class="btn-link">Edit</a></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+
+</div>
+
+@if (_showHirePanel)
+{
+    <HireEmployeePanel OnHireComplete="OnHireComplete" OnCancel="CloseHirePanel" />
+}
+
+@code {
+    private bool _loading = true;
+    private bool _showHirePanel = false;
+    private List<EmploymentListItem> _employees = [];
+    private EmployeeStatCards _stats = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDataAsync();
+    }
+
+    private async Task LoadDataAsync()
+    {
+        _loading = true;
+        try
+        {
+            var result = await EmploymentService.GetPagedListAsync(new EmployeeListQuery());
+            _employees = result.Items.ToList();
+            _stats = await EmploymentService.GetStatCardsAsync(DateOnly.FromDateTime(DateTime.UtcNow));
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void OpenHirePanel()
+	{
+		_showHirePanel = true;
+		StateHasChanged();
+	}
+    private void CloseHirePanel() => _showHirePanel = false;
+	
+	private async Task OnHireComplete()
+	{
+		_showHirePanel = false;
+		await LoadDataAsync();
+	}
+
+    private static string GetInitials(EmploymentListItem emp) =>
+        $"{emp.LegalFirstName.FirstOrDefault()}{emp.LegalLastName.FirstOrDefault()}".ToUpper();
+}
+
+<style>
+    .page-container {
+        padding: var(--space-6);
+    }
+
+    .page-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: var(--space-6);
+    }
+
+    .page-title {
+        font-size: var(--font-size-lg);
+        font-weight: var(--font-weight-semibold);
+        color: var(--aw-navy);
+        margin: 0;
+    }
+
+    .stat-cards {
+        display: flex;
+        gap: var(--space-4);
+        margin-bottom: var(--space-6);
+    }
+
+    .stat-card {
+        background: white;
+        border-radius: var(--radius-lg);
+        padding: var(--space-4) var(--space-6);
+        box-shadow: var(--shadow-sm);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-1);
+        min-width: 120px;
+    }
+
+    .stat-label {
+        font-size: var(--font-size-sm);
+        color: #6B7280;
+        font-weight: var(--font-weight-medium);
+    }
+
+    .stat-value {
+        font-size: 1.5rem;
+        font-weight: var(--font-weight-semibold);
+        color: var(--aw-navy);
+    }
+
+    .grid-container {
+        background: white;
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-sm);
+        overflow: hidden;
+    }
+
+    .loading-text {
+        padding: var(--space-6);
+        color: #6B7280;
+        text-align: center;
+    }
+
+    .empty-state {
+        padding: var(--space-10);
+        text-align: center;
+        color: #6B7280;
+    }
+
+    .employee-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: var(--font-size-base);
+    }
+
+    .employee-table th {
+        background: #F9FAFB;
+        padding: var(--space-3) var(--space-4);
+        text-align: left;
+        font-weight: var(--font-weight-medium);
+        color: #6B7280;
+        font-size: var(--font-size-sm);
+        border-bottom: 1px solid #E5E7EB;
+    }
+
+    .employee-table td {
+        padding: var(--space-3) var(--space-4);
+        border-bottom: 1px solid #F3F4F6;
+        color: var(--aw-navy);
+    }
+
+    .employee-name-cell {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+    }
+
+    .avatar {
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        background-color: var(--aw-teal);
+        color: white;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-semibold);
+        flex-shrink: 0;
+    }
+
+    .status-badge {
+        padding: 2px var(--space-2);
+        border-radius: var(--radius-sm);
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-medium);
+    }
+
+    .status-active    { background: #D1FAE5; color: #065F46; }
+    .status-on_leave  { background: #FEF3C7; color: #92400E; }
+    .status-suspended { background: #FEE2E2; color: #991B1B; }
+    .status-terminated { background: #F3F4F6; color: #6B7280; }
+
+    .btn-primary {
+        background-color: var(--aw-teal);
+        color: white;
+        border: none;
+        border-radius: var(--radius-md);
+        padding: var(--space-2) var(--space-4);
+        font-size: var(--font-size-base);
+        font-weight: var(--font-weight-medium);
+        cursor: pointer;
+    }
+
+    .btn-primary:hover { opacity: 0.9; }
+
+    .btn-link {
+        color: var(--aw-teal);
+        text-decoration: none;
+        font-weight: var(--font-weight-medium);
+    }
+
+    .panel-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,0.4);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+    }
+
+    .panel-content {
+        background: white;
+        border-radius: var(--radius-lg);
+        padding: var(--space-6);
+        min-width: 400px;
+    }
+</style>

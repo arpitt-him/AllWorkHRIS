@@ -254,6 +254,71 @@ html, body {
 }
 
 /* ------------------------------------------------------------------ */
+/* Blazor reconnect modal                                               */
+/* ------------------------------------------------------------------ */
+#components-reconnect-modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    background: rgba(47, 67, 80, 0.55);
+    align-items: center;
+    justify-content: center;
+}
+
+#components-reconnect-modal.components-reconnect-show {
+    display: flex;
+}
+
+.reconnect-card {
+    background: white;
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-lg);
+    padding: var(--space-6) var(--space-8);
+    display: flex;
+    align-items: center;
+    gap: var(--space-5);
+    max-width: 360px;
+}
+
+.reconnect-spinner {
+    width: 28px;
+    height: 28px;
+    border: 3px solid #E2E8F0;
+    border-top-color: var(--aw-teal);
+    border-radius: 50%;
+    animation: reconnect-spin 0.8s linear infinite;
+    flex-shrink: 0;
+}
+
+@keyframes reconnect-spin {
+    to { transform: rotate(360deg); }
+}
+
+.reconnect-text {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+}
+
+.reconnect-text strong {
+    color: var(--aw-navy);
+    font-size: var(--font-size-base);
+    font-weight: var(--font-weight-semibold);
+}
+
+.reconnect-text span {
+    color: #6B7280;
+    font-size: var(--font-size-sm);
+}
+
+#reconnect-countdown {
+    color: var(--aw-teal);
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-medium);
+}
+
+/* ------------------------------------------------------------------ */
 /* Validation                                                           */
 /* ------------------------------------------------------------------ */
 .valid.modified:not([type=checkbox]) {

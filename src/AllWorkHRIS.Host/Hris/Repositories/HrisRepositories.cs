@@ -52,14 +52,14 @@ public sealed class PersonRepository : IPersonRepository
                 national_identifier, national_identifier_type, gender, pronouns,
                 citizenship_status, work_authorization_status, work_authorization_exp_date,
                 language_preference, marital_status, veteran_status, disability_status,
-                person_status, creation_timestamp, last_update_timestamp, last_updated_by
+                person_status_id, creation_timestamp, last_update_timestamp, last_updated_by
             ) VALUES (
                 @PersonId, @PersonNumber, @LegalFirstName, @LegalMiddleName,
                 @LegalLastName, @NameSuffix, @PreferredName, @DateOfBirth,
                 @NationalIdentifier, @NationalIdentifierType, @Gender, @Pronouns,
                 @CitizenshipStatus, @WorkAuthorizationStatus, @WorkAuthorizationExpDate,
                 @LanguagePreference, @MaritalStatus, @VeteranStatus, @DisabilityStatus,
-                @PersonStatus::person_status, @CreationTimestamp, @LastUpdateTimestamp, @LastUpdatedBy
+                @PersonStatusId, @CreationTimestamp, @LastUpdateTimestamp, @LastUpdatedBy
             )
             """;
         await uow.Connection.ExecuteAsync(sql, person, uow.Transaction);
@@ -103,6 +103,57 @@ public sealed class PersonRepository : IPersonRepository
 }
 
 // ============================================================
+// PERSON ADDRESS
+// ============================================================
+
+public interface IPersonAddressRepository
+{
+    Task<PersonAddress?> GetPrimaryAsync(Guid personId);
+    Task<Guid>           InsertAsync(PersonAddress address, IUnitOfWork uow);
+}
+
+public sealed class PersonAddressRepository : IPersonAddressRepository
+{
+    private readonly IConnectionFactory _connectionFactory;
+
+    public PersonAddressRepository(IConnectionFactory connectionFactory)
+        => _connectionFactory = connectionFactory;
+
+    public async Task<PersonAddress?> GetPrimaryAsync(Guid personId)
+    {
+        const string sql = """
+            SELECT * FROM person_address
+            WHERE person_id    = @PersonId
+              AND address_type = 'PRIMARY'
+              AND (effective_end_date IS NULL OR effective_end_date >= CURRENT_DATE)
+            ORDER BY effective_start_date DESC
+            LIMIT 1
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        return await conn.QueryFirstOrDefaultAsync<PersonAddress>(sql, new { PersonId = personId });
+    }
+
+    public async Task<Guid> InsertAsync(PersonAddress address, IUnitOfWork uow)
+    {
+        const string sql = """
+            INSERT INTO person_address (
+                person_address_id, person_id, address_type, address_line_1, address_line_2,
+                city, state_code, postal_code, country_code, phone_primary, phone_secondary,
+                email_personal, effective_start_date, effective_end_date,
+                created_by, creation_timestamp
+            ) VALUES (
+                @PersonAddressId, @PersonId, @AddressType, @AddressLine1, @AddressLine2,
+                @City, @StateCode, @PostalCode, @CountryCode, @PhonePrimary, @PhoneSecondary,
+                @EmailPersonal, @EffectiveStartDate, @EffectiveEndDate,
+                @CreatedBy, @CreationTimestamp
+            )
+            """;
+        await uow.Connection.ExecuteAsync(sql, address, uow.Transaction);
+        return address.PersonAddressId;
+    }
+}
+
+// ============================================================
 // EMPLOYMENT
 // ============================================================
 
@@ -113,7 +164,7 @@ public interface IEmploymentRepository
     Task<IEnumerable<Employment>>             GetActiveByLegalEntityAsync(Guid legalEntityId, DateOnly asOf);
     Task<bool>                                ExistsWithNumberAsync(string employeeNumber);
     Task<Guid>                                InsertAsync(Employment employment, IUnitOfWork uow);
-    Task                                      UpdateStatusAsync(Guid employmentId, string status,
+    Task                                      UpdateStatusAsync(Guid employmentId, int statusId,
                                                   DateOnly effectiveDate, IUnitOfWork uow);
     Task<PagedResult<EmploymentListItem>>     GetPagedListAsync(EmployeeListQuery query);
     Task<EmployeeStatCards>                   GetStatCardsAsync(DateOnly asOf);
@@ -150,7 +201,9 @@ public sealed class EmploymentRepository : IEmploymentRepository
             WHERE legal_entity_id = @LegalEntityId
               AND employment_start_date <= @AsOf
               AND (employment_end_date IS NULL OR employment_end_date >= @AsOf)
-              AND employment_status NOT IN ('TERMINATED', 'CLOSED')
+              AND employment_status_id NOT IN (
+                  SELECT id FROM lkp_employment_status WHERE code IN ('TERMINATED', 'CLOSED')
+              )
             """;
         using var conn = _connectionFactory.CreateConnection();
         return await conn.QueryAsync<Employment>(sql, new { LegalEntityId = legalEntityId, AsOf = asOf });
@@ -168,23 +221,21 @@ public sealed class EmploymentRepository : IEmploymentRepository
         const string sql = """
             INSERT INTO employment (
                 employment_id, person_id, legal_entity_id, employer_id, employee_number,
-                employment_type, employment_start_date, employment_end_date, original_hire_date,
-                termination_date, employment_status, full_or_part_time_status,
-                regular_or_temporary_status, flsa_status, payroll_context_id,
+                employment_type_id, employment_start_date, employment_end_date, original_hire_date,
+                termination_date, employment_status_id, full_part_time_status_id,
+                regular_temporary_status_id, flsa_status_id, payroll_context_id,
                 primary_work_location_id, primary_department_id, manager_employment_id,
                 rehire_flag, prior_employment_id, primary_flag, payroll_eligibility_flag,
                 benefits_eligibility_flag, time_tracking_required_flag,
                 creation_timestamp, last_update_timestamp, last_updated_by
             ) VALUES (
                 @EmploymentId, @PersonId, @LegalEntityId, @EmployerId, @EmployeeNumber,
-                @EmploymentType::employment_type, @EmploymentStartDate, @EmploymentEndDate,
-                @OriginalHireDate, @TerminationDate, @EmploymentStatus::employment_status,
-                @FullOrPartTimeStatus::full_part_time_status,
-                @RegularOrTemporaryStatus::regular_temporary_status,
-                @FlsaStatus::flsa_status, @PayrollContextId,
-                @PrimaryWorkLocationId, @PrimaryDepartmentId, @ManagerEmploymentId,
-                @RehireFlag, @PriorEmploymentId, @PrimaryFlag, @PayrollEligibilityFlag,
-                @BenefitsEligibilityFlag, @TimeTrackingRequiredFlag,
+                @EmploymentTypeId, @EmploymentStartDate, @EmploymentEndDate,
+                @OriginalHireDate, @TerminationDate, @EmploymentStatusId,
+                @FullPartTimeStatusId, @RegularTemporaryStatusId, @FlsaStatusId,
+                @PayrollContextId, @PrimaryWorkLocationId, @PrimaryDepartmentId,
+                @ManagerEmploymentId, @RehireFlag, @PriorEmploymentId, @PrimaryFlag,
+                @PayrollEligibilityFlag, @BenefitsEligibilityFlag, @TimeTrackingRequiredFlag,
                 @CreationTimestamp, @LastUpdateTimestamp, @LastUpdatedBy
             )
             """;
@@ -192,12 +243,12 @@ public sealed class EmploymentRepository : IEmploymentRepository
         return employment.EmploymentId;
     }
 
-    public async Task UpdateStatusAsync(Guid employmentId, string status,
+    public async Task UpdateStatusAsync(Guid employmentId, int statusId,
         DateOnly effectiveDate, IUnitOfWork uow)
     {
         const string sql = """
             UPDATE employment SET
-                employment_status     = @Status::employment_status,
+                employment_status_id  = @StatusId,
                 employment_end_date   = @EffectiveDate,
                 last_update_timestamp = @Now,
                 last_updated_by       = 'system'
@@ -206,7 +257,7 @@ public sealed class EmploymentRepository : IEmploymentRepository
         await uow.Connection.ExecuteAsync(sql, new
         {
             EmploymentId  = employmentId,
-            Status        = status,
+            StatusId      = statusId,
             EffectiveDate = effectiveDate,
             Now           = DateTimeOffset.UtcNow
         }, uow.Transaction);
@@ -214,7 +265,10 @@ public sealed class EmploymentRepository : IEmploymentRepository
 
     public async Task<PagedResult<EmploymentListItem>> GetPagedListAsync(EmployeeListQuery query)
     {
-        var where = new List<string> { "e.employment_status != 'CLOSED'" };
+        var where = new List<string>
+        {
+            "e.employment_status_id != (SELECT id FROM lkp_employment_status WHERE code = 'CLOSED')"
+        };
         var p = new DynamicParameters();
 
         if (!string.IsNullOrWhiteSpace(query.SearchTerm))
@@ -224,7 +278,7 @@ public sealed class EmploymentRepository : IEmploymentRepository
         }
         if (!string.IsNullOrWhiteSpace(query.Status))
         {
-            where.Add("e.employment_status = @Status::employment_status");
+            where.Add("e.employment_status_id = (SELECT id FROM lkp_employment_status WHERE code = @Status)");
             p.Add("Status", query.Status);
         }
         if (query.DepartmentId.HasValue)
@@ -252,7 +306,8 @@ public sealed class EmploymentRepository : IEmploymentRepository
             FROM employment e
             INNER JOIN person p ON p.person_id = e.person_id
             LEFT JOIN assignment a ON a.employment_id = e.employment_id
-                AND a.assignment_type = 'PRIMARY' AND a.assignment_status = 'ACTIVE'
+                AND a.assignment_type_id   = (SELECT id FROM lkp_assignment_type   WHERE code = 'PRIMARY')
+                AND a.assignment_status_id = (SELECT id FROM lkp_assignment_status  WHERE code = 'ACTIVE')
             LEFT JOIN org_unit d ON d.org_unit_id = a.department_id
             {whereClause}
             """;
@@ -260,17 +315,25 @@ public sealed class EmploymentRepository : IEmploymentRepository
         var dataSql = $"""
             SELECT DISTINCT ON (e.employment_id)
                 e.employment_id, e.person_id, p.legal_first_name, p.legal_last_name,
-                p.preferred_name, e.employee_number, e.employment_status::text, e.employment_type::text,
+                p.preferred_name, e.employee_number,
+                les.code  AS employment_status,
+                let2.code AS employment_type,
                 e.employment_start_date, j.job_title, d.org_unit_name AS department_name,
-                c.base_rate, c.rate_type::text, c.pay_frequency::text
+                c.base_rate, lcrt.code AS rate_type, lpf.code AS pay_frequency
             FROM employment e
             INNER JOIN person p ON p.person_id = e.person_id
+            LEFT JOIN lkp_employment_status les  ON les.id  = e.employment_status_id
+            LEFT JOIN lkp_employment_type   let2 ON let2.id = e.employment_type_id
             LEFT JOIN assignment a ON a.employment_id = e.employment_id
-                AND a.assignment_type = 'PRIMARY' AND a.assignment_status = 'ACTIVE'
+                AND a.assignment_type_id   = (SELECT id FROM lkp_assignment_type   WHERE code = 'PRIMARY')
+                AND a.assignment_status_id = (SELECT id FROM lkp_assignment_status  WHERE code = 'ACTIVE')
             LEFT JOIN job j ON j.job_id = a.job_id
             LEFT JOIN org_unit d ON d.org_unit_id = a.department_id
             LEFT JOIN compensation_record c ON c.employment_id = e.employment_id
-                AND c.compensation_status = 'ACTIVE' AND c.primary_rate_flag = true
+                AND c.compensation_status_id = (SELECT id FROM lkp_compensation_status WHERE code = 'ACTIVE')
+                AND c.primary_rate_flag = true
+            LEFT JOIN lkp_compensation_rate_type lcrt ON lcrt.id = c.rate_type_id
+            LEFT JOIN lkp_pay_frequency          lpf  ON lpf.id  = c.pay_frequency_id
             {whereClause}
             ORDER BY e.employment_id, {sortColumn} {sortDir}
             LIMIT @PageSize OFFSET @Offset
@@ -296,18 +359,19 @@ public sealed class EmploymentRepository : IEmploymentRepository
     {
         const string sql = """
             SELECT
-                COUNT(*) FILTER (WHERE employment_status = 'ACTIVE')    AS active,
-                COUNT(*) FILTER (WHERE employment_status = 'ON_LEAVE')  AS on_leave,
-                COUNT(*) FILTER (WHERE employment_type  = 'CONTRACTOR') AS contractors,
+                COUNT(*) FILTER (WHERE employment_status_id = (SELECT id FROM lkp_employment_status WHERE code = 'ACTIVE'))    AS active,
+                COUNT(*) FILTER (WHERE employment_status_id = (SELECT id FROM lkp_employment_status WHERE code = 'ON_LEAVE'))  AS on_leave,
+                COUNT(*) FILTER (WHERE employment_type_id   = (SELECT id FROM lkp_employment_type   WHERE code = 'CONTRACTOR')) AS contractors,
                 (SELECT COUNT(DISTINCT a.department_id)
                  FROM assignment a
-                 WHERE a.assignment_status = 'ACTIVE')                  AS departments
+                 WHERE a.assignment_status_id = (SELECT id FROM lkp_assignment_status WHERE code = 'ACTIVE')) AS departments
             FROM employment
             WHERE employment_start_date <= @AsOf
-              AND employment_status NOT IN ('CLOSED')
+              AND employment_status_id != (SELECT id FROM lkp_employment_status WHERE code = 'CLOSED')
             """;
         using var conn = _connectionFactory.CreateConnection();
-        return await conn.QueryFirstAsync<EmployeeStatCards>(sql, new { AsOf = asOf });
+        return await conn.QueryFirstAsync<EmployeeStatCards>(sql,
+            new { AsOf = asOf.ToDateTime(TimeOnly.MinValue) });
     }
 }
 
@@ -334,9 +398,9 @@ public sealed class AssignmentRepository : IAssignmentRepository
     {
         const string sql = """
             SELECT * FROM assignment
-            WHERE employment_id    = @EmploymentId
-              AND assignment_type   = 'PRIMARY'
-              AND assignment_status = 'ACTIVE'
+            WHERE employment_id      = @EmploymentId
+              AND assignment_type_id   = (SELECT id FROM lkp_assignment_type   WHERE code = 'PRIMARY')
+              AND assignment_status_id = (SELECT id FROM lkp_assignment_status  WHERE code = 'ACTIVE')
             LIMIT 1
             """;
         using var conn = _connectionFactory.CreateConnection();
@@ -358,13 +422,13 @@ public sealed class AssignmentRepository : IAssignmentRepository
         const string sql = """
             INSERT INTO assignment (
                 assignment_id, employment_id, job_id, position_id, department_id,
-                location_id, payroll_context_id, plan_id, assignment_type, assignment_status,
+                location_id, payroll_context_id, plan_id, assignment_type_id, assignment_status_id,
                 assignment_priority, assignment_start_date, assignment_end_date,
                 created_by, creation_timestamp, last_updated_by, last_update_timestamp
             ) VALUES (
                 @AssignmentId, @EmploymentId, @JobId, @PositionId, @DepartmentId,
                 @LocationId, @PayrollContextId, @PlanId,
-                @AssignmentType::assignment_type, @AssignmentStatus::assignment_status,
+                @AssignmentTypeId, @AssignmentStatusId,
                 @AssignmentPriority, @AssignmentStartDate, @AssignmentEndDate,
                 @CreatedBy, @CreationTimestamp, @LastUpdatedBy, @LastUpdateTimestamp
             )
@@ -377,10 +441,10 @@ public sealed class AssignmentRepository : IAssignmentRepository
     {
         const string sql = """
             UPDATE assignment SET
-                assignment_status   = 'CLOSED'::assignment_status,
-                assignment_end_date = @EndDate,
+                assignment_status_id  = (SELECT id FROM lkp_assignment_status WHERE code = 'ENDED'),
+                assignment_end_date   = @EndDate,
                 last_update_timestamp = @Now,
-                last_updated_by     = @UpdatedBy
+                last_updated_by       = @UpdatedBy
             WHERE assignment_id = @AssignmentId
             """;
         await uow.Connection.ExecuteAsync(sql, new
@@ -416,10 +480,10 @@ public sealed class CompensationRepository : ICompensationRepository
     {
         const string sql = """
             SELECT * FROM compensation_record
-            WHERE employment_id     = @EmploymentId
-              AND primary_rate_flag = true
-              AND compensation_status = 'ACTIVE'
-              AND effective_start_date <= @AsOf
+            WHERE employment_id          = @EmploymentId
+              AND primary_rate_flag       = true
+              AND compensation_status_id  = (SELECT id FROM lkp_compensation_status WHERE code = 'ACTIVE')
+              AND effective_start_date   <= @AsOf
               AND (effective_end_date IS NULL OR effective_end_date >= @AsOf)
             LIMIT 1
             """;
@@ -443,16 +507,15 @@ public sealed class CompensationRepository : ICompensationRepository
     {
         const string sql = """
             INSERT INTO compensation_record (
-                compensation_id, employment_id, rate_type, base_rate, rate_currency,
-                annual_equivalent, pay_frequency, effective_start_date, effective_end_date,
-                compensation_status, change_reason_code, approval_status, approved_by,
+                compensation_id, employment_id, rate_type_id, base_rate, rate_currency,
+                annual_equivalent, pay_frequency_id, effective_start_date, effective_end_date,
+                compensation_status_id, change_reason_code, approval_status_id, approved_by,
                 approval_timestamp, primary_rate_flag, created_by, creation_timestamp,
                 last_updated_by, last_update_timestamp
             ) VALUES (
-                @CompensationId, @EmploymentId, @RateType::compensation_rate_type,
-                @BaseRate, @RateCurrency, @AnnualEquivalent, @PayFrequency::pay_frequency,
-                @EffectiveStartDate, @EffectiveEndDate, @CompensationStatus::compensation_status,
-                @ChangeReasonCode, @ApprovalStatus::approval_status, @ApprovedBy,
+                @CompensationId, @EmploymentId, @RateTypeId, @BaseRate, @RateCurrency,
+                @AnnualEquivalent, @PayFrequencyId, @EffectiveStartDate, @EffectiveEndDate,
+                @CompensationStatusId, @ChangeReasonCode, @ApprovalStatusId, @ApprovedBy,
                 @ApprovalTimestamp, @PrimaryRateFlag, @CreatedBy, @CreationTimestamp,
                 @LastUpdatedBy, @LastUpdateTimestamp
             )
@@ -465,13 +528,13 @@ public sealed class CompensationRepository : ICompensationRepository
     {
         const string sql = """
             UPDATE compensation_record SET
-                compensation_status   = 'SUPERSEDED'::compensation_status,
-                effective_end_date    = @EndDate,
-                last_update_timestamp = @Now,
-                last_updated_by       = @UpdatedBy
-            WHERE employment_id     = @EmploymentId
-              AND primary_rate_flag  = true
-              AND compensation_status = 'ACTIVE'
+                compensation_status_id = (SELECT id FROM lkp_compensation_status WHERE code = 'ENDED'),
+                effective_end_date     = @EndDate,
+                last_update_timestamp  = @Now,
+                last_updated_by        = @UpdatedBy
+            WHERE employment_id         = @EmploymentId
+              AND primary_rate_flag      = true
+              AND compensation_status_id = (SELECT id FROM lkp_compensation_status WHERE code = 'ACTIVE')
             """;
         await uow.Connection.ExecuteAsync(sql, new
         {
@@ -490,7 +553,7 @@ public sealed class CompensationRepository : ICompensationRepository
 public interface IOrgUnitRepository
 {
     Task<OrgUnit?>             GetByIdAsync(Guid orgUnitId);
-    Task<IEnumerable<OrgUnit>> GetByTypeAsync(OrgUnitType type);
+    Task<IEnumerable<OrgUnit>> GetByTypeAsync(int orgUnitTypeId);
     Task<IEnumerable<OrgUnit>> GetChildrenAsync(Guid parentOrgUnitId);
     Task<IEnumerable<OrgUnit>> GetAllActiveAsync();
     Task<Guid>                 InsertAsync(OrgUnit orgUnit, IUnitOfWork uow);
@@ -510,22 +573,24 @@ public sealed class OrgUnitRepository : IOrgUnitRepository
         return await conn.QueryFirstOrDefaultAsync<OrgUnit>(sql, new { OrgUnitId = orgUnitId });
     }
 
-    public async Task<IEnumerable<OrgUnit>> GetByTypeAsync(OrgUnitType type)
+    public async Task<IEnumerable<OrgUnit>> GetByTypeAsync(int orgUnitTypeId)
     {
         const string sql = """
             SELECT * FROM org_unit
-            WHERE org_unit_type = @Type::org_unit_type AND org_status = 'ACTIVE'
+            WHERE org_unit_type_id = @OrgUnitTypeId
+              AND org_status_id    = (SELECT id FROM lkp_org_status WHERE code = 'ACTIVE')
             ORDER BY org_unit_name
             """;
         using var conn = _connectionFactory.CreateConnection();
-        return await conn.QueryAsync<OrgUnit>(sql, new { Type = type.ToString().ToUpperInvariant() });
+        return await conn.QueryAsync<OrgUnit>(sql, new { OrgUnitTypeId = orgUnitTypeId });
     }
 
     public async Task<IEnumerable<OrgUnit>> GetChildrenAsync(Guid parentOrgUnitId)
     {
         const string sql = """
             SELECT * FROM org_unit
-            WHERE parent_org_unit_id = @ParentId AND org_status = 'ACTIVE'
+            WHERE parent_org_unit_id = @ParentId
+              AND org_status_id      = (SELECT id FROM lkp_org_status WHERE code = 'ACTIVE')
             ORDER BY org_unit_name
             """;
         using var conn = _connectionFactory.CreateConnection();
@@ -534,7 +599,11 @@ public sealed class OrgUnitRepository : IOrgUnitRepository
 
     public async Task<IEnumerable<OrgUnit>> GetAllActiveAsync()
     {
-        const string sql = "SELECT * FROM org_unit WHERE org_status = 'ACTIVE' ORDER BY org_unit_name";
+        const string sql = """
+            SELECT * FROM org_unit
+            WHERE org_status_id = (SELECT id FROM lkp_org_status WHERE code = 'ACTIVE')
+            ORDER BY org_unit_name
+            """;
         using var conn = _connectionFactory.CreateConnection();
         return await conn.QueryAsync<OrgUnit>(sql);
     }
@@ -543,17 +612,17 @@ public sealed class OrgUnitRepository : IOrgUnitRepository
     {
         const string sql = """
             INSERT INTO org_unit (
-                org_unit_id, org_unit_type, org_unit_code, org_unit_name, parent_org_unit_id,
-                org_status, effective_start_date, effective_end_date, tax_registration_number,
+                org_unit_id, org_unit_type_id, org_unit_code, org_unit_name, parent_org_unit_id,
+                org_status_id, effective_start_date, effective_end_date, tax_registration_number,
                 country_code, state_of_incorporation, legal_entity_type, address_line_1,
-                address_line_2, city, state_code, postal_code, locality_code, work_location_type,
+                address_line_2, city, state_code, postal_code, locality_code, work_location_type_id,
                 created_by, creation_timestamp, last_updated_by, last_update_timestamp
             ) VALUES (
-                @OrgUnitId, @OrgUnitType::org_unit_type, @OrgUnitCode, @OrgUnitName,
-                @ParentOrgUnitId, @OrgStatus::org_status, @EffectiveStartDate, @EffectiveEndDate,
+                @OrgUnitId, @OrgUnitTypeId, @OrgUnitCode, @OrgUnitName, @ParentOrgUnitId,
+                @OrgStatusId, @EffectiveStartDate, @EffectiveEndDate,
                 @TaxRegistrationNumber, @CountryCode, @StateOfIncorporation, @LegalEntityType,
                 @AddressLine1, @AddressLine2, @City, @StateCode, @PostalCode, @LocalityCode,
-                @WorkLocationType::work_location_type,
+                @WorkLocationTypeId,
                 @CreatedBy, @CreationTimestamp, @LastUpdatedBy, @LastUpdateTimestamp
             )
             """;
@@ -589,7 +658,11 @@ public sealed class JobRepository : IJobRepository
 
     public async Task<IEnumerable<Job>> GetAllActiveAsync()
     {
-        const string sql = "SELECT * FROM job WHERE job_status = 'ACTIVE' ORDER BY job_title";
+        const string sql = """
+            SELECT * FROM job
+            WHERE job_status_id = (SELECT id FROM lkp_job_status WHERE code = 'ACTIVE')
+            ORDER BY job_title
+            """;
         using var conn = _connectionFactory.CreateConnection();
         return await conn.QueryAsync<Job>(sql);
     }
@@ -599,13 +672,13 @@ public sealed class JobRepository : IJobRepository
         const string sql = """
             INSERT INTO job (
                 job_id, job_code, job_title, job_family, job_level,
-                flsa_classification, eeo_category, job_status,
+                flsa_classification_id, eeo_category_id, job_status_id,
                 effective_start_date, effective_end_date,
                 created_by, creation_timestamp, last_updated_by, last_update_timestamp
             ) VALUES (
                 @JobId, @JobCode, @JobTitle, @JobFamily, @JobLevel,
-                @FlsaClassification::flsa_classification, @EeoCategory::eeo_category,
-                @JobStatus::job_status, @EffectiveStartDate, @EffectiveEndDate,
+                @FlsaClassificationId, @EeoCategoryId, @JobStatusId,
+                @EffectiveStartDate, @EffectiveEndDate,
                 @CreatedBy, @CreationTimestamp, @LastUpdatedBy, @LastUpdateTimestamp
             )
             """;
@@ -643,8 +716,11 @@ public sealed class PositionRepository : IPositionRepository
     {
         const string sql = """
             SELECT * FROM position
-            WHERE job_id = @JobId AND position_status != 'CLOSED'
-            ORDER BY position_status
+            WHERE job_id = @JobId
+              AND position_status_id NOT IN (
+                  SELECT id FROM lkp_position_status WHERE code = 'ABOLISHED'
+              )
+            ORDER BY position_status_id
             """;
         using var conn = _connectionFactory.CreateConnection();
         return await conn.QueryAsync<Position>(sql, new { JobId = jobId });
@@ -655,11 +731,11 @@ public sealed class PositionRepository : IPositionRepository
         const string sql = """
             INSERT INTO position (
                 position_id, job_id, org_unit_id, position_title, headcount_budget,
-                position_status, effective_start_date, effective_end_date,
+                position_status_id, effective_start_date, effective_end_date,
                 created_by, creation_timestamp, last_updated_by, last_update_timestamp
             ) VALUES (
                 @PositionId, @JobId, @OrgUnitId, @PositionTitle, @HeadcountBudget,
-                @PositionStatus::position_status, @EffectiveStartDate, @EffectiveEndDate,
+                @PositionStatusId, @EffectiveStartDate, @EffectiveEndDate,
                 @CreatedBy, @CreationTimestamp, @LastUpdatedBy, @LastUpdateTimestamp
             )
             """;
@@ -677,7 +753,6 @@ public interface IEmployeeEventRepository
     Task<EmployeeEvent?>             GetByIdAsync(Guid eventId);
     Task<IEnumerable<EmployeeEvent>> GetByEmploymentIdAsync(Guid employmentId);
     Task<Guid>                       InsertAsync(EmployeeEvent employeeEvent, IUnitOfWork uow);
-    Task                             UpdateStatusAsync(Guid eventId, string status, IUnitOfWork uow);
 }
 
 public sealed class EmployeeEventRepository : IEmployeeEventRepository
@@ -709,23 +784,16 @@ public sealed class EmployeeEventRepository : IEmployeeEventRepository
     {
         const string sql = """
             INSERT INTO employee_event (
-                event_id, employment_id, event_type, effective_date,
+                event_id, employment_id, event_type_id, effective_date,
                 event_reason, notes, initiated_by, approved_by,
                 approval_timestamp, creation_timestamp
             ) VALUES (
-                @EventId, @EmploymentId, @EventType::employee_event_type, @EffectiveDate,
+                @EventId, @EmploymentId, @EventTypeId, @EffectiveDate,
                 @EventReason, @Notes, @InitiatedBy, @ApprovedBy,
                 @ApprovalTimestamp, @CreationTimestamp
             )
             """;
         await uow.Connection.ExecuteAsync(sql, employeeEvent, uow.Transaction);
         return employeeEvent.EventId;
-    }
-
-    public Task UpdateStatusAsync(Guid eventId, string status, IUnitOfWork uow)
-    {
-        // Employee events are immutable — status updates are not supported in v1
-        throw new NotSupportedException(
-            "Employee events are immutable. Create a new event to record a status change.");
     }
 }

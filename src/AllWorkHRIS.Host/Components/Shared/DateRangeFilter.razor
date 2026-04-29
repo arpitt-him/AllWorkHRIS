@@ -1,0 +1,79 @@
+@* AllWorkHRIS.Host/Components/Shared/DateRangeFilter.razor *@
+@* Platform-wide standard date-range filter for all grid columns per ADR-006 *@
+@using Syncfusion.Blazor.Calendars
+
+<div class="date-range-filter">
+    <SfDatePicker @bind-Value="FromDate"
+                  Placeholder="From"
+                  CssClass="filter-date-input" />
+    <span class="filter-separator">–</span>
+    <SfDatePicker @bind-Value="ToDate"
+                  Placeholder="To"
+                  CssClass="filter-date-input" />
+    <button class="filter-apply-btn" @onclick="ApplyFilter">Apply</button>
+    <button class="filter-clear-btn" @onclick="ClearFilter">Clear</button>
+</div>
+
+@code {
+    [Parameter] public EventCallback<(DateOnly? From, DateOnly? To)> OnFilterChanged { get; set; }
+
+    private DateTime? FromDate;
+    private DateTime? ToDate;
+
+    private async Task ApplyFilter()
+    {
+        var from = FromDate.HasValue ? DateOnly.FromDateTime(FromDate.Value) : (DateOnly?)null;
+        var to   = ToDate.HasValue   ? DateOnly.FromDateTime(ToDate.Value)   : (DateOnly?)null;
+        await OnFilterChanged.InvokeAsync((from, to));
+    }
+
+    private async Task ClearFilter()
+    {
+        FromDate = null;
+        ToDate   = null;
+        await OnFilterChanged.InvokeAsync((null, null));
+    }
+}
+
+<style>
+    .date-range-filter {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        padding: var(--space-2);
+    }
+
+    .filter-separator {
+        color: #6B7280;
+        font-size: var(--font-size-sm);
+    }
+
+    .filter-apply-btn {
+        background-color: var(--aw-teal);
+        color: white;
+        border: none;
+        border-radius: var(--radius-sm);
+        padding: var(--space-1) var(--space-3);
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-medium);
+        cursor: pointer;
+    }
+
+    .filter-apply-btn:hover {
+        opacity: 0.9;
+    }
+
+    .filter-clear-btn {
+        background-color: transparent;
+        color: #6B7280;
+        border: 1px solid #D1D5DB;
+        border-radius: var(--radius-sm);
+        padding: var(--space-1) var(--space-3);
+        font-size: var(--font-size-sm);
+        cursor: pointer;
+    }
+
+    .filter-clear-btn:hover {
+        background-color: #F3F4F6;
+    }
+</style>
