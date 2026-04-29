@@ -7,6 +7,7 @@ public sealed record OrgUnit
     public string OrgUnitCode { get; init; } = default!;
     public string OrgUnitName { get; init; } = default!;
     public Guid? ParentOrgUnitId { get; init; }
+    public Guid? LegalEntityId { get; init; }
     public int OrgStatusId { get; init; }
     public DateOnly EffectiveStartDate { get; init; }
     public DateOnly? EffectiveEndDate { get; init; }

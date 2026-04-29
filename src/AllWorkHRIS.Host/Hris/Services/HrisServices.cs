@@ -50,6 +50,7 @@ public sealed class EmploymentService : IEmploymentService
     private readonly IEventPublisher            _eventPublisher;
     private readonly ITemporalContext           _temporalContext;
     private readonly ILookupCache               _lookupCache;
+    private readonly IOnboardingService         _onboardingService;
 
     private readonly int _activeStatusId;
     private readonly int _terminatedStatusId;
@@ -71,7 +72,8 @@ public sealed class EmploymentService : IEmploymentService
         IEmployeeEventRepository   eventRepository,
         IEventPublisher            eventPublisher,
         ITemporalContext           temporalContext,
-        ILookupCache               lookupCache)
+        ILookupCache               lookupCache,
+        IOnboardingService         onboardingService)
     {
         _connectionFactory       = connectionFactory;
         _personRepository        = personRepository;
@@ -83,6 +85,7 @@ public sealed class EmploymentService : IEmploymentService
         _eventPublisher          = eventPublisher;
         _temporalContext         = temporalContext;
         _lookupCache             = lookupCache;
+        _onboardingService       = onboardingService;
 
         _activeStatusId           = lookupCache.GetId(LookupTables.EmploymentStatus,    "ACTIVE");
         _terminatedStatusId       = lookupCache.GetId(LookupTables.EmploymentStatus,    "TERMINATED");
@@ -137,6 +140,9 @@ public sealed class EmploymentService : IEmploymentService
                 PayrollContextId = command.PayrollContextId,
                 EventTimestamp   = DateTimeOffset.UtcNow
             });
+
+            await _onboardingService.CreatePlanAsync(
+                employmentId, command.EmploymentStartDate, command.InitiatedBy);
 
             return new HireResult(personId, employmentId, eventId);
         }
@@ -258,6 +264,9 @@ public sealed class EmploymentService : IEmploymentService
                 EventTimestamp    = DateTimeOffset.UtcNow
             });
 
+            await _onboardingService.CreatePlanAsync(
+                employmentId, command.EmploymentStartDate, command.InitiatedBy);
+
             return new HireResult(personId, employmentId, eventId);
         }
         catch
@@ -356,9 +365,11 @@ public sealed class EmploymentService : IEmploymentService
 
 public interface IPersonService
 {
-    Task<Person?>  GetByIdAsync(Guid personId);
-    Task<Person?>  GetByEmploymentIdAsync(Guid employmentId);
-    Task           UpdatePersonAsync(UpdatePersonCommand command);
+    Task<Person?>                  GetByIdAsync(Guid personId);
+    Task<Person?>                  GetByEmploymentIdAsync(Guid employmentId);
+    Task<Dictionary<Guid, string>> GetNamesByEmploymentIdsAsync(IEnumerable<Guid> employmentIds);
+    Task<Dictionary<Guid, string>> GetNamesByPersonIdsAsync(IEnumerable<Guid> personIds);
+    Task                           UpdatePersonAsync(UpdatePersonCommand command);
 }
 
 public sealed class PersonService : IPersonService
@@ -379,6 +390,12 @@ public sealed class PersonService : IPersonService
 
     public async Task<Person?> GetByEmploymentIdAsync(Guid employmentId)
         => await _personRepository.GetByEmploymentIdAsync(employmentId);
+
+    public Task<Dictionary<Guid, string>> GetNamesByEmploymentIdsAsync(IEnumerable<Guid> employmentIds)
+        => _personRepository.GetNamesByEmploymentIdsAsync(employmentIds);
+
+    public Task<Dictionary<Guid, string>> GetNamesByPersonIdsAsync(IEnumerable<Guid> personIds)
+        => _personRepository.GetNamesByPersonIdsAsync(personIds);
 
     public async Task UpdatePersonAsync(UpdatePersonCommand command)
     {
@@ -599,28 +616,39 @@ public sealed class LifecycleEventService : ILifecycleEventService
 
 public interface IOrgStructureService
 {
-    Task<OrgUnit?>             GetOrgUnitByIdAsync(Guid orgUnitId);
-    Task<IEnumerable<OrgUnit>> GetLegalEntitiesAsync();
-    Task<IEnumerable<OrgUnit>> GetDepartmentsAsync();
-    Task<IEnumerable<OrgUnit>> GetLocationsAsync();
-    Task<IEnumerable<OrgUnit>> GetChildrenAsync(Guid parentOrgUnitId);
-    Task<IEnumerable<OrgUnit>> GetAllActiveAsync();
+    Task<OrgUnit?>                     GetOrgUnitByIdAsync(Guid orgUnitId);
+    Task<IEnumerable<OrgUnit>>         GetLegalEntitiesAsync();
+    Task<IEnumerable<OrgUnit>>         GetDepartmentsAsync();
+    Task<IEnumerable<OrgUnit>>         GetLocationsAsync();
+    Task<IEnumerable<OrgUnit>>         GetChildrenAsync(Guid parentOrgUnitId);
+    Task<IEnumerable<OrgUnit>>         GetAllActiveAsync(Guid? legalEntityId = null);
+    Task<IEnumerable<OrgUnitEmployee>> GetOrgUnitWorkforceAsync(Guid orgUnitId);
+    Task<Guid>                         CreateOrgUnitAsync(CreateOrgUnitCommand command);
 }
 
 public sealed class OrgStructureService : IOrgStructureService
 {
-    private readonly IOrgUnitRepository _orgUnitRepository;
+    private readonly IConnectionFactory  _connectionFactory;
+    private readonly IOrgUnitRepository  _orgUnitRepository;
+    private readonly ILookupCache        _lookupCache;
 
     private readonly int _legalEntityTypeId;
     private readonly int _departmentTypeId;
     private readonly int _locationTypeId;
+    private readonly int _activeStatusId;
 
-    public OrgStructureService(IOrgUnitRepository orgUnitRepository, ILookupCache lookupCache)
+    public OrgStructureService(
+        IConnectionFactory  connectionFactory,
+        IOrgUnitRepository  orgUnitRepository,
+        ILookupCache        lookupCache)
     {
+        _connectionFactory  = connectionFactory;
         _orgUnitRepository  = orgUnitRepository;
+        _lookupCache        = lookupCache;
         _legalEntityTypeId  = lookupCache.GetId(LookupTables.OrgUnitType, "LEGAL_ENTITY");
         _departmentTypeId   = lookupCache.GetId(LookupTables.OrgUnitType, "DEPARTMENT");
         _locationTypeId     = lookupCache.GetId(LookupTables.OrgUnitType, "LOCATION");
+        _activeStatusId     = lookupCache.GetId(LookupTables.OrgStatus,   "ACTIVE");
     }
 
     public async Task<OrgUnit?> GetOrgUnitByIdAsync(Guid orgUnitId)
@@ -638,6 +666,178 @@ public sealed class OrgStructureService : IOrgStructureService
     public async Task<IEnumerable<OrgUnit>> GetChildrenAsync(Guid parentOrgUnitId)
         => await _orgUnitRepository.GetChildrenAsync(parentOrgUnitId);
 
-    public async Task<IEnumerable<OrgUnit>> GetAllActiveAsync()
-        => await _orgUnitRepository.GetAllActiveAsync();
+    public async Task<IEnumerable<OrgUnit>> GetAllActiveAsync(Guid? legalEntityId = null)
+        => await _orgUnitRepository.GetAllActiveAsync(legalEntityId);
+
+    public async Task<IEnumerable<OrgUnitEmployee>> GetOrgUnitWorkforceAsync(Guid orgUnitId)
+        => await _orgUnitRepository.GetWorkforceByOrgUnitAsync(orgUnitId);
+
+    public async Task<Guid> CreateOrgUnitAsync(CreateOrgUnitCommand command)
+    {
+        if (string.IsNullOrWhiteSpace(command.OrgUnitCode))
+            throw new ValidationException("Org unit code is required.");
+        if (string.IsNullOrWhiteSpace(command.OrgUnitName))
+            throw new ValidationException("Org unit name is required.");
+
+        var isLegalEntity = command.OrgUnitTypeCode == "LEGAL_ENTITY";
+        if (!isLegalEntity && command.LegalEntityId is null)
+            throw new ValidationException("A legal entity context is required for this org unit type.");
+
+        var typeId    = _lookupCache.GetId(LookupTables.OrgUnitType, command.OrgUnitTypeCode);
+        var now       = DateTimeOffset.UtcNow;
+        var newId     = Guid.NewGuid();
+
+        var orgUnit = new OrgUnit
+        {
+            OrgUnitId           = newId,
+            OrgUnitTypeId       = typeId,
+            OrgUnitCode         = command.OrgUnitCode.Trim().ToUpper(),
+            OrgUnitName         = command.OrgUnitName.Trim(),
+            ParentOrgUnitId     = command.ParentOrgUnitId,
+            LegalEntityId       = isLegalEntity ? newId : command.LegalEntityId,
+            OrgStatusId         = _activeStatusId,
+            EffectiveStartDate  = command.EffectiveStartDate,
+            CreatedBy           = command.InitiatedBy,
+            CreationTimestamp   = now,
+            LastUpdatedBy       = command.InitiatedBy,
+            LastUpdateTimestamp = now
+        };
+
+        using var uow = new UnitOfWork(_connectionFactory);
+        try
+        {
+            await _orgUnitRepository.InsertAsync(orgUnit, uow);
+            uow.Commit();
+            return orgUnit.OrgUnitId;
+        }
+        catch
+        {
+            uow.Rollback();
+            throw;
+        }
+    }
+}
+
+// ============================================================
+// JOB SERVICE
+// ============================================================
+
+public interface IJobService
+{
+    Task<IEnumerable<Job>> GetAllActiveAsync();
+    Task<Guid>             CreateJobAsync(CreateJobCommand command);
+}
+
+public sealed class JobService : IJobService
+{
+    private readonly IJobRepository  _jobRepository;
+    private readonly ILookupCache    _lookupCache;
+    private readonly IConnectionFactory _connectionFactory;
+
+    public JobService(IJobRepository jobRepository, ILookupCache lookupCache, IConnectionFactory connectionFactory)
+    {
+        _jobRepository      = jobRepository;
+        _lookupCache        = lookupCache;
+        _connectionFactory  = connectionFactory;
+    }
+
+    public Task<IEnumerable<Job>> GetAllActiveAsync()
+        => _jobRepository.GetAllActiveAsync();
+
+    public async Task<Guid> CreateJobAsync(CreateJobCommand command)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var job = new Job
+        {
+            JobId                 = Guid.NewGuid(),
+            JobCode               = command.JobCode.Trim().ToUpper(),
+            JobTitle              = command.JobTitle.Trim(),
+            JobFamily             = string.IsNullOrWhiteSpace(command.JobFamily) ? null : command.JobFamily.Trim(),
+            JobLevel              = string.IsNullOrWhiteSpace(command.JobLevel)  ? null : command.JobLevel.Trim(),
+            FlsaClassificationId  = _lookupCache.GetId(LookupTables.FlsaClassification, command.FlsaClassificationCode),
+            EeoCategoryId         = _lookupCache.GetId(LookupTables.EeoCategory, command.EeoCategoryCode),
+            JobStatusId           = _lookupCache.GetId(LookupTables.JobStatus, "ACTIVE"),
+            EffectiveStartDate    = command.EffectiveStartDate,
+            CreatedBy             = command.InitiatedBy,
+            CreationTimestamp     = now,
+            LastUpdatedBy         = command.InitiatedBy,
+            LastUpdateTimestamp   = now
+        };
+
+        using var uow = new UnitOfWork(_connectionFactory);
+        try
+        {
+            await _jobRepository.InsertAsync(job, uow);
+            uow.Commit();
+            return job.JobId;
+        }
+        catch
+        {
+            uow.Rollback();
+            throw;
+        }
+    }
+}
+
+// ============================================================
+// POSITION SERVICE
+// ============================================================
+
+public interface IPositionService
+{
+    Task<IEnumerable<Position>> GetByJobIdAsync(Guid jobId);
+    Task<IEnumerable<Position>> GetAllActiveAsync();
+    Task<Guid>                  CreatePositionAsync(CreatePositionCommand command);
+}
+
+public sealed class PositionService : IPositionService
+{
+    private readonly IPositionRepository _positionRepository;
+    private readonly ILookupCache        _lookupCache;
+    private readonly IConnectionFactory  _connectionFactory;
+
+    public PositionService(IPositionRepository positionRepository, ILookupCache lookupCache, IConnectionFactory connectionFactory)
+    {
+        _positionRepository = positionRepository;
+        _lookupCache        = lookupCache;
+        _connectionFactory  = connectionFactory;
+    }
+
+    public Task<IEnumerable<Position>> GetByJobIdAsync(Guid jobId)
+        => _positionRepository.GetByJobIdAsync(jobId);
+
+    public Task<IEnumerable<Position>> GetAllActiveAsync()
+        => _positionRepository.GetAllActiveAsync();
+
+    public async Task<Guid> CreatePositionAsync(CreatePositionCommand command)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var position = new Position
+        {
+            PositionId          = Guid.NewGuid(),
+            JobId               = command.JobId,
+            OrgUnitId           = command.OrgUnitId,
+            PositionTitle       = string.IsNullOrWhiteSpace(command.PositionTitle) ? null : command.PositionTitle.Trim(),
+            HeadcountBudget     = command.HeadcountBudget,
+            PositionStatusId    = _lookupCache.GetId(LookupTables.PositionStatus, "OPEN"),
+            EffectiveStartDate  = command.EffectiveStartDate,
+            CreatedBy           = command.InitiatedBy,
+            CreationTimestamp   = now,
+            LastUpdatedBy       = command.InitiatedBy,
+            LastUpdateTimestamp = now
+        };
+
+        using var uow = new UnitOfWork(_connectionFactory);
+        try
+        {
+            await _positionRepository.InsertAsync(position, uow);
+            uow.Commit();
+            return position.PositionId;
+        }
+        catch
+        {
+            uow.Rollback();
+            throw;
+        }
+    }
 }

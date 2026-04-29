@@ -2,14 +2,24 @@
 @rendermode InteractiveServer
 @attribute [Authorize(Roles = "HrisViewer,HrisAdmin")]
 @using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Components.Forms
 @using AllWorkHRIS.Core.Lookups
+@using AllWorkHRIS.Host.Hris.Commands
 @using AllWorkHRIS.Host.Hris.Services
+@using AllWorkHRIS.Host.Hris.Repositories
 @using AllWorkHRIS.Host.Hris.Domain
-@inject IEmploymentService  EmploymentService
-@inject IPersonService      PersonService
-@inject ICompensationService CompensationService
-@inject ILookupCache        LookupCache
-@inject NavigationManager   Navigation
+@inject IEmploymentService    EmploymentService
+@inject IPersonService        PersonService
+@inject ICompensationService  CompensationService
+@inject IAssignmentRepository AssignmentRepository
+@inject IOrgStructureService  OrgStructureService
+@inject IJobRepository        JobRepository
+@inject ILeaveService         LeaveService
+@inject IDocumentService      DocumentService
+@inject IOnboardingService    OnboardingService
+@inject ILookupCache          LookupCache
+@inject NavigationManager     Navigation
 
 <PageTitle>@_pageTitle — AllWork HRIS</PageTitle>
 
@@ -68,7 +78,7 @@ else
             @foreach (var tab in _tabs)
             {
                 <button class="tab-btn @(_activeTab == tab ? "active" : "")"
-                        @onclick="() => _activeTab = tab">
+                        @onclick="() => SwitchTabAsync(tab)">
                     @tab
                 </button>
             }
@@ -150,10 +160,58 @@ else
                     break;
 
                 case "Assignment":
-                    <div class="detail-section">
-                        <h3 class="section-title">Current Assignment</h3>
-                        <p class="placeholder-text">Assignment details — populated in Phase 2 completion.</p>
-                    </div>
+                    @if (_assignmentLoading)
+                    {
+                        <p class="loading-text">Loading assignment...</p>
+                    }
+                    else if (_assignment is null)
+                    {
+                        <p class="placeholder-text">No active assignment on record.</p>
+                    }
+                    else
+                    {
+                        <div class="detail-section">
+                            <h3 class="section-title">Current Assignment</h3>
+                            <div class="detail-grid">
+                                <div class="detail-item">
+                                    <span class="detail-label">Job</span>
+                                    <span class="detail-value">
+                                        @if (_assignmentJob is not null)
+                                        {
+                                            @($"{_assignmentJob.JobTitle} ({_assignmentJob.JobCode})")
+                                        }
+                                        else { @("—") }
+                                    </span>
+                                </div>
+                                <div class="detail-item">
+                                    <span class="detail-label">Department</span>
+                                    <span class="detail-value">@(_assignmentDepartment?.OrgUnitName ?? "—")</span>
+                                </div>
+                                <div class="detail-item">
+                                    <span class="detail-label">Location</span>
+                                    <span class="detail-value">@(_assignmentLocation?.OrgUnitName ?? "—")</span>
+                                </div>
+                                <div class="detail-item">
+                                    <span class="detail-label">Manager</span>
+                                    <span class="detail-value">
+                                        @if (_managerPerson is not null)
+                                        {
+                                            @($"{_managerPerson.LegalFirstName} {_managerPerson.LegalLastName}")
+                                        }
+                                        else { @("—") }
+                                    </span>
+                                </div>
+                                <div class="detail-item">
+                                    <span class="detail-label">Assignment Type</span>
+                                    <span class="detail-value">@LookupLabel(LookupTables.AssignmentType, _assignment.AssignmentTypeId)</span>
+                                </div>
+                                <div class="detail-item">
+                                    <span class="detail-label">Start Date</span>
+                                    <span class="detail-value">@_assignment.AssignmentStartDate.ToString("yyyy-MM-dd")</span>
+                                </div>
+                            </div>
+                        </div>
+                    }
                     break;
 
                 case "Compensation":
@@ -195,21 +253,409 @@ else
                     break;
 
                 case "Leave":
-                    <div class="detail-section">
-                        <h3 class="section-title">Leave Balances</h3>
-                        <p class="placeholder-text">Leave management — implemented in Phase 3.</p>
-                    </div>
+                    @if (_leaveLoading)
+                    {
+                        <p class="loading-text">Loading leave data...</p>
+                    }
+                    else
+                    {
+                        <div class="section-header-row">
+                            <h3 class="section-title">Leave Balances</h3>
+                        </div>
+                        @if (_leaveBalances is not null && _leaveBalances.Any())
+                        {
+                            <div class="balance-cards">
+                                @foreach (var bal in _leaveBalances)
+                                {
+                                    <div class="balance-card">
+                                        <div class="balance-card-type">@LookupLabel(LookupTables.LeaveType, bal.LeaveTypeId)</div>
+                                        <div class="balance-card-available">@bal.AvailableBalance.ToString("0.##")</div>
+                                        <div class="balance-card-label">days available</div>
+                                        <div class="balance-card-details">
+                                            <span>Used: @bal.UsedBalance.ToString("0.##")</span>
+                                            <span>Pending: @bal.PendingBalance.ToString("0.##")</span>
+                                            <span>Entitled: @bal.EntitlementTotal.ToString("0.##")</span>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        }
+                        else
+                        {
+                            <p class="placeholder-text">No leave balances on record.</p>
+                        }
+
+                        <div class="section-header-row" style="margin-top: var(--space-6);">
+                            <h3 class="section-title">Leave Requests</h3>
+                            <AuthorizeView Roles="HrisAdmin">
+                                <Authorized>
+                                    <button class="btn-secondary btn-sm"
+                                            @onclick="() => _showLeaveForm = !_showLeaveForm">
+                                        @(_showLeaveForm ? "Cancel" : "+ Request Leave")
+                                    </button>
+                                </Authorized>
+                            </AuthorizeView>
+                        </div>
+
+                        <AuthorizeView Roles="HrisAdmin">
+                            <Authorized>
+                                @if (_showLeaveForm)
+                                {
+                                    <div class="form-panel">
+                                        <div class="form-grid">
+                                            <div class="form-field">
+                                                <label class="form-label">Leave Type</label>
+                                                <select class="form-select" @bind="_newLeaveType">
+                                                    <option value="">Select type…</option>
+                                                    @foreach (var lt in LookupCache.GetAll(LookupTables.LeaveType))
+                                                    {
+                                                        <option value="@lt.Code">@lt.Label</option>
+                                                    }
+                                                </select>
+                                            </div>
+                                            <div class="form-field">
+                                                <label class="form-label">Reason Code</label>
+                                                <input type="text" class="form-input" @bind="_newLeaveReason"
+                                                       placeholder="e.g. PERSONAL" />
+                                            </div>
+                                            <div class="form-field">
+                                                <label class="form-label">Start Date</label>
+                                                <input type="date" class="form-input" @bind="_newLeaveStartDt" />
+                                            </div>
+                                            <div class="form-field">
+                                                <label class="form-label">End Date</label>
+                                                <input type="date" class="form-input" @bind="_newLeaveEndDt" />
+                                            </div>
+                                            <div class="form-field form-field-full">
+                                                <label class="form-label">Notes (optional)</label>
+                                                <textarea class="form-input" rows="2" @bind="_newLeaveNotes"></textarea>
+                                            </div>
+                                        </div>
+                                        @if (_leaveError is not null)
+                                        {
+                                            <p class="form-error">@_leaveError</p>
+                                        }
+                                        <div class="form-actions">
+                                            <button class="btn-primary" @onclick="SubmitLeaveAsync"
+                                                    disabled="@_leaveSubmitting">
+                                                @(_leaveSubmitting ? "Submitting…" : "Submit Request")
+                                            </button>
+                                            <button class="btn-secondary"
+                                                    @onclick="() => _showLeaveForm = false">Cancel</button>
+                                        </div>
+                                    </div>
+                                }
+                            </Authorized>
+                        </AuthorizeView>
+
+                        @if (_leaveHistory is not null && _leaveHistory.Any())
+                        {
+                            <div class="table-wrapper">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Type</th>
+                                            <th>Start</th>
+                                            <th>End</th>
+                                            <th>Requested</th>
+                                            <th>Status</th>
+                                            <th>Notes</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var req in _leaveHistory.OrderByDescending(r => r.RequestDate))
+                                        {
+                                            <tr>
+                                                <td>@LookupLabel(LookupTables.LeaveType, req.LeaveTypeId)</td>
+                                                <td>@req.LeaveStartDate.ToString("yyyy-MM-dd")</td>
+                                                <td>@req.LeaveEndDate.ToString("yyyy-MM-dd")</td>
+                                                <td>@req.RequestDate.ToString("yyyy-MM-dd")</td>
+                                                <td>
+                                                    <span class="status-badge status-@LookupCode(LookupTables.LeaveStatus, req.LeaveStatusId)">
+                                                        @LookupLabel(LookupTables.LeaveStatus, req.LeaveStatusId)
+                                                    </span>
+                                                </td>
+                                                <td>@(req.Notes ?? "—")</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                        else
+                        {
+                            <p class="placeholder-text" style="margin-top: var(--space-4);">No leave requests on record.</p>
+                        }
+                    }
                     break;
 
                 case "Documents":
                     <AuthorizeView Roles="HrisAdmin">
                         <Authorized>
-                            <div class="detail-section">
-                                <h3 class="section-title">Documents</h3>
-                                <p class="placeholder-text">Document management — implemented in Phase 3.</p>
-                            </div>
+                            @if (_documentsLoading)
+                            {
+                                <p class="loading-text">Loading documents...</p>
+                            }
+                            else
+                            {
+                                <div class="section-header-row">
+                                    <h3 class="section-title">Documents</h3>
+                                    <button class="btn-secondary btn-sm"
+                                            @onclick="() => _showUploadForm = !_showUploadForm">
+                                        @(_showUploadForm ? "Cancel" : "+ Upload Document")
+                                    </button>
+                                </div>
+
+                                @if (_showUploadForm)
+                                {
+                                    <div class="form-panel">
+                                        <div class="form-grid">
+                                            <div class="form-field">
+                                                <label class="form-label">Document Type</label>
+                                                <select class="form-select" @bind="_uploadDocType">
+                                                    <option value="">Select type…</option>
+                                                    @foreach (var dt in LookupCache.GetAll(LookupTables.DocumentType))
+                                                    {
+                                                        <option value="@dt.Code">@dt.Label</option>
+                                                    }
+                                                </select>
+                                            </div>
+                                            <div class="form-field">
+                                                <label class="form-label">Document Name</label>
+                                                <input type="text" class="form-input" @bind="_uploadDocName"
+                                                       placeholder="e.g. I-9 Form" />
+                                            </div>
+                                            <div class="form-field">
+                                                <label class="form-label">Effective Date</label>
+                                                <input type="date" class="form-input" @bind="_uploadEffectiveDt" />
+                                            </div>
+                                            <div class="form-field">
+                                                <label class="form-label">Expiration Date (optional)</label>
+                                                <input type="date" class="form-input" @bind="_uploadExpirationDt" />
+                                            </div>
+                                            <div class="form-field form-field-full">
+                                                <label class="form-label">File</label>
+                                                <InputFile OnChange="OnFileSelected" />
+                                                @if (_uploadFile is not null)
+                                                {
+                                                    <span class="file-info">
+                                                        @_uploadFile.Name (@(_uploadFile.Size / 1024) KB)
+                                                    </span>
+                                                }
+                                            </div>
+                                        </div>
+                                        @if (_uploadError is not null)
+                                        {
+                                            <p class="form-error">@_uploadError</p>
+                                        }
+                                        <div class="form-actions">
+                                            <button class="btn-primary" @onclick="UploadDocumentAsync"
+                                                    disabled="@_uploading">
+                                                @(_uploading ? "Uploading…" : "Upload")
+                                            </button>
+                                            <button class="btn-secondary"
+                                                    @onclick="() => _showUploadForm = false">Cancel</button>
+                                        </div>
+                                    </div>
+                                }
+
+                                @if (_documents is not null && _documents.Any())
+                                {
+                                    <div class="table-wrapper">
+                                        <table class="data-table">
+                                            <thead>
+                                                <tr>
+                                                    <th>Type</th>
+                                                    <th>Name</th>
+                                                    <th>Ver.</th>
+                                                    <th>Status</th>
+                                                    <th>Effective</th>
+                                                    <th>Expires</th>
+                                                    <th>Verified</th>
+                                                    <th></th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                @foreach (var doc in _documents.OrderByDescending(d => d.UploadDate))
+                                                {
+                                                    <tr>
+                                                        <td>@LookupLabel(LookupTables.DocumentType, doc.DocumentTypeId)</td>
+                                                        <td>@doc.DocumentName</td>
+                                                        <td>v@doc.DocumentVersion</td>
+                                                        <td>
+                                                            <span class="status-badge status-@LookupCode(LookupTables.DocumentStatus, doc.DocumentStatusId)">
+                                                                @LookupLabel(LookupTables.DocumentStatus, doc.DocumentStatusId)
+                                                            </span>
+                                                        </td>
+                                                        <td>@doc.EffectiveDate.ToString("yyyy-MM-dd")</td>
+                                                        <td class="@ExpirationClass(doc.ExpirationDate)">
+                                                            @(doc.ExpirationDate?.ToString("yyyy-MM-dd") ?? "—")
+                                                        </td>
+                                                        <td>@(doc.VerifiedBy.HasValue ? "✓" : "—")</td>
+                                                        <td>
+                                                            <a href="/api/documents/@doc.DocumentId/content"
+                                                               class="btn-link" target="_blank">Download</a>
+                                                        </td>
+                                                    </tr>
+                                                }
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <p class="placeholder-text" style="margin-top: var(--space-4);">No documents on record.</p>
+                                }
+                            }
                         </Authorized>
+                        <NotAuthorized>
+                            <p class="placeholder-text">You do not have permission to view documents.</p>
+                        </NotAuthorized>
                     </AuthorizeView>
+                    break;
+
+                case "Onboarding":
+                    @if (_onboardingLoading)
+                    {
+                        <p class="loading-text">Loading onboarding data...</p>
+                    }
+                    else if (_onboardingPlan is null)
+                    {
+                        <p class="placeholder-text">No onboarding plan found for this employee.</p>
+                    }
+                    else
+                    {
+                        <div class="detail-section">
+                            <div class="section-header-row">
+                                <h3 class="section-title">Onboarding Plan</h3>
+                                <span class="status-badge status-@LookupCode(LookupTables.OnboardingPlanStatus, _onboardingPlan.PlanStatusId)">
+                                    @LookupLabel(LookupTables.OnboardingPlanStatus, _onboardingPlan.PlanStatusId)
+                                </span>
+                            </div>
+                            <div class="detail-grid" style="margin-top: var(--space-3);">
+                                <div class="detail-item">
+                                    <span class="detail-label">Target Start Date</span>
+                                    <span class="detail-value">@_onboardingPlan.TargetStartDate.ToString("yyyy-MM-dd")</span>
+                                </div>
+                                @if (_onboardingPlan.CompletionDate.HasValue)
+                                {
+                                    <div class="detail-item">
+                                        <span class="detail-label">Completion Date</span>
+                                        <span class="detail-value">@_onboardingPlan.CompletionDate.Value.ToString("yyyy-MM-dd")</span>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+
+                        @if (_onboardingError is not null)
+                        {
+                            <p class="form-error" style="margin-top: var(--space-3);">@_onboardingError</p>
+                        }
+
+                        <div class="detail-section" style="margin-top: var(--space-6);">
+                            <h3 class="section-title">Tasks</h3>
+                            @if (_onboardingTasks is not null && _onboardingTasks.Any())
+                            {
+                                <div class="table-wrapper">
+                                    <table class="data-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Task</th>
+                                                <th>Type</th>
+                                                <th>Owner</th>
+                                                <th>Due</th>
+                                                <th>Blocking</th>
+                                                <th>Status</th>
+                                                <th></th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @foreach (var task in _onboardingTasks.OrderBy(t => t.DueDate))
+                                            {
+                                                var isPending = task.TaskStatusId == _taskPendingStatusId;
+                                                var isOverdue = task.DueDate < DateOnly.FromDateTime(DateTime.UtcNow) && isPending;
+                                                <tr>
+                                                    <td>@task.TaskName</td>
+                                                    <td>@LookupLabel(LookupTables.OnboardingTaskType, task.TaskTypeId)</td>
+                                                    <td>@task.TaskOwnerRole</td>
+                                                    <td class="@(isOverdue ? "cell-overdue" : "")">
+                                                        @task.DueDate.ToString("yyyy-MM-dd")
+                                                    </td>
+                                                    <td>
+                                                        @if (task.BlockingFlag)
+                                                        {
+                                                            <span class="badge-blocking">Blocking</span>
+                                                        }
+                                                    </td>
+                                                    <td>
+                                                        <span class="status-badge status-@LookupCode(LookupTables.OnboardingTaskStatus, task.TaskStatusId)">
+                                                            @LookupLabel(LookupTables.OnboardingTaskStatus, task.TaskStatusId)
+                                                        </span>
+                                                        @if (task.WaiverReason is not null)
+                                                        {
+                                                            <div class="waiver-reason">@task.WaiverReason</div>
+                                                        }
+                                                    </td>
+                                                    <td>
+                                                        <AuthorizeView Roles="HrisAdmin">
+                                                            <Authorized>
+                                                                @if (isPending)
+                                                                {
+                                                                    <button class="btn-link btn-xs"
+                                                                            @onclick="() => StartComplete(task.TaskId)">Complete</button>
+                                                                    <span class="text-muted"> · </span>
+                                                                    <button class="btn-link btn-xs text-muted"
+                                                                            @onclick="() => StartWaive(task.TaskId)">Waive</button>
+                                                                }
+                                                            </Authorized>
+                                                        </AuthorizeView>
+                                                    </td>
+                                                </tr>
+
+                                                @if (_completingTaskId == task.TaskId)
+                                                {
+                                                    <tr class="inline-form-row">
+                                                        <td colspan="7">
+                                                            <div class="inline-form">
+                                                                <label class="form-label">Completion Date</label>
+                                                                <input type="date" class="form-input form-input-sm"
+                                                                       @bind="_completionDt" />
+                                                                <button class="btn-primary btn-sm"
+                                                                        @onclick="() => ConfirmCompleteAsync(task.TaskId)">Confirm</button>
+                                                                <button class="btn-secondary btn-sm"
+                                                                        @onclick="CancelInlineForm">Cancel</button>
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                }
+
+                                                @if (_waivingTaskId == task.TaskId)
+                                                {
+                                                    <tr class="inline-form-row">
+                                                        <td colspan="7">
+                                                            <div class="inline-form">
+                                                                <label class="form-label">Waiver Reason</label>
+                                                                <input type="text" class="form-input form-input-sm"
+                                                                       @bind="_waiveReason" placeholder="Enter reason…" />
+                                                                <button class="btn-primary btn-sm"
+                                                                        @onclick="() => ConfirmWaiveAsync(task.TaskId)">Confirm</button>
+                                                                <button class="btn-secondary btn-sm"
+                                                                        @onclick="CancelInlineForm">Cancel</button>
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                }
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
+                            }
+                            else
+                            {
+                                <p class="placeholder-text">No onboarding tasks found.</p>
+                            }
+                        </div>
+                    }
                     break;
 
                 case "History":
@@ -226,31 +672,82 @@ else
 
 @code {
     [Parameter] public Guid EmploymentId { get; set; }
+    [CascadingParameter] private Task<AuthenticationState> AuthStateTask { get; set; } = default!;
 
-    private bool              _loading     = true;
-    private string            _activeTab   = "Profile";
-    private string            _pageTitle   = "Employee";
-    private string            _initials    = "??";
+    // Core state
+    private bool              _loading    = true;
+    private string            _activeTab  = "Profile";
+    private string            _pageTitle  = "Employee";
+    private string            _initials   = "??";
     private Employment?       _employment;
     private Person?           _person;
     private CompensationRecord? _compensation;
 
     private int _activeStatusId;
     private int _onLeaveStatusId;
+    private int _taskPendingStatusId;
+    private int _taskCompletedStatusId;
+    private int _taskWaivedStatusId;
 
     private static readonly string[] _tabs =
-        ["Profile", "Employment", "Assignment", "Compensation", "Leave", "Documents", "History"];
+        ["Profile", "Employment", "Assignment", "Compensation", "Leave", "Documents", "Onboarding", "History"];
 
-    private string LookupLabel(string tableName, int id)
-        => LookupCache.GetAll(tableName).FirstOrDefault(e => e.Id == id)?.Label ?? id.ToString();
+    // Assignment tab
+    private bool         _assignmentLoaded   = false;
+    private bool         _assignmentLoading  = false;
+    private Assignment?  _assignment;
+    private Job?         _assignmentJob;
+    private OrgUnit?     _assignmentDepartment;
+    private OrgUnit?     _assignmentLocation;
+    private Person?      _managerPerson;
 
-    private string LookupCode(string tableName, int id)
-        => LookupCache.GetCode(tableName, id).ToLower();
+    // Leave tab
+    private bool                     _leaveLoaded   = false;
+    private bool                     _leaveLoading  = false;
+    private IEnumerable<LeaveBalance>? _leaveBalances;
+    private IEnumerable<LeaveRequest>? _leaveHistory;
+    private bool     _showLeaveForm   = false;
+    private string   _newLeaveType    = "";
+    private string   _newLeaveReason  = "";
+    private DateTime _newLeaveStartDt = DateTime.Today;
+    private DateTime _newLeaveEndDt   = DateTime.Today;
+    private string?  _newLeaveNotes;
+    private string?  _leaveError;
+    private bool     _leaveSubmitting = false;
+
+    // Documents tab
+    private bool                     _documentsLoaded  = false;
+    private bool                     _documentsLoading = false;
+    private IEnumerable<HrDocument>? _documents;
+    private bool      _showUploadForm    = false;
+    private string    _uploadDocType     = "";
+    private string    _uploadDocName     = "";
+    private DateTime  _uploadEffectiveDt = DateTime.Today;
+    private DateTime? _uploadExpirationDt;
+    private IBrowserFile? _uploadFile;
+    private string?   _uploadError;
+    private bool      _uploading         = false;
+
+    // Onboarding tab
+    private bool                       _onboardingLoaded  = false;
+    private bool                       _onboardingLoading = false;
+    private OnboardingPlan?            _onboardingPlan;
+    private IEnumerable<OnboardingTask>? _onboardingTasks;
+    private Guid?    _completingTaskId;
+    private Guid?    _waivingTaskId;
+    private DateTime _completionDt  = DateTime.Today;
+    private string   _waiveReason   = "";
+    private string?  _onboardingError;
+
+    // -----------------------------------------------------------------------
 
     protected override async Task OnInitializedAsync()
     {
-        _activeStatusId  = LookupCache.GetId(LookupTables.EmploymentStatus, "ACTIVE");
-        _onLeaveStatusId = LookupCache.GetId(LookupTables.EmploymentStatus, "ON_LEAVE");
+        _activeStatusId        = LookupCache.GetId(LookupTables.EmploymentStatus,     "ACTIVE");
+        _onLeaveStatusId       = LookupCache.GetId(LookupTables.EmploymentStatus,     "ON_LEAVE");
+        _taskPendingStatusId   = LookupCache.GetId(LookupTables.OnboardingTaskStatus, "PENDING");
+        _taskCompletedStatusId = LookupCache.GetId(LookupTables.OnboardingTaskStatus, "COMPLETED");
+        _taskWaivedStatusId    = LookupCache.GetId(LookupTables.OnboardingTaskStatus, "WAIVED");
 
         _loading = true;
         try
@@ -258,7 +755,7 @@ else
             _employment = await EmploymentService.GetByIdAsync(EmploymentId);
             if (_employment is not null)
             {
-                _person = await PersonService.GetByEmploymentIdAsync(EmploymentId);
+                _person       = await PersonService.GetByEmploymentIdAsync(EmploymentId);
                 _compensation = await CompensationService.GetCurrentRateAsync(
                     EmploymentId, DateOnly.FromDateTime(DateTime.UtcNow));
 
@@ -269,10 +766,240 @@ else
                 }
             }
         }
-        finally
+        finally { _loading = false; }
+    }
+
+    private async Task SwitchTabAsync(string tab)
+    {
+        _activeTab = tab;
+        switch (tab)
         {
-            _loading = false;
+            case "Assignment" when !_assignmentLoaded: await LoadAssignmentAsync(); break;
+            case "Leave"      when !_leaveLoaded:      await LoadLeaveAsync();      break;
+            case "Documents"  when !_documentsLoaded:  await LoadDocumentsAsync();  break;
+            case "Onboarding" when !_onboardingLoaded: await LoadOnboardingAsync(); break;
         }
+    }
+
+    private async Task LoadAssignmentAsync()
+    {
+        _assignmentLoading = true;
+        try
+        {
+            _assignment = await AssignmentRepository.GetActiveByEmploymentIdAsync(EmploymentId);
+            if (_assignment is not null)
+            {
+                var jobTask   = JobRepository.GetByIdAsync(_assignment.JobId);
+                var deptTask  = OrgStructureService.GetOrgUnitByIdAsync(_assignment.DepartmentId);
+                var locTask   = OrgStructureService.GetOrgUnitByIdAsync(_assignment.LocationId);
+                await Task.WhenAll(jobTask, deptTask, locTask);
+                _assignmentJob        = await jobTask;
+                _assignmentDepartment = await deptTask;
+                _assignmentLocation   = await locTask;
+
+                if (_employment?.ManagerEmploymentId.HasValue == true)
+                    _managerPerson = await PersonService.GetByEmploymentIdAsync(_employment.ManagerEmploymentId!.Value);
+            }
+            _assignmentLoaded = true;
+        }
+        finally { _assignmentLoading = false; }
+    }
+
+    private async Task LoadLeaveAsync()
+    {
+        _leaveLoading = true;
+        try
+        {
+            _leaveBalances = await LeaveService.GetBalancesAsync(EmploymentId);
+            _leaveHistory  = await LeaveService.GetHistoryAsync(EmploymentId);
+            _leaveLoaded   = true;
+        }
+        finally { _leaveLoading = false; }
+    }
+
+    private async Task LoadDocumentsAsync()
+    {
+        if (_person is null) return;
+        _documentsLoading = true;
+        try
+        {
+            _documents       = await DocumentService.GetDocumentsAsync(_person.PersonId, EmploymentId);
+            _documentsLoaded = true;
+        }
+        finally { _documentsLoading = false; }
+    }
+
+    private async Task LoadOnboardingAsync()
+    {
+        _onboardingLoading = true;
+        try
+        {
+            _onboardingPlan = await OnboardingService.GetPlanByEmploymentIdAsync(EmploymentId);
+            if (_onboardingPlan is not null)
+                _onboardingTasks = await OnboardingService.GetTasksByPlanIdAsync(_onboardingPlan.OnboardingPlanId);
+            _onboardingLoaded = true;
+        }
+        finally { _onboardingLoading = false; }
+    }
+
+    // Leave form
+
+    private async Task SubmitLeaveAsync()
+    {
+        _leaveError = null;
+        if (string.IsNullOrWhiteSpace(_newLeaveType))   { _leaveError = "Leave type is required.";   return; }
+        if (string.IsNullOrWhiteSpace(_newLeaveReason)) { _leaveError = "Reason code is required.";  return; }
+
+        _leaveSubmitting = true;
+        try
+        {
+            var command = new SubmitLeaveRequestCommand
+            {
+                EmploymentId    = EmploymentId,
+                LeaveType       = _newLeaveType,
+                LeaveStartDate  = DateOnly.FromDateTime(_newLeaveStartDt),
+                LeaveEndDate    = DateOnly.FromDateTime(_newLeaveEndDt),
+                LeaveReasonCode = _newLeaveReason,
+                SubmittedBy     = await GetCurrentUserIdAsync(),
+                Notes           = string.IsNullOrWhiteSpace(_newLeaveNotes) ? null : _newLeaveNotes
+            };
+            await LeaveService.SubmitLeaveRequestAsync(command);
+            _showLeaveForm = false;
+            _newLeaveType = _newLeaveReason = "";
+            _newLeaveNotes = null;
+            _leaveLoaded = false;
+            await LoadLeaveAsync();
+        }
+        catch (Exception ex) { _leaveError = ex.Message; }
+        finally { _leaveSubmitting = false; }
+    }
+
+    // Document upload
+
+    private void OnFileSelected(InputFileChangeEventArgs e) => _uploadFile = e.File;
+
+    private async Task UploadDocumentAsync()
+    {
+        _uploadError = null;
+        if (string.IsNullOrWhiteSpace(_uploadDocType)) { _uploadError = "Document type is required."; return; }
+        if (string.IsNullOrWhiteSpace(_uploadDocName)) { _uploadError = "Document name is required."; return; }
+        if (_uploadFile is null)                        { _uploadError = "A file is required.";        return; }
+        if (_person is null)                            return;
+
+        var ext = Path.GetExtension(_uploadFile.Name).TrimStart('.');
+        if (string.IsNullOrEmpty(ext)) { _uploadError = "Cannot determine file format from extension."; return; }
+
+        const long maxBytes = 25L * 1024 * 1024;
+        if (_uploadFile.Size > maxBytes) { _uploadError = "File exceeds 25 MB limit."; return; }
+
+        _uploading = true;
+        try
+        {
+            await using var stream = _uploadFile.OpenReadStream(maxAllowedSize: maxBytes);
+            var command = new UploadDocumentCommand
+            {
+                PersonId       = _person.PersonId,
+                EmploymentId   = EmploymentId,
+                DocumentType   = _uploadDocType,
+                DocumentName   = _uploadDocName,
+                FileContent    = stream,
+                FileFormat     = ext.ToUpper(),
+                EffectiveDate  = DateOnly.FromDateTime(_uploadEffectiveDt),
+                ExpirationDate = _uploadExpirationDt.HasValue
+                                     ? DateOnly.FromDateTime(_uploadExpirationDt.Value)
+                                     : null,
+                UploadedBy     = await GetCurrentUserIdAsync()
+            };
+            await DocumentService.UploadDocumentAsync(command);
+            _showUploadForm = false;
+            _uploadDocType = _uploadDocName = "";
+            _uploadFile    = null;
+            _uploadExpirationDt = null;
+            _documentsLoaded = false;
+            await LoadDocumentsAsync();
+        }
+        catch (Exception ex) { _uploadError = ex.Message; }
+        finally { _uploading = false; }
+    }
+
+    // Onboarding actions
+
+    private void StartComplete(Guid taskId)
+    {
+        _completingTaskId = taskId;
+        _waivingTaskId    = null;
+        _completionDt     = DateTime.Today;
+        _onboardingError  = null;
+    }
+
+    private void StartWaive(Guid taskId)
+    {
+        _waivingTaskId    = taskId;
+        _completingTaskId = null;
+        _waiveReason      = "";
+        _onboardingError  = null;
+    }
+
+    private void CancelInlineForm()
+    {
+        _completingTaskId = null;
+        _waivingTaskId    = null;
+    }
+
+    private async Task ConfirmCompleteAsync(Guid taskId)
+    {
+        _onboardingError = null;
+        try
+        {
+            await OnboardingService.CompleteTaskAsync(
+                taskId, DateOnly.FromDateTime(_completionDt), await GetCurrentUserIdAsync());
+            _completingTaskId = null;
+            _onboardingLoaded = false;
+            await LoadOnboardingAsync();
+        }
+        catch (Exception ex) { _onboardingError = ex.Message; }
+    }
+
+    private async Task ConfirmWaiveAsync(Guid taskId)
+    {
+        _onboardingError = null;
+        if (string.IsNullOrWhiteSpace(_waiveReason))
+        {
+            _onboardingError = "Waiver reason is required.";
+            return;
+        }
+        try
+        {
+            await OnboardingService.WaiveTaskAsync(taskId, _waiveReason, await GetCurrentUserIdAsync());
+            _waivingTaskId    = null;
+            _onboardingLoaded = false;
+            await LoadOnboardingAsync();
+        }
+        catch (Exception ex) { _onboardingError = ex.Message; }
+    }
+
+    // Helpers
+
+    private async Task<Guid> GetCurrentUserIdAsync()
+    {
+        var state = await AuthStateTask;
+        var sub   = state.User.FindFirst("sub")?.Value;
+        return Guid.TryParse(sub, out var id) ? id : Guid.Empty;
+    }
+
+    private string LookupLabel(string tableName, int id)
+        => LookupCache.GetAll(tableName).FirstOrDefault(e => e.Id == id)?.Label ?? id.ToString();
+
+    private string LookupCode(string tableName, int id)
+        => LookupCache.GetCode(tableName, id).ToLower();
+
+    private string ExpirationClass(DateOnly? expiration)
+    {
+        if (expiration is null) return "";
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        if (expiration <= today)               return "cell-overdue";
+        if (expiration <= today.AddDays(90))   return "cell-expiring";
+        return "";
     }
 }
 
@@ -326,6 +1053,8 @@ else
         justify-content: flex-end;
     }
 
+    /* ---- Tabs ---- */
+
     .tab-bar {
         display: flex;
         gap: 0;
@@ -346,11 +1075,7 @@ else
         transition: color 0.15s, border-color 0.15s;
     }
 
-    .tab-btn.active {
-        color: var(--aw-teal);
-        border-bottom-color: var(--aw-teal);
-    }
-
+    .tab-btn.active { color: var(--aw-teal); border-bottom-color: var(--aw-teal); }
     .tab-btn:hover:not(.active) { color: var(--aw-navy); }
 
     .tab-content {
@@ -359,6 +1084,8 @@ else
         box-shadow: var(--shadow-sm);
         padding: var(--space-6);
     }
+
+    /* ---- Detail grid ---- */
 
     .detail-section { }
 
@@ -369,17 +1096,22 @@ else
         margin: 0 0 var(--space-4) 0;
     }
 
+    .section-header-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: var(--space-4);
+    }
+
+    .section-header-row .section-title { margin: 0; }
+
     .detail-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(140px, auto));
         gap: var(--space-4);
     }
 
-    .detail-item {
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-1);
-    }
+    .detail-item { display: flex; flex-direction: column; gap: var(--space-1); }
 
     .detail-label {
         font-size: var(--font-size-sm);
@@ -387,33 +1119,214 @@ else
         font-weight: var(--font-weight-medium);
     }
 
-    .detail-value {
-        font-size: var(--font-size-base);
-        color: var(--aw-navy);
-    }
+    .detail-value { font-size: var(--font-size-base); color: var(--aw-navy); }
 
-    .placeholder-text {
-        color: #6B7280;
-        font-style: italic;
-    }
-
-    .loading-text, .error-text {
-        padding: var(--space-6);
-        color: #6B7280;
-        text-align: center;
-    }
+    /* ---- Status badges ---- */
 
     .status-badge {
+        display: inline-block;
         padding: 2px var(--space-2);
         border-radius: var(--radius-sm);
         font-size: var(--font-size-sm);
         font-weight: var(--font-weight-medium);
     }
 
+    /* Employment */
     .status-active     { background: #D1FAE5; color: #065F46; }
+    .status-on_leave   { background: #FEF3C7; color: #92400E; }
     .status-onleave    { background: #FEF3C7; color: #92400E; }
     .status-suspended  { background: #FEE2E2; color: #991B1B; }
     .status-terminated { background: #F3F4F6; color: #6B7280; }
+
+    /* Leave statuses */
+    .status-requested   { background: #DBEAFE; color: #1E40AF; }
+    .status-approved    { background: #D1FAE5; color: #065F46; }
+    .status-in_progress { background: #FEF3C7; color: #92400E; }
+    .status-completed   { background: #D1FAE5; color: #065F46; }
+    .status-denied      { background: #FEE2E2; color: #991B1B; }
+    .status-cancelled   { background: #F3F4F6; color: #6B7280; }
+
+    /* Document statuses */
+    .status-superseded { background: #F3F4F6; color: #6B7280; }
+    .status-expired    { background: #FEE2E2; color: #991B1B; }
+    .status-archived   { background: #F3F4F6; color: #6B7280; }
+
+    /* Onboarding plan statuses */
+    .status-not_started       { background: #F3F4F6; color: #6B7280; }
+    .status-blocking_complete { background: #DBEAFE; color: #1E40AF; }
+
+    /* Onboarding task statuses */
+    .status-pending { background: #FEF3C7; color: #92400E; }
+    .status-waived  { background: #F3F4F6; color: #6B7280; }
+
+    /* ---- Tables ---- */
+
+    .table-wrapper { overflow-x: auto; margin-top: var(--space-4); }
+
+    .data-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: var(--font-size-sm);
+    }
+
+    .data-table th {
+        text-align: left;
+        padding: var(--space-2) var(--space-3);
+        font-weight: var(--font-weight-semibold);
+        color: #6B7280;
+        border-bottom: 1px solid #E5E7EB;
+        white-space: nowrap;
+    }
+
+    .data-table td {
+        padding: var(--space-2) var(--space-3);
+        border-bottom: 1px solid #F3F4F6;
+        color: var(--aw-navy);
+        vertical-align: middle;
+    }
+
+    .data-table tr:last-child td { border-bottom: none; }
+    .data-table tbody tr:hover td { background: #F9FAFB; }
+
+    /* ---- Leave balance cards ---- */
+
+    .balance-cards {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-4);
+        margin-top: var(--space-4);
+    }
+
+    .balance-card {
+        background: #F9FAFB;
+        border: 1px solid #E5E7EB;
+        border-radius: var(--radius-lg);
+        padding: var(--space-4);
+        flex: 1 1 160px;
+        max-width: 220px;
+    }
+
+    .balance-card-type {
+        font-size: var(--font-size-sm);
+        color: #6B7280;
+        font-weight: var(--font-weight-medium);
+        margin-bottom: var(--space-1);
+    }
+
+    .balance-card-available {
+        font-size: 2rem;
+        font-weight: var(--font-weight-semibold);
+        color: var(--aw-teal);
+        line-height: 1;
+    }
+
+    .balance-card-label {
+        font-size: var(--font-size-sm);
+        color: #6B7280;
+        margin-bottom: var(--space-2);
+    }
+
+    .balance-card-details {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        font-size: var(--font-size-sm);
+        color: #6B7280;
+    }
+
+    /* ---- Form panel ---- */
+
+    .form-panel {
+        background: #F9FAFB;
+        border: 1px solid #E5E7EB;
+        border-radius: var(--radius-lg);
+        padding: var(--space-4);
+        margin-bottom: var(--space-4);
+    }
+
+    .form-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+        gap: var(--space-3);
+        margin-bottom: var(--space-3);
+    }
+
+    .form-field { display: flex; flex-direction: column; gap: var(--space-1); }
+    .form-field-full { grid-column: 1 / -1; }
+
+    .form-label {
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-medium);
+        color: #374151;
+    }
+
+    .form-input, .form-select {
+        padding: var(--space-2);
+        border: 1px solid #D1D5DB;
+        border-radius: var(--radius-md);
+        font-size: var(--font-size-sm);
+        color: var(--aw-navy);
+        background: white;
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    .form-input:focus, .form-select:focus {
+        outline: none;
+        border-color: var(--aw-teal);
+    }
+
+    .form-input-sm { width: 160px; }
+    .form-error { color: #DC2626; font-size: var(--font-size-sm); margin: var(--space-2) 0; }
+    .form-actions { display: flex; gap: var(--space-2); margin-top: var(--space-2); }
+
+    .file-info { font-size: var(--font-size-sm); color: #6B7280; margin-top: var(--space-1); display: block; }
+
+    /* ---- Inline onboarding forms ---- */
+
+    .inline-form-row td { background: #F0FDF4; }
+
+    .inline-form {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        flex-wrap: wrap;
+        padding: var(--space-2) 0;
+    }
+
+    .waiver-reason { font-size: var(--font-size-sm); color: #6B7280; font-style: italic; margin-top: 2px; }
+
+    /* ---- Expiration / overdue cell coloring ---- */
+
+    .cell-overdue  { color: #DC2626; font-weight: var(--font-weight-medium); }
+    .cell-expiring { color: #92400E; font-weight: var(--font-weight-medium); }
+
+    /* ---- Blocking badge ---- */
+
+    .badge-blocking {
+        background: #FEF3C7;
+        color: #92400E;
+        padding: 2px 6px;
+        border-radius: var(--radius-sm);
+        font-size: 0.7rem;
+        font-weight: var(--font-weight-medium);
+    }
+
+    /* ---- Buttons ---- */
+
+    .btn-primary {
+        background: var(--aw-teal);
+        color: white;
+        border: none;
+        border-radius: var(--radius-md);
+        padding: var(--space-2) var(--space-3);
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-medium);
+        cursor: pointer;
+    }
+
+    .btn-primary:hover:not(:disabled) { opacity: 0.9; }
+    .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
 
     .btn-secondary {
         background: white;
@@ -441,9 +1354,32 @@ else
 
     .btn-danger:hover { background: #FEF2F2; }
 
+    .btn-sm { padding: var(--space-1) var(--space-2) !important; }
+
+    .btn-xs {
+        background: none;
+        border: none;
+        padding: 0;
+        font-size: var(--font-size-sm);
+        cursor: pointer;
+        color: var(--aw-teal);
+    }
+
+    .btn-xs:hover { text-decoration: underline; }
+
     .btn-link {
         color: var(--aw-teal);
         text-decoration: none;
         font-weight: var(--font-weight-medium);
+        font-size: var(--font-size-sm);
     }
+
+    .btn-link:hover { text-decoration: underline; }
+
+    .text-muted { color: #6B7280; }
+
+    /* ---- Misc ---- */
+
+    .placeholder-text { color: #6B7280; font-style: italic; }
+    .loading-text, .error-text { padding: var(--space-6); color: #6B7280; text-align: center; }
 </style>

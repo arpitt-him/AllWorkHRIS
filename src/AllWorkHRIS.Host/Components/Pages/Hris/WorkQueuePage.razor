@@ -1,0 +1,564 @@
+@page "/hris/workqueue"
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = "HrisAdmin,Manager")]
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using AllWorkHRIS.Host.Hris.Commands
+@using AllWorkHRIS.Host.Hris.Domain
+@using AllWorkHRIS.Host.Hris.Services
+@using AllWorkHRIS.Core.Lookups
+@inject IWorkQueueService WorkQueueService
+@inject ILeaveService     LeaveService
+@inject IPersonService    PersonService
+@inject ILookupCache      LookupCache
+
+<PageTitle>Work Queue — AllWork HRIS</PageTitle>
+
+<div class="page-container">
+
+    <div class="page-header">
+        <h2 class="page-title">Work Queue</h2>
+        <button class="btn-secondary btn-sm" @onclick="LoadAsync">Refresh</button>
+    </div>
+
+    @* ── STAT CARDS ── *@
+    <div class="stat-cards">
+        <div class="stat-card">
+            <span class="stat-label">Open Items</span>
+            <span class="stat-value">@_items.Count</span>
+        </div>
+        <div class="stat-card stat-card-urgent">
+            <span class="stat-label">High / Hold Priority</span>
+            <span class="stat-value">@_items.Count(i => i.Priority is WorkQueuePriority.High or WorkQueuePriority.Hold)</span>
+        </div>
+    </div>
+
+    @if (!_loading && _items.Count > 0)
+    {
+        <div class="filter-row" style="margin-top: var(--space-2); margin-bottom: var(--space-6);">
+            <input type="text" class="filter-input" placeholder="Filter by employee name…"
+                   @bind="_nameFilter" @bind:event="oninput" />
+            <span class="filter-label">Due from</span>
+            <input type="date" class="filter-date" value="@_dateFromStr"
+                   @oninput="e => _dateFromStr = e.Value?.ToString() ?? string.Empty" />
+            <span class="filter-label">to</span>
+            <input type="date" class="filter-date" value="@_dateToStr"
+                   @oninput="e => _dateToStr = e.Value?.ToString() ?? string.Empty" />
+            @if (!string.IsNullOrWhiteSpace(_nameFilter) || !string.IsNullOrWhiteSpace(_dateFromStr) || !string.IsNullOrWhiteSpace(_dateToStr))
+            {
+                <button class="btn-secondary btn-sm" @onclick="ClearFilters">Clear</button>
+            }
+        </div>
+    }
+
+    @if (_loading)
+    {
+        <p class="loading-text">Loading work queue...</p>
+    }
+    else if (_items.Count == 0)
+    {
+        <div class="empty-state">
+            <p>No open items — all caught up.</p>
+        </div>
+    }
+    else
+    {
+        @* ── LEAVE APPROVALS ── *@
+        @if (LeaveItems.Any())
+        {
+            <h3 class="section-heading" style="margin-top: var(--space-2);">Leave Approvals</h3>
+            <div class="grid-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Title</th>
+                            <th>Employee</th>
+                            <th>Priority</th>
+                            <th>Created</th>
+                            <th>Due</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var item in LeaveItems.OrderByDescending(i => PriorityRank(i.Priority)))
+                        {
+                            <tr>
+                                <td>@item.Title</td>
+                                <td>
+                                    @if (item.EmploymentId.HasValue)
+                                    {
+                                        <a href="/hris/employees/@item.EmploymentId" class="link">
+                                            @EmployeeName(item.EmploymentId)
+                                        </a>
+                                    }
+                                    else { @("—") }
+                                </td>
+                                <td><span class="priority-badge priority-@item.Priority.ToLower()">@item.Priority</span></td>
+                                <td>@item.CreatedAt.ToString("yyyy-MM-dd")</td>
+                                <td class="@DueClass(item.DueDate)">@(item.DueDate?.ToString("yyyy-MM-dd") ?? "—")</td>
+                                <td class="action-cell">
+                                    @if (_approvingId == item.WorkQueueItemId)
+                                    {
+                                        <div class="inline-confirm">
+                                            <span class="confirm-text">Confirm approval?</span>
+                                            <button class="btn-primary btn-xs" @onclick="() => ConfirmApproveAsync(item)"
+                                                    disabled="@_actioning">Yes</button>
+                                            <button class="btn-secondary btn-xs" @onclick="CancelAction">No</button>
+                                        </div>
+                                    }
+                                    else if (_denyingId == item.WorkQueueItemId)
+                                    {
+                                        <div class="inline-confirm">
+                                            <input type="text" class="form-input-sm" placeholder="Reason…"
+                                                   @bind="_denyReason" />
+                                            <button class="btn-danger btn-xs" @onclick="() => ConfirmDenyAsync(item)"
+                                                    disabled="@_actioning">Deny</button>
+                                            <button class="btn-secondary btn-xs" @onclick="CancelAction">Cancel</button>
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <button class="btn-primary btn-xs"
+                                                @onclick="() => StartApprove(item.WorkQueueItemId)">Approve</button>
+                                        <button class="btn-danger btn-xs"
+                                                @onclick="() => StartDeny(item.WorkQueueItemId)">Deny</button>
+                                    }
+                                </td>
+                            </tr>
+                            @if (_actionError is not null && (_approvingId == item.WorkQueueItemId || _denyingId == item.WorkQueueItemId))
+                            {
+                                <tr><td colspan="6"><p class="form-error">@_actionError</p></td></tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+
+        @* ── DOCUMENT ALERTS ── *@
+        @if (DocItems.Any())
+        {
+            <h3 class="section-heading" style="margin-top: var(--space-8);">Document Alerts</h3>
+            <div class="grid-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Alert</th>
+                            <th>Employee</th>
+                            <th>Description</th>
+                            <th>Priority</th>
+                            <th>Due / Expires</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var item in DocItems.OrderByDescending(i => PriorityRank(i.Priority)))
+                        {
+                            <tr>
+                                <td>@item.Title</td>
+                                <td>
+                                    @if (item.EmploymentId.HasValue)
+                                    {
+                                        <a href="/hris/employees/@item.EmploymentId" class="link">
+                                            @EmployeeName(item.EmploymentId)
+                                        </a>
+                                    }
+                                    else { @("—") }
+                                </td>
+                                <td>@(item.Description ?? "—")</td>
+                                <td><span class="priority-badge priority-@item.Priority.ToLower()">@item.Priority</span></td>
+                                <td class="@DueClass(item.DueDate)">@(item.DueDate?.ToString("yyyy-MM-dd") ?? "—")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+
+        @* ── ONBOARDING TASKS ── *@
+        @if (OnboardingItems.Any())
+        {
+            <h3 class="section-heading" style="margin-top: var(--space-8);">Onboarding Tasks</h3>
+            <div class="grid-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Task</th>
+                            <th>Employee</th>
+                            <th>Priority</th>
+                            <th>Due</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var item in OnboardingItems.OrderBy(i => i.DueDate))
+                        {
+                            <tr>
+                                <td>@OnboardingTaskLabel(item.Title)</td>
+                                <td>
+                                    @if (item.EmploymentId.HasValue)
+                                    {
+                                        <a href="/hris/employees/@item.EmploymentId" class="link">
+                                            @EmployeeName(item.EmploymentId)
+                                        </a>
+                                    }
+                                    else { @("—") }
+                                </td>
+                                <td><span class="priority-badge priority-@item.Priority.ToLower()">@item.Priority</span></td>
+                                <td class="@DueClass(item.DueDate)">@(item.DueDate?.ToString("yyyy-MM-dd") ?? "—")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    }
+
+</div>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState> AuthStateTask { get; set; } = default!;
+
+    private bool                       _loading      = true;
+    private List<WorkQueueItem>        _items        = [];
+    private Dictionary<Guid, string>   _employeeNames = [];
+    private string                     _nameFilter   = "";
+    private string                     _dateFromStr  = "";
+    private string                     _dateToStr    = "";
+
+    private DateOnly? DateFrom => DateOnly.TryParse(_dateFromStr, out var d) ? d : null;
+    private DateOnly? DateTo   => DateOnly.TryParse(_dateToStr,   out var d) ? d : null;
+
+    private List<WorkQueueItem> LeaveItems =>
+        _items.Where(i => i.ItemType == WorkQueueItemTypes.LeaveApproval && MatchesFilter(i)).ToList();
+
+    private List<WorkQueueItem> DocItems =>
+        _items.Where(i => i.ItemType is WorkQueueItemTypes.DocExpired or WorkQueueItemTypes.DocExpiring30
+                       or WorkQueueItemTypes.DocExpiring90 && MatchesFilter(i)).ToList();
+
+    private List<WorkQueueItem> OnboardingItems =>
+        _items.Where(i => i.ItemType == WorkQueueItemTypes.OnboardingTask && MatchesFilter(i)).ToList();
+
+    private bool MatchesFilter(WorkQueueItem item)
+    {
+        if (!string.IsNullOrWhiteSpace(_nameFilter))
+        {
+            var name = EmployeeName(item.EmploymentId);
+            if (!name.Contains(_nameFilter, StringComparison.OrdinalIgnoreCase)) return false;
+        }
+        if (DateFrom.HasValue && item.DueDate.HasValue && item.DueDate < DateFrom) return false;
+        if (DateTo.HasValue   && item.DueDate.HasValue && item.DueDate > DateTo)   return false;
+        return true;
+    }
+
+    private void ClearFilters()
+    {
+        _nameFilter  = "";
+        _dateFromStr = "";
+        _dateToStr   = "";
+    }
+
+    private string EmployeeName(Guid? employmentId)
+    {
+        if (employmentId is null) return "—";
+        return _employeeNames.TryGetValue(employmentId.Value, out var name) ? name : "—";
+    }
+
+    // Action state
+    private Guid?   _approvingId;
+    private Guid?   _denyingId;
+    private string  _denyReason  = "";
+    private bool    _actioning   = false;
+    private string? _actionError;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _items   = [];
+        try
+        {
+            var state = await AuthStateTask;
+            var roles = state.User.Claims
+                .Where(c => c.Type == "roles")
+                .Select(c => c.Value)
+                .ToHashSet();
+
+            var tasks = new List<Task<IEnumerable<WorkQueueItem>>>();
+            if (roles.Contains("HrisAdmin")) tasks.Add(WorkQueueService.GetOpenByRoleAsync("HrisAdmin"));
+            if (roles.Contains("Manager"))   tasks.Add(WorkQueueService.GetOpenByRoleAsync("Manager"));
+
+            var results = await Task.WhenAll(tasks);
+            _items = results.SelectMany(r => r)
+                            .DistinctBy(i => i.WorkQueueItemId)
+                            .OrderByDescending(i => PriorityRank(i.Priority))
+                            .ThenBy(i => i.CreatedAt)
+                            .ToList();
+
+            var employmentIds = _items
+                .Where(i => i.EmploymentId.HasValue)
+                .Select(i => i.EmploymentId!.Value)
+                .Distinct();
+            _employeeNames = await PersonService.GetNamesByEmploymentIdsAsync(employmentIds);
+        }
+        finally { _loading = false; }
+    }
+
+    private void StartApprove(Guid itemId)
+    {
+        _approvingId = itemId;
+        _denyingId   = null;
+        _actionError = null;
+    }
+
+    private void StartDeny(Guid itemId)
+    {
+        _denyingId   = itemId;
+        _approvingId = null;
+        _denyReason  = "";
+        _actionError = null;
+    }
+
+    private void CancelAction()
+    {
+        _approvingId = null;
+        _denyingId   = null;
+        _actionError = null;
+    }
+
+    private async Task ConfirmApproveAsync(WorkQueueItem item)
+    {
+        _actioning   = true;
+        _actionError = null;
+        try
+        {
+            await LeaveService.ApproveLeaveRequestAsync(new ApproveLeaveRequestCommand
+            {
+                LeaveRequestId = item.ReferenceId,
+                ApprovedBy     = await GetCurrentUserIdAsync()
+            });
+            await WorkQueueService.ResolveByReferenceAsync(item.ReferenceId, await GetCurrentUserIdAsync());
+            _approvingId = null;
+            await LoadAsync();
+        }
+        catch (Exception ex) { _actionError = ex.Message; }
+        finally { _actioning = false; }
+    }
+
+    private async Task ConfirmDenyAsync(WorkQueueItem item)
+    {
+        if (string.IsNullOrWhiteSpace(_denyReason))
+        {
+            _actionError = "Denial reason is required.";
+            return;
+        }
+        _actioning   = true;
+        _actionError = null;
+        try
+        {
+            await LeaveService.DenyLeaveRequestAsync(new DenyLeaveRequestCommand
+            {
+                LeaveRequestId = item.ReferenceId,
+                DeniedBy       = await GetCurrentUserIdAsync(),
+                DenialReason   = _denyReason
+            });
+            await WorkQueueService.ResolveByReferenceAsync(item.ReferenceId, await GetCurrentUserIdAsync());
+            _denyingId = null;
+            await LoadAsync();
+        }
+        catch (Exception ex) { _actionError = ex.Message; }
+        finally { _actioning = false; }
+    }
+
+    private async Task<Guid> GetCurrentUserIdAsync()
+    {
+        var state = await AuthStateTask;
+        var sub   = state.User.FindFirst("sub")?.Value;
+        return Guid.TryParse(sub, out var id) ? id : Guid.Empty;
+    }
+
+    private string OnboardingTaskLabel(string title)
+    {
+        const string prefix = "Onboarding task: ";
+        if (!title.StartsWith(prefix)) return title;
+        var code = title[prefix.Length..];
+        try { return "Onboarding: " + LookupCache.Get(LookupTables.OnboardingTaskType, code).Label; }
+        catch { return title; }
+    }
+
+    private static int PriorityRank(string priority) => priority switch
+    {
+        WorkQueuePriority.Hold   => 3,
+        WorkQueuePriority.High   => 2,
+        WorkQueuePriority.Normal => 1,
+        _                        => 0
+    };
+
+    private static string DueClass(DateOnly? due)
+    {
+        if (due is null) return "";
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        if (due <= today)            return "cell-overdue";
+        if (due <= today.AddDays(7)) return "cell-expiring";
+        return "";
+    }
+}
+
+<style>
+    .page-container { padding: var(--space-6); }
+
+    .page-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: var(--space-6);
+    }
+
+    .page-title {
+        font-size: var(--font-size-lg);
+        font-weight: var(--font-weight-semibold);
+        color: var(--aw-navy);
+        margin: 0;
+    }
+
+    .section-heading {
+        font-size: var(--font-size-base);
+        font-weight: var(--font-weight-semibold);
+        color: var(--aw-navy);
+        margin: 0 0 var(--space-3) 0;
+    }
+
+    /* ── Stat cards ── */
+    .stat-cards { display: flex; gap: var(--space-4); margin-bottom: var(--space-6); }
+
+    .stat-card {
+        background: white;
+        border-radius: var(--radius-lg);
+        padding: var(--space-4) var(--space-6);
+        box-shadow: var(--shadow-sm);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-1);
+        min-width: 140px;
+    }
+
+    .stat-card-urgent { border-left: 3px solid #DC2626; }
+
+    .stat-label { font-size: var(--font-size-sm); color: #6B7280; font-weight: var(--font-weight-medium); }
+    .stat-value { font-size: 1.5rem; font-weight: var(--font-weight-semibold); color: var(--aw-navy); }
+
+    /* ── Table ── */
+    .grid-container {
+        background: white;
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-sm);
+        overflow: hidden;
+        margin-bottom: var(--space-4);
+    }
+
+    .data-table { width: 100%; border-collapse: collapse; font-size: var(--font-size-sm); }
+
+    .data-table th {
+        background: #F9FAFB;
+        padding: var(--space-3) var(--space-4);
+        text-align: left;
+        font-weight: var(--font-weight-medium);
+        color: #6B7280;
+        border-bottom: 1px solid #E5E7EB;
+        white-space: nowrap;
+    }
+
+    .data-table td {
+        padding: var(--space-3) var(--space-4);
+        border-bottom: 1px solid #F3F4F6;
+        color: var(--aw-navy);
+        vertical-align: middle;
+    }
+
+    .data-table tr:last-child td { border-bottom: none; }
+    .data-table tbody tr:hover td { background: #F9FAFB; }
+
+    /* ── Priority badges ── */
+    .priority-badge {
+        display: inline-block;
+        padding: 2px var(--space-2);
+        border-radius: var(--radius-sm);
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-medium);
+    }
+
+    .priority-normal { background: #F3F4F6; color: #6B7280; }
+    .priority-high   { background: #FEF3C7; color: #92400E; }
+    .priority-hold   { background: #FEE2E2; color: #991B1B; }
+
+    /* ── Cell states ── */
+    .cell-overdue  { color: #DC2626; font-weight: var(--font-weight-medium); }
+    .cell-expiring { color: #92400E; font-weight: var(--font-weight-medium); }
+
+    /* ── Actions ── */
+    .action-cell { white-space: nowrap; }
+
+    .inline-confirm {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        flex-wrap: wrap;
+    }
+
+    .confirm-text { font-size: var(--font-size-sm); color: var(--aw-navy); }
+
+    .form-input-sm {
+        padding: var(--space-1) var(--space-2);
+        border: 1px solid #D1D5DB;
+        border-radius: var(--radius-md);
+        font-size: var(--font-size-sm);
+        width: 180px;
+    }
+
+    .form-error { color: #DC2626; font-size: var(--font-size-sm); margin: 0; padding: var(--space-2) var(--space-4); }
+
+    /* ── Misc ── */
+    .loading-text { padding: var(--space-6); color: #6B7280; text-align: center; }
+
+    .empty-state {
+        background: white;
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-sm);
+        padding: var(--space-10);
+        text-align: center;
+        color: #6B7280;
+    }
+
+    .filter-row { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
+    .filter-input { padding: var(--space-2) var(--space-3); border: 1px solid #D1D5DB; border-radius: var(--radius-md); font-size: var(--font-size-sm); width: 220px; }
+    .filter-date  { padding: var(--space-2) var(--space-3); border: 1px solid #D1D5DB; border-radius: var(--radius-md); font-size: var(--font-size-sm); }
+    .filter-label { font-size: var(--font-size-sm); color: #6B7280; white-space: nowrap; }
+
+    .link { color: var(--aw-teal); text-decoration: none; font-weight: var(--font-weight-medium); }
+    .link:hover { text-decoration: underline; }
+
+    /* ── Buttons ── */
+    .btn-primary {
+        background: var(--aw-teal); color: white; border: none;
+        border-radius: var(--radius-md); padding: var(--space-2) var(--space-3);
+        font-size: var(--font-size-sm); font-weight: var(--font-weight-medium); cursor: pointer;
+    }
+    .btn-primary:hover:not(:disabled) { opacity: 0.9; }
+    .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+
+    .btn-secondary {
+        background: white; color: var(--aw-navy); border: 1px solid #D1D5DB;
+        border-radius: var(--radius-md); padding: var(--space-2) var(--space-3);
+        font-size: var(--font-size-sm); font-weight: var(--font-weight-medium); cursor: pointer;
+    }
+    .btn-secondary:hover { background: #F9FAFB; }
+
+    .btn-danger {
+        background: white; color: #DC2626; border: 1px solid #FCA5A5;
+        border-radius: var(--radius-md); padding: var(--space-2) var(--space-3);
+        font-size: var(--font-size-sm); font-weight: var(--font-weight-medium); cursor: pointer;
+    }
+    .btn-danger:hover { background: #FEF2F2; }
+
+    .btn-sm  { padding: var(--space-1) var(--space-2) !important; }
+    .btn-xs  { padding: 2px var(--space-2) !important; font-size: var(--font-size-sm) !important; }
+</style>

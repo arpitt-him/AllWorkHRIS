@@ -1,0 +1,412 @@
+@page "/hris/documents/expiring"
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = "HrisAdmin")]
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using AllWorkHRIS.Host.Hris.Domain
+@using AllWorkHRIS.Host.Hris.Repositories
+@using AllWorkHRIS.Host.Hris.Services
+@using AllWorkHRIS.Core.Lookups
+@inject IDocumentRepository DocumentRepository
+@inject IPersonService       PersonService
+@inject ILookupCache         LookupCache
+
+<PageTitle>Document Expiration Report — AllWork HRIS</PageTitle>
+
+<div class="page-container">
+
+    <div class="page-header">
+        <h2 class="page-title">Document Expiration Report</h2>
+        <button class="btn-secondary btn-sm" @onclick="LoadAsync">Refresh</button>
+    </div>
+
+    @if (_loading)
+    {
+        <p class="loading-text">Loading...</p>
+    }
+    else
+    {
+        @* ── STAT CARDS ── *@
+        <div class="stat-cards">
+            <div class="stat-card stat-card-expired">
+                <span class="stat-label">Expired</span>
+                <span class="stat-value">@_allDocs.Count(d => IsExpired(d))</span>
+            </div>
+            <div class="stat-card stat-card-warn30">
+                <span class="stat-label">Expiring ≤ 30 days</span>
+                <span class="stat-value">@_allDocs.Count(d => IsExpiring30(d))</span>
+            </div>
+            <div class="stat-card stat-card-warn90">
+                <span class="stat-label">Expiring 31–90 days</span>
+                <span class="stat-value">@_allDocs.Count(d => IsExpiring90(d))</span>
+            </div>
+        </div>
+
+        @* ── FILTERS ── *@
+        <div class="filter-row">
+            <input type="text" class="filter-input" placeholder="Filter by employee name…"
+                   @bind="_nameFilter" @bind:event="oninput" />
+            <select class="filter-select" @bind="_typeFilter" @bind:event="oninput">
+                <option value="">All document types</option>
+                @foreach (var entry in _docTypes)
+                {
+                    <option value="@entry.Id">@entry.Label</option>
+                }
+            </select>
+            <select class="filter-select" @bind="_statusFilter" @bind:event="oninput">
+                <option value="">All statuses</option>
+                <option value="expired">Expired</option>
+                <option value="expiring30">Expiring ≤ 30 days</option>
+                <option value="expiring90">Expiring 31–90 days</option>
+            </select>
+            @if (!string.IsNullOrWhiteSpace(_nameFilter) || !string.IsNullOrEmpty(_typeFilter) || !string.IsNullOrWhiteSpace(_statusFilter))
+            {
+                <button class="btn-secondary btn-sm" @onclick="ClearFilters">Clear</button>
+            }
+        </div>
+
+        @* ── TABLE ── *@
+        @if (!FilteredDocs.Any())
+        {
+            <div class="empty-state">
+                <p>No documents match the current filters.</p>
+            </div>
+        }
+        else
+        {
+            <div class="grid-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Employee</th>
+                            <th>Document Name</th>
+                            <th>Type</th>
+                            <th>Effective</th>
+                            <th>Expiration</th>
+                            <th>Status</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var doc in FilteredDocs)
+                        {
+                            <tr>
+                                <td>
+                                    @if (doc.EmploymentId.HasValue)
+                                    {
+                                        <a href="/hris/employees/@doc.EmploymentId" class="link">
+                                            @EmployeeName(doc.EmploymentId)
+                                        </a>
+                                    }
+                                    else
+                                    {
+                                        <span>@PersonName(doc.PersonId)</span>
+                                    }
+                                </td>
+                                <td>@doc.DocumentName</td>
+                                <td>@DocTypeLabel(doc.DocumentTypeId)</td>
+                                <td>@doc.EffectiveDate.ToString("yyyy-MM-dd")</td>
+                                <td class="@ExpirationClass(doc.ExpirationDate)">
+                                    @(doc.ExpirationDate?.ToString("yyyy-MM-dd") ?? "—")
+                                </td>
+                                <td>
+                                    <span class="status-badge @ExpirationBadgeClass(doc.ExpirationDate)">
+                                        @ExpirationLabel(doc.ExpirationDate)
+                                    </span>
+                                </td>
+                                <td>
+                                    <a href="/api/documents/@doc.DocumentId/content"
+                                       class="btn-secondary btn-xs" target="_blank">Download</a>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    }
+
+</div>
+
+@code {
+    private bool                       _loading       = true;
+    private List<HrDocument>           _allDocs       = [];
+    private Dictionary<Guid, string>   _employeeNames = [];
+    private Dictionary<Guid, string>   _personNames   = [];
+    private IReadOnlyList<LookupEntry> _docTypes      = [];
+    private Dictionary<int, string>    _docTypeLabels = [];
+
+    private string _nameFilter   = "";
+    private string _typeFilter   = "";
+    private string _statusFilter = "";
+
+    private List<HrDocument> FilteredDocs
+    {
+        get
+        {
+            var today = DateOnly.FromDateTime(DateTime.UtcNow);
+            return _allDocs.Where(d =>
+            {
+                if (!string.IsNullOrWhiteSpace(_nameFilter))
+                {
+                    var name = d.EmploymentId.HasValue
+                        ? EmployeeName(d.EmploymentId)
+                        : PersonName(d.PersonId);
+                    if (!name.Contains(_nameFilter, StringComparison.OrdinalIgnoreCase))
+                        return false;
+                }
+                if (!string.IsNullOrEmpty(_typeFilter) &&
+                    int.TryParse(_typeFilter, out var typeId) &&
+                    d.DocumentTypeId != typeId)
+                    return false;
+                if (!string.IsNullOrWhiteSpace(_statusFilter))
+                {
+                    return _statusFilter switch
+                    {
+                        "expired"    => IsExpired(d),
+                        "expiring30" => IsExpiring30(d),
+                        "expiring90" => IsExpiring90(d),
+                        _            => true
+                    };
+                }
+                return true;
+            })
+            .OrderBy(d => d.ExpirationDate)
+            .ToList();
+        }
+    }
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            _docTypes      = LookupCache.GetAll(LookupTables.DocumentType);
+            _docTypeLabels = _docTypes.ToDictionary(e => e.Id, e => e.Label);
+
+            var today = DateOnly.FromDateTime(DateTime.UtcNow);
+            var expiredTask   = DocumentRepository.GetExpiredAsOfAsync(today);
+            var expiring90Task = DocumentRepository.GetExpiringWithinAsync(90);
+            await Task.WhenAll(expiredTask, expiring90Task);
+
+            _allDocs = (await expiredTask)
+                .Concat(await expiring90Task)
+                .DistinctBy(d => d.DocumentId)
+                .ToList();
+
+            var empIds = _allDocs
+                .Where(d => d.EmploymentId.HasValue)
+                .Select(d => d.EmploymentId!.Value)
+                .Distinct();
+            _employeeNames = await PersonService.GetNamesByEmploymentIdsAsync(empIds);
+
+            // Person-level docs (no employment link) — look up by person_id
+            var personOnlyIds = _allDocs
+                .Where(d => !d.EmploymentId.HasValue)
+                .Select(d => d.PersonId)
+                .Distinct()
+                .ToList();
+            if (personOnlyIds.Count > 0)
+                _personNames = await PersonService.GetNamesByPersonIdsAsync(personOnlyIds);
+        }
+        finally { _loading = false; }
+    }
+
+    private void ClearFilters()
+    {
+        _nameFilter   = "";
+        _typeFilter   = "";
+        _statusFilter = "";
+    }
+
+    private string EmployeeName(Guid? employmentId)
+    {
+        if (employmentId is null) return "—";
+        return _employeeNames.TryGetValue(employmentId.Value, out var n) ? n : "—";
+    }
+
+    private string PersonName(Guid personId)
+        => _personNames.TryGetValue(personId, out var n) ? n : "—";
+
+    private string DocTypeLabel(int typeId)
+        => _docTypeLabels.TryGetValue(typeId, out var l) ? l : typeId.ToString();
+
+    private static bool IsExpired(HrDocument d)
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        return d.ExpirationDate.HasValue && d.ExpirationDate.Value <= today;
+    }
+
+    private static bool IsExpiring30(HrDocument d)
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        return d.ExpirationDate.HasValue
+            && d.ExpirationDate.Value > today
+            && d.ExpirationDate.Value <= today.AddDays(30);
+    }
+
+    private static bool IsExpiring90(HrDocument d)
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        return d.ExpirationDate.HasValue
+            && d.ExpirationDate.Value > today.AddDays(30)
+            && d.ExpirationDate.Value <= today.AddDays(90);
+    }
+
+    private static string ExpirationClass(DateOnly? exp)
+    {
+        if (exp is null) return "";
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        if (exp.Value <= today)              return "cell-expired";
+        if (exp.Value <= today.AddDays(30))  return "cell-warn30";
+        return "cell-warn90";
+    }
+
+    private static string ExpirationBadgeClass(DateOnly? exp)
+    {
+        if (exp is null) return "badge-neutral";
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        if (exp.Value <= today)              return "badge-expired";
+        if (exp.Value <= today.AddDays(30))  return "badge-warn30";
+        return "badge-warn90";
+    }
+
+    private static string ExpirationLabel(DateOnly? exp)
+    {
+        if (exp is null) return "No expiry";
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var days  = exp.Value.DayNumber - today.DayNumber;
+        if (days <= 0)  return $"Expired {-days}d ago";
+        if (days <= 30) return $"Expires in {days}d";
+        return $"Expires in {days}d";
+    }
+}
+
+<style>
+    .page-container { padding: var(--space-6); }
+
+    .page-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: var(--space-6);
+    }
+
+    .page-title {
+        font-size: var(--font-size-lg);
+        font-weight: var(--font-weight-semibold);
+        color: var(--aw-navy);
+        margin: 0;
+    }
+
+    /* ── Stat cards ── */
+    .stat-cards { display: flex; gap: var(--space-4); margin-bottom: var(--space-6); flex-wrap: wrap; }
+
+    .stat-card {
+        background: white;
+        border-radius: var(--radius-lg);
+        padding: var(--space-4) var(--space-6);
+        box-shadow: var(--shadow-sm);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-1);
+        min-width: 160px;
+    }
+
+    .stat-card-expired  { border-left: 3px solid #DC2626; }
+    .stat-card-warn30   { border-left: 3px solid #D97706; }
+    .stat-card-warn90   { border-left: 3px solid #CA8A04; }
+
+    .stat-label { font-size: var(--font-size-sm); color: #6B7280; font-weight: var(--font-weight-medium); }
+    .stat-value { font-size: 1.5rem; font-weight: var(--font-weight-semibold); color: var(--aw-navy); }
+
+    /* ── Filters ── */
+    .filter-row {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        flex-wrap: wrap;
+        margin-bottom: var(--space-6);
+    }
+
+    .filter-input  { padding: var(--space-2) var(--space-3); border: 1px solid #D1D5DB; border-radius: var(--radius-md); font-size: var(--font-size-sm); width: 220px; }
+    .filter-select { padding: var(--space-2) var(--space-3); border: 1px solid #D1D5DB; border-radius: var(--radius-md); font-size: var(--font-size-sm); background: white; }
+
+    /* ── Table ── */
+    .grid-container {
+        background: white;
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-sm);
+        overflow: hidden;
+    }
+
+    .data-table { width: 100%; border-collapse: collapse; font-size: var(--font-size-sm); }
+
+    .data-table th {
+        background: #F9FAFB;
+        padding: var(--space-3) var(--space-4);
+        text-align: left;
+        font-weight: var(--font-weight-medium);
+        color: #6B7280;
+        border-bottom: 1px solid #E5E7EB;
+        white-space: nowrap;
+    }
+
+    .data-table td {
+        padding: var(--space-3) var(--space-4);
+        border-bottom: 1px solid #F3F4F6;
+        color: var(--aw-navy);
+        vertical-align: middle;
+    }
+
+    .data-table tr:last-child td { border-bottom: none; }
+    .data-table tbody tr:hover td { background: #F9FAFB; }
+
+    /* ── Cell states ── */
+    .cell-expired { color: #DC2626; font-weight: var(--font-weight-medium); }
+    .cell-warn30  { color: #D97706; font-weight: var(--font-weight-medium); }
+    .cell-warn90  { color: #CA8A04; }
+
+    /* ── Status badges ── */
+    .status-badge {
+        display: inline-block;
+        padding: 2px var(--space-2);
+        border-radius: var(--radius-sm);
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-medium);
+        white-space: nowrap;
+    }
+
+    .badge-expired  { background: #FEE2E2; color: #991B1B; }
+    .badge-warn30   { background: #FEF3C7; color: #92400E; }
+    .badge-warn90   { background: #FEF9C3; color: #854D0E; }
+    .badge-neutral  { background: #F3F4F6; color: #6B7280; }
+
+    /* ── Misc ── */
+    .loading-text { padding: var(--space-6); color: #6B7280; text-align: center; }
+
+    .empty-state {
+        background: white;
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-sm);
+        padding: var(--space-10);
+        text-align: center;
+        color: #6B7280;
+    }
+
+    .link { color: var(--aw-teal); text-decoration: none; font-weight: var(--font-weight-medium); }
+    .link:hover { text-decoration: underline; }
+
+    /* ── Buttons ── */
+    .btn-secondary {
+        background: white; color: var(--aw-navy); border: 1px solid #D1D5DB;
+        border-radius: var(--radius-md); padding: var(--space-2) var(--space-3);
+        font-size: var(--font-size-sm); font-weight: var(--font-weight-medium);
+        cursor: pointer; text-decoration: none; display: inline-block;
+    }
+    .btn-secondary:hover { background: #F9FAFB; }
+    .btn-sm { padding: var(--space-1) var(--space-2) !important; }
+    .btn-xs { padding: 2px var(--space-2) !important; font-size: var(--font-size-sm) !important; }
+</style>

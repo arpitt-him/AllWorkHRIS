@@ -1,0 +1,615 @@
+@page "/hris/jobs"
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = "HrisViewer,HrisAdmin")]
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using AllWorkHRIS.Core.Lookups
+@using AllWorkHRIS.Host.Hris.Commands
+@using AllWorkHRIS.Host.Hris.Services
+@using AllWorkHRIS.Host.Hris.Domain
+@inject IJobService           JobService
+@inject IPositionService      PositionService
+@inject IOrgStructureService  OrgStructureService
+@inject ILookupCache          LookupCache
+
+<PageTitle>Jobs & Positions — AllWork HRIS</PageTitle>
+
+<div class="page-container">
+
+    <div class="page-header">
+        <h2 class="page-title">Jobs & Positions</h2>
+    </div>
+
+    @* ── STAT CARDS ── *@
+    <div class="stat-cards">
+        <div class="stat-card">
+            <span class="stat-label">Active Jobs</span>
+            <span class="stat-value">@_jobs.Count</span>
+        </div>
+        <div class="stat-card">
+            <span class="stat-label">Active Positions</span>
+            <span class="stat-value">@_positions.Count</span>
+        </div>
+    </div>
+
+    @* ══════════════════════════════════════════════════════════ *@
+    @* JOBS SECTION                                               *@
+    @* ══════════════════════════════════════════════════════════ *@
+
+    <div class="section-header-row" style="margin-bottom: var(--space-3);">
+        <h3 class="section-heading">Jobs</h3>
+        <AuthorizeView Roles="HrisAdmin">
+            <Authorized>
+                <button class="@(_showJobForm ? "btn-secondary btn-sm" : "btn-primary btn-sm")"
+                        @onclick="() => _showJobForm = !_showJobForm">
+                    @(_showJobForm ? "Cancel" : "+ Add Job")
+                </button>
+            </Authorized>
+        </AuthorizeView>
+    </div>
+
+    <AuthorizeView Roles="HrisAdmin">
+        <Authorized>
+            @if (_showJobForm)
+            {
+                <div class="form-panel">
+                    <div class="form-grid">
+                        <div class="form-field">
+                            <label class="form-label">Job Code <span class="required">*</span></label>
+                            <input type="text" class="form-input" @bind="_jobCode"
+                                   placeholder="e.g. JOB-ACCT" maxlength="50" />
+                        </div>
+                        <div class="form-field">
+                            <label class="form-label">Job Title <span class="required">*</span></label>
+                            <input type="text" class="form-input" @bind="_jobTitle"
+                                   placeholder="e.g. Staff Accountant" maxlength="200" />
+                        </div>
+                        <div class="form-field">
+                            <label class="form-label">Job Family</label>
+                            <input type="text" class="form-input" @bind="_jobFamily"
+                                   placeholder="e.g. Finance" maxlength="100" />
+                        </div>
+                        <div class="form-field">
+                            <label class="form-label">Job Level</label>
+                            <input type="text" class="form-input" @bind="_jobLevel"
+                                   placeholder="e.g. Individual Contributor" maxlength="100" />
+                        </div>
+                        <div class="form-field">
+                            <label class="form-label">FLSA Classification <span class="required">*</span></label>
+                            <select class="form-select" @bind="_jobFlsaCode">
+                                <option value="">Select…</option>
+                                @foreach (var e in LookupCache.GetAll(LookupTables.FlsaClassification))
+                                {
+                                    <option value="@e.Code">@e.Label</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="form-field">
+                            <label class="form-label">EEO Category <span class="required">*</span></label>
+                            <select class="form-select" @bind="_jobEeoCode">
+                                <option value="">Select…</option>
+                                @foreach (var e in LookupCache.GetAll(LookupTables.EeoCategory))
+                                {
+                                    <option value="@e.Code">@e.Label</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="form-field">
+                            <label class="form-label">Effective Date <span class="required">*</span></label>
+                            <input type="date" class="form-input" @bind="_jobEffectiveDate" />
+                        </div>
+                    </div>
+                    @if (_jobError is not null)
+                    {
+                        <p class="form-error">@_jobError</p>
+                    }
+                    <div class="form-actions">
+                        <button class="btn-primary" @onclick="CreateJobAsync"
+                                disabled="@_jobSaving">
+                            @(_jobSaving ? "Saving…" : "Create Job")
+                        </button>
+                        <button class="btn-secondary"
+                                @onclick="() => _showJobForm = false">Cancel</button>
+                    </div>
+                </div>
+            }
+        </Authorized>
+    </AuthorizeView>
+
+    <div class="grid-container">
+        @if (_loading)
+        {
+            <p class="loading-text">Loading jobs...</p>
+        }
+        else if (_jobs.Count == 0)
+        {
+            <div class="empty-state"><p>No active jobs found.</p></div>
+        }
+        else
+        {
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Code</th>
+                        <th>Title</th>
+                        <th>Family</th>
+                        <th>Level</th>
+                        <th>FLSA Classification</th>
+                        <th>EEO Category</th>
+                        <th>Effective Date</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var job in _jobs)
+                    {
+                        <tr>
+                            <td class="mono">@job.JobCode</td>
+                            <td>@job.JobTitle</td>
+                            <td>@(job.JobFamily ?? "—")</td>
+                            <td>@(job.JobLevel ?? "—")</td>
+                            <td>@Label(LookupTables.FlsaClassification, job.FlsaClassificationId)</td>
+                            <td>@Label(LookupTables.EeoCategory, job.EeoCategoryId)</td>
+                            <td>@job.EffectiveStartDate.ToString("yyyy-MM-dd")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+
+    @* ══════════════════════════════════════════════════════════ *@
+    @* POSITIONS SECTION                                          *@
+    @* ══════════════════════════════════════════════════════════ *@
+
+    <div class="section-header-row" style="margin-top: var(--space-8); margin-bottom: var(--space-3);">
+        <h3 class="section-heading">Positions</h3>
+        <AuthorizeView Roles="HrisAdmin">
+            <Authorized>
+                <button class="@(_showPositionForm ? "btn-secondary btn-sm" : "btn-primary btn-sm")"
+                        @onclick="() => _showPositionForm = !_showPositionForm"
+                        disabled="@(_jobs.Count == 0)">
+                    @(_showPositionForm ? "Cancel" : "+ Add Position")
+                </button>
+            </Authorized>
+        </AuthorizeView>
+    </div>
+
+    <AuthorizeView Roles="HrisAdmin">
+        <Authorized>
+            @if (_showPositionForm)
+            {
+                <div class="form-panel">
+                    <div class="form-grid">
+                        <div class="form-field">
+                            <label class="form-label">Job <span class="required">*</span></label>
+                            <select class="form-select" @bind="_posJobId">
+                                <option value="">Select job…</option>
+                                @foreach (var job in _jobs)
+                                {
+                                    <option value="@job.JobId">@job.JobTitle (@job.JobCode)</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="form-field">
+                            <label class="form-label">Department <span class="required">*</span></label>
+                            <select class="form-select" @bind="_posDeptId">
+                                <option value="">Select department…</option>
+                                @foreach (var dept in _departments)
+                                {
+                                    <option value="@dept.OrgUnitId">@dept.OrgUnitName</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="form-field">
+                            <label class="form-label">Position Title (optional)</label>
+                            <input type="text" class="form-input" @bind="_posTitle"
+                                   placeholder="Leave blank to use job title" maxlength="200" />
+                        </div>
+                        <div class="form-field">
+                            <label class="form-label">Headcount Budget</label>
+                            <input type="number" class="form-input" @bind="_posHeadcount"
+                                   min="1" max="999" placeholder="e.g. 2" />
+                        </div>
+                        <div class="form-field">
+                            <label class="form-label">Effective Date <span class="required">*</span></label>
+                            <input type="date" class="form-input" @bind="_posEffectiveDate" />
+                        </div>
+                    </div>
+                    @if (_posError is not null)
+                    {
+                        <p class="form-error">@_posError</p>
+                    }
+                    <div class="form-actions">
+                        <button class="btn-primary" @onclick="CreatePositionAsync"
+                                disabled="@_posSaving">
+                            @(_posSaving ? "Saving…" : "Create Position")
+                        </button>
+                        <button class="btn-secondary"
+                                @onclick="() => _showPositionForm = false">Cancel</button>
+                    </div>
+                </div>
+            }
+        </Authorized>
+    </AuthorizeView>
+
+    <div class="grid-container">
+        @if (_loading)
+        {
+            <p class="loading-text">Loading positions...</p>
+        }
+        else if (_positions.Count == 0)
+        {
+            <div class="empty-state"><p>No positions defined yet.</p></div>
+        }
+        else
+        {
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Job</th>
+                        <th>Department</th>
+                        <th>Position Title</th>
+                        <th>Headcount Budget</th>
+                        <th>Status</th>
+                        <th>Effective Date</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var pos in _positions)
+                    {
+                        <tr>
+                            <td>@JobTitle(pos.JobId)</td>
+                            <td>@DeptName(pos.OrgUnitId)</td>
+                            <td>@(pos.PositionTitle ?? "—")</td>
+                            <td>@(pos.HeadcountBudget?.ToString() ?? "—")</td>
+                            <td>
+                                <span class="status-badge status-@StatusCode(LookupTables.PositionStatus, pos.PositionStatusId)">
+                                    @Label(LookupTables.PositionStatus, pos.PositionStatusId)
+                                </span>
+                            </td>
+                            <td>@pos.EffectiveStartDate.ToString("yyyy-MM-dd")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+
+</div>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState> AuthStateTask { get; set; } = default!;
+
+    private bool          _loading  = true;
+    private List<Job>     _jobs     = [];
+    private List<Position> _positions = [];
+    private List<OrgUnit>  _departments = [];
+
+    // Job form
+    private bool     _showJobForm    = false;
+    private string   _jobCode        = "";
+    private string   _jobTitle       = "";
+    private string   _jobFamily      = "";
+    private string   _jobLevel       = "";
+    private string   _jobFlsaCode    = "";
+    private string   _jobEeoCode     = "";
+    private DateTime _jobEffectiveDate = DateTime.Today;
+    private string?  _jobError;
+    private bool     _jobSaving      = false;
+
+    // Position form
+    private bool     _showPositionForm = false;
+    private string   _posJobId        = "";
+    private string   _posDeptId       = "";
+    private string   _posTitle        = "";
+    private int?     _posHeadcount;
+    private DateTime _posEffectiveDate = DateTime.Today;
+    private string?  _posError;
+    private bool     _posSaving       = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var jobsTask  = JobService.GetAllActiveAsync();
+            var posTask   = PositionService.GetAllActiveAsync();
+            var deptTask  = OrgStructureService.GetDepartmentsAsync();
+            await Task.WhenAll(jobsTask, posTask, deptTask);
+            _jobs        = (await jobsTask).ToList();
+            _positions   = (await posTask).ToList();
+            _departments = (await deptTask).ToList();
+        }
+        finally { _loading = false; }
+    }
+
+    private async Task CreateJobAsync()
+    {
+        _jobError = null;
+        if (string.IsNullOrWhiteSpace(_jobCode))    { _jobError = "Job Code is required.";           return; }
+        if (string.IsNullOrWhiteSpace(_jobTitle))   { _jobError = "Job Title is required.";          return; }
+        if (string.IsNullOrWhiteSpace(_jobFlsaCode)){ _jobError = "FLSA Classification is required."; return; }
+        if (string.IsNullOrWhiteSpace(_jobEeoCode)) { _jobError = "EEO Category is required.";       return; }
+
+        _jobSaving = true;
+        try
+        {
+            var command = new CreateJobCommand
+            {
+                JobCode               = _jobCode,
+                JobTitle              = _jobTitle,
+                JobFamily             = _jobFamily,
+                JobLevel              = _jobLevel,
+                FlsaClassificationCode = _jobFlsaCode,
+                EeoCategoryCode       = _jobEeoCode,
+                EffectiveStartDate    = DateOnly.FromDateTime(_jobEffectiveDate),
+                InitiatedBy           = await GetCurrentUserIdAsync()
+            };
+            await JobService.CreateJobAsync(command);
+
+            _showJobForm = false;
+            _jobCode = _jobTitle = _jobFamily = _jobLevel = _jobFlsaCode = _jobEeoCode = "";
+            _jobs = (await JobService.GetAllActiveAsync()).ToList();
+        }
+        catch (Exception ex) { _jobError = ex.Message; }
+        finally { _jobSaving = false; }
+    }
+
+    private async Task CreatePositionAsync()
+    {
+        _posError = null;
+        if (!Guid.TryParse(_posJobId, out var jobId))   { _posError = "Job is required.";        return; }
+        if (!Guid.TryParse(_posDeptId, out var deptId)) { _posError = "Department is required."; return; }
+
+        _posSaving = true;
+        try
+        {
+            var command = new CreatePositionCommand
+            {
+                JobId              = jobId,
+                OrgUnitId          = deptId,
+                PositionTitle      = _posTitle,
+                HeadcountBudget    = _posHeadcount,
+                EffectiveStartDate = DateOnly.FromDateTime(_posEffectiveDate),
+                InitiatedBy        = await GetCurrentUserIdAsync()
+            };
+            await PositionService.CreatePositionAsync(command);
+
+            _showPositionForm = false;
+            _posJobId = _posDeptId = _posTitle = "";
+            _posHeadcount = null;
+            _positions = (await PositionService.GetAllActiveAsync()).ToList();
+        }
+        catch (Exception ex) { _posError = ex.Message; }
+        finally { _posSaving = false; }
+    }
+
+    private async Task<Guid> GetCurrentUserIdAsync()
+    {
+        var state = await AuthStateTask;
+        var sub   = state.User.FindFirst("sub")?.Value;
+        return Guid.TryParse(sub, out var id) ? id : Guid.Empty;
+    }
+
+    private string Label(string table, int id)
+        => LookupCache.GetAll(table).FirstOrDefault(e => e.Id == id)?.Label ?? "—";
+
+    private string StatusCode(string table, int id)
+        => LookupCache.GetCode(table, id).ToLower();
+
+    private string JobTitle(Guid jobId)
+    {
+        var job = _jobs.FirstOrDefault(j => j.JobId == jobId);
+        return job is not null ? $"{job.JobTitle} ({job.JobCode})" : "—";
+    }
+
+    private string DeptName(Guid orgUnitId)
+        => _departments.FirstOrDefault(d => d.OrgUnitId == orgUnitId)?.OrgUnitName ?? "—";
+}
+
+<style>
+    .page-container { padding: var(--space-6); }
+
+    .page-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: var(--space-6);
+    }
+
+    .page-title {
+        font-size: var(--font-size-lg);
+        font-weight: var(--font-weight-semibold);
+        color: var(--aw-navy);
+        margin: 0;
+    }
+
+    .section-heading {
+        font-size: var(--font-size-base);
+        font-weight: var(--font-weight-semibold);
+        color: var(--aw-navy);
+        margin: 0;
+    }
+
+    .section-header-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }
+
+    /* ---- Stat cards ---- */
+
+    .stat-cards {
+        display: flex;
+        gap: var(--space-4);
+        margin-bottom: var(--space-6);
+    }
+
+    .stat-card {
+        background: white;
+        border-radius: var(--radius-lg);
+        padding: var(--space-4) var(--space-6);
+        box-shadow: var(--shadow-sm);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-1);
+        min-width: 120px;
+    }
+
+    .stat-label {
+        font-size: var(--font-size-sm);
+        color: #6B7280;
+        font-weight: var(--font-weight-medium);
+    }
+
+    .stat-value {
+        font-size: 1.5rem;
+        font-weight: var(--font-weight-semibold);
+        color: var(--aw-navy);
+    }
+
+    /* ---- Grid container ---- */
+
+    .grid-container {
+        background: white;
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-sm);
+        overflow: hidden;
+        margin-bottom: var(--space-4);
+    }
+
+    .loading-text {
+        padding: var(--space-6);
+        color: #6B7280;
+        text-align: center;
+    }
+
+    .empty-state {
+        padding: var(--space-8);
+        text-align: center;
+        color: #6B7280;
+    }
+
+    /* ---- Data table ---- */
+
+    .data-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: var(--font-size-sm);
+    }
+
+    .data-table th {
+        background: #F9FAFB;
+        padding: var(--space-3) var(--space-4);
+        text-align: left;
+        font-weight: var(--font-weight-medium);
+        color: #6B7280;
+        border-bottom: 1px solid #E5E7EB;
+        white-space: nowrap;
+    }
+
+    .data-table td {
+        padding: var(--space-3) var(--space-4);
+        border-bottom: 1px solid #F3F4F6;
+        color: var(--aw-navy);
+    }
+
+    .data-table tr:last-child td { border-bottom: none; }
+    .data-table tbody tr:hover td { background: #F9FAFB; }
+
+    .mono {
+        font-family: monospace;
+        font-size: var(--font-size-sm);
+    }
+
+    /* ---- Status badges ---- */
+
+    .status-badge {
+        display: inline-block;
+        padding: 2px var(--space-2);
+        border-radius: var(--radius-sm);
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-medium);
+    }
+
+    .status-open      { background: #D1FAE5; color: #065F46; }
+    .status-filled    { background: #DBEAFE; color: #1E40AF; }
+    .status-frozen    { background: #FEF3C7; color: #92400E; }
+    .status-abolished { background: #F3F4F6; color: #6B7280; }
+
+    /* ---- Form panel ---- */
+
+    .form-panel {
+        background: #F9FAFB;
+        border: 1px solid #E5E7EB;
+        border-radius: var(--radius-lg);
+        padding: var(--space-4);
+        margin-bottom: var(--space-4);
+    }
+
+    .form-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+        gap: var(--space-3);
+        margin-bottom: var(--space-3);
+    }
+
+    .form-field { display: flex; flex-direction: column; gap: var(--space-1); }
+
+    .form-label {
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-medium);
+        color: #374151;
+    }
+
+    .required { color: #DC2626; }
+
+    .form-input, .form-select {
+        padding: var(--space-2);
+        border: 1px solid #D1D5DB;
+        border-radius: var(--radius-md);
+        font-size: var(--font-size-sm);
+        color: var(--aw-navy);
+        background: white;
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    .form-input:focus, .form-select:focus {
+        outline: none;
+        border-color: var(--aw-teal);
+    }
+
+    .form-error { color: #DC2626; font-size: var(--font-size-sm); margin: var(--space-2) 0; }
+    .form-actions { display: flex; gap: var(--space-2); margin-top: var(--space-2); }
+
+    /* ---- Buttons ---- */
+
+    .btn-primary {
+        background: var(--aw-teal);
+        color: white;
+        border: none;
+        border-radius: var(--radius-md);
+        padding: var(--space-2) var(--space-3);
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-medium);
+        cursor: pointer;
+    }
+
+    .btn-primary:hover:not(:disabled) { opacity: 0.9; }
+    .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+
+    .btn-secondary {
+        background: white;
+        color: var(--aw-navy);
+        border: 1px solid #D1D5DB;
+        border-radius: var(--radius-md);
+        padding: var(--space-2) var(--space-3);
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-medium);
+        cursor: pointer;
+    }
+
+    .btn-secondary:hover:not(:disabled) { background: #F9FAFB; }
+    .btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-sm { padding: var(--space-1) var(--space-2) !important; }
+</style>

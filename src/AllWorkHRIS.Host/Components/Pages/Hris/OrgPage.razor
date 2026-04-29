@@ -2,9 +2,12 @@
 @rendermode InteractiveServer
 @attribute [Authorize(Roles = "HrisViewer,HrisAdmin")]
 @using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
 @using AllWorkHRIS.Core.Lookups
+@using AllWorkHRIS.Host.Hris.Commands
 @using AllWorkHRIS.Host.Hris.Services
 @using AllWorkHRIS.Host.Hris.Domain
+@using AllWorkHRIS.Host.Hris.Queries
 @inject IOrgStructureService OrgStructureService
 @inject ILookupCache LookupCache
 
@@ -20,6 +23,51 @@
             </Authorized>
         </AuthorizeView>
     </div>
+
+    @* Legal entity context selector *@
+    <div class="entity-selector-bar">
+        <label class="entity-selector-label">Legal Entity</label>
+        <div class="entity-tabs">
+            @if (!_legalEntities.Any())
+            {
+                <span class="entity-none">No legal entities found. Add one using + Add Org Unit.</span>
+            }
+            else if (_legalEntities.Count <= 8)
+            {
+                @foreach (var le in _legalEntities)
+                {
+                    <button class="entity-tab @(_selectedLegalEntityId == le.OrgUnitId ? "active" : "")"
+                            @onclick="async () => await SelectLegalEntityAsync(le.OrgUnitId)">
+                        @le.OrgUnitName
+                    </button>
+                }
+            }
+            else
+            {
+                <div class="entity-search-wrap">
+                    <input type="text" class="entity-search-input" placeholder="Search legal entities…"
+                           @bind="_entitySearchTerm" @bind:event="oninput" />
+                    <div class="entity-search-list">
+                        @foreach (var le in _legalEntities
+                            .Where(e => string.IsNullOrWhiteSpace(_entitySearchTerm) ||
+                                        e.OrgUnitName.Contains(_entitySearchTerm, StringComparison.OrdinalIgnoreCase))
+                            .OrderBy(e => e.OrgUnitName))
+                        {
+                            <button class="entity-search-item @(_selectedLegalEntityId == le.OrgUnitId ? "active" : "")"
+                                    @onclick="async () => await SelectLegalEntityAsync(le.OrgUnitId)">
+                                @le.OrgUnitName
+                            </button>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+
+    @if (_selectError is not null)
+    {
+        <p class="form-error" style="margin-bottom:var(--space-3)">Error loading org units: @_selectError</p>
+    }
 
     @* View toggle *@
     <div class="view-toggle">
@@ -37,13 +85,19 @@
     {
         <p class="loading-text">Loading organisation...</p>
     }
+    else if (_selectedLegalEntityId is null)
+    {
+        <div class="empty-state">
+            <p>Select a legal entity above to view its organisation structure.</p>
+        </div>
+    }
     else if (_activeView == "hierarchy")
     {
         <div class="org-tree-container">
             @if (!_orgUnits.Any())
             {
                 <div class="empty-state">
-                    <p>No org units found.</p>
+                    <p>No org units found for this legal entity.</p>
                     <AuthorizeView Roles="HrisAdmin">
                         <Authorized>
                             <p>Click <strong>+ Add Org Unit</strong> to create the first org unit.</p>
@@ -53,35 +107,50 @@
             }
             else
             {
-                @foreach (var root in RootUnits)
+                @foreach (var (unit, depth) in GetTreeOrder())
                 {
+                    var hasChildren = TreeUnits.Any(u => u.ParentOrgUnitId == unit.OrgUnitId);
+                    var isSelected  = _selectedNodeId == unit.OrgUnitId;
                     <div class="org-tree-node">
-                        <div class="org-node-header" @onclick="() => ToggleNode(root.OrgUnitId)">
-                            <span class="org-node-toggle">@(IsExpanded(root.OrgUnitId) ? "▾" : "▸")</span>
-                            <span class="org-type-badge">@LookupLabel(LookupTables.OrgUnitType, root.OrgUnitTypeId)</span>
-                            <span class="org-node-name">@root.OrgUnitName</span>
-                            <span class="org-node-code">@root.OrgUnitCode</span>
-                        </div>
-                        @if (IsExpanded(root.OrgUnitId))
-                        {
-                            <div class="org-node-children">
-                                @foreach (var child in ChildrenOf(root.OrgUnitId))
+                        <div class="org-node-header @(isSelected ? "selected" : "")"
+                             style="padding-left: calc(var(--space-3) + @(depth * 24)px)"
+                             @onclick="async () => await SelectNodeAsync(unit.OrgUnitId, unit.OrgUnitName)">
+                            <span class="org-node-toggle"
+                                  @onclick:stopPropagation
+                                  @onclick="() => { if (hasChildren) ToggleNode(unit.OrgUnitId); }">
+                                @if (hasChildren)
                                 {
-                                    <div class="org-tree-node org-tree-node--child">
-                                        <div class="org-node-header">
-                                            <span class="org-node-toggle">&nbsp;&nbsp;</span>
-                                            <span class="org-type-badge">@LookupLabel(LookupTables.OrgUnitType, child.OrgUnitTypeId)</span>
-                                            <span class="org-node-name">@child.OrgUnitName</span>
-                                            <span class="org-node-code">@child.OrgUnitCode</span>
-                                        </div>
-                                    </div>
+                                    @(IsExpanded(unit.OrgUnitId) ? "▾" : "▸")
                                 }
-                            </div>
-                        }
+                                else
+                                {
+                                    @("·")
+                                }
+                            </span>
+                            <span class="org-type-badge">@LookupLabel(LookupTables.OrgUnitType, unit.OrgUnitTypeId)</span>
+                            <span class="org-node-name">@unit.OrgUnitName</span>
+                            <span class="org-node-code">@unit.OrgUnitCode</span>
+                        </div>
                     </div>
                 }
             }
         </div>
+
+        @if (LocationUnits.Any())
+        {
+            <div class="locations-section">
+                <h4 class="locations-title">Locations</h4>
+                <div class="locations-list">
+                    @foreach (var loc in LocationUnits.OrderBy(l => l.OrgUnitName))
+                    {
+                        <div class="location-chip">
+                            <span class="location-chip-name">@loc.OrgUnitName</span>
+                            <span class="location-chip-code">@loc.OrgUnitCode</span>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
     }
     else
     {
@@ -89,7 +158,7 @@
             @if (!_orgUnits.Any())
             {
                 <div class="empty-state">
-                    <p>No org units found.</p>
+                    <p>No org units found for this legal entity.</p>
                 </div>
             }
             else
@@ -105,7 +174,7 @@
                         </tr>
                     </thead>
                     <tbody>
-                        @foreach (var unit in _orgUnits.OrderBy(u => u.OrgUnitTypeId).ThenBy(u => u.OrgUnitName))
+                        @foreach (var unit in TreeUnits.OrderBy(u => u.OrgUnitTypeId).ThenBy(u => u.OrgUnitName))
                         {
                             <tr>
                                 <td>@unit.OrgUnitName</td>
@@ -121,47 +190,265 @@
         </div>
     }
 
+    @* Workforce panel — shown when a hierarchy node is selected *@
+    @if (_selectedNodeId.HasValue)
+    {
+        <div class="workforce-panel">
+            <div class="workforce-panel-header">
+                <div>
+                    <span class="workforce-panel-title">@_selectedNodeName</span>
+                    <span class="workforce-panel-subtitle">Workforce Composition</span>
+                </div>
+                <button class="workforce-close" @onclick="() => { _selectedNodeId = null; _workforce = []; }">✕</button>
+            </div>
+
+            @if (_workforceLoading)
+            {
+                <p class="loading-text">Loading workforce...</p>
+            }
+            else if (!_workforce.Any())
+            {
+                <p class="loading-text">No active employees in this unit or its sub-units.</p>
+            }
+            else
+            {
+                @* Summary cards *@
+                var headcount  = _workforce.Count;
+                var fullTime   = _workforce.Count(w => w.FullPartTime == "FULL_TIME");
+                var partTime   = _workforce.Count(w => w.FullPartTime != "FULL_TIME");
+                var exempt     = _workforce.Count(w => w.FlsaStatus.StartsWith("EXEMPT"));
+                var nonExempt  = _workforce.Count(w => w.FlsaStatus   == "NON_EXEMPT");
+                var totalCost  = _workforce.Sum(w => w.AnnualEquivalent);
+
+                <div class="wf-summary">
+                    <div class="wf-card">
+                        <div class="wf-card-value">@headcount</div>
+                        <div class="wf-card-label">Headcount</div>
+                    </div>
+                    <div class="wf-card">
+                        <div class="wf-card-value">@fullTime <span class="wf-card-sub">FT</span> / @partTime <span class="wf-card-sub">PT</span></div>
+                        <div class="wf-card-label">Full / Part Time</div>
+                    </div>
+                    <div class="wf-card">
+                        <div class="wf-card-value">@exempt <span class="wf-card-sub">Ex</span> / @nonExempt <span class="wf-card-sub">NE</span></div>
+                        <div class="wf-card-label">FLSA Exempt / Non-Exempt</div>
+                    </div>
+                    <div class="wf-card wf-card-cost">
+                        <div class="wf-card-value">@totalCost.ToString("C0")</div>
+                        <div class="wf-card-label">Total Annualized Cost</div>
+                    </div>
+                </div>
+
+                @* Employee table *@
+                <table class="wf-table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>#</th>
+                            <th>Job Title</th>
+                            <th>Department</th>
+                            <th>FT/PT</th>
+                            <th>FLSA</th>
+                            <th>Annual Cost</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var emp in _workforce)
+                        {
+                            <tr>
+                                <td>@emp.LegalLastName, @(emp.PreferredName ?? emp.LegalFirstName)</td>
+                                <td class="mono">@emp.EmployeeNumber</td>
+                                <td>@emp.JobTitle</td>
+                                <td>@emp.DepartmentName</td>
+                                <td><span class="wf-badge wf-@emp.FullPartTime.ToLower()">@emp.FullPartTime.Replace("_"," ")</span></td>
+                                <td><span class="wf-badge wf-@emp.FlsaStatus.ToLower()">@emp.FlsaStatus.Replace("_"," ")</span></td>
+                                <td class="mono">@emp.AnnualEquivalent.ToString("C0")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+    }
+
 </div>
 
 @if (_showAddPanel)
 {
     <div class="panel-overlay" @onclick="CloseAddOrgUnitPanel">
         <div class="panel-content" @onclick:stopPropagation>
-            <p>Add Org Unit panel — implemented in Phase 2 completion.</p>
-            <button @onclick="CloseAddOrgUnitPanel">Close</button>
+            <h3 class="panel-title">Add Org Unit</h3>
+
+            <div class="panel-form">
+                <div class="form-field">
+                    <label class="form-label">Type</label>
+                    <select class="form-select"
+                            value="@_newUnitType"
+                            @onchange="e => _newUnitType = e.Value?.ToString() ?? string.Empty">
+                        <option value="" selected="@(_newUnitType == "")">Select type…</option>
+                        @foreach (var t in LookupCache.GetAll(LookupTables.OrgUnitType))
+                        {
+                            <option value="@t.Code" selected="@(_newUnitType == t.Code)">@t.Label</option>
+                        }
+                    </select>
+                </div>
+                <div class="form-field">
+                    <label class="form-label">Name</label>
+                    <input type="text" class="form-input" @bind="_newUnitName" placeholder="e.g. Engineering" />
+                </div>
+                <div class="form-field">
+                    <label class="form-label">Code</label>
+                    <input type="text" class="form-input" @bind="_newUnitCode"
+                           placeholder="e.g. ENG" maxlength="20" style="text-transform:uppercase" />
+                </div>
+                @if (_newUnitType != "LEGAL_ENTITY")
+                {
+                    <div class="form-field">
+                        <label class="form-label">Legal Entity</label>
+                        <select class="form-select"
+                                value="@_newLegalEntityIdStr"
+                                @onchange="e => _newLegalEntityIdStr = e.Value?.ToString() ?? string.Empty">
+                            <option value="" selected="@(_newLegalEntityIdStr == "")">— Select legal entity —</option>
+                            @foreach (var le in _legalEntities)
+                            {
+                                <option value="@le.OrgUnitId" selected="@(_newLegalEntityIdStr == le.OrgUnitId.ToString())">
+                                    @le.OrgUnitName
+                                </option>
+                            }
+                        </select>
+                    </div>
+                    <div class="form-field">
+                        <label class="form-label">Parent Org Unit (optional)</label>
+                        <select class="form-select"
+                                value="@_newParentIdStr"
+                                @onchange="e => _newParentIdStr = e.Value?.ToString() ?? string.Empty">
+                            <option value="" selected="@(_newParentIdStr == "")">— None (top level) —</option>
+                            @foreach (var u in _orgUnits.OrderBy(u => u.OrgUnitName))
+                            {
+                                <option value="@u.OrgUnitId" selected="@(_newParentIdStr == u.OrgUnitId.ToString())">
+                                    @u.OrgUnitName (@LookupCode(LookupTables.OrgUnitType, u.OrgUnitTypeId).ToUpper())
+                                </option>
+                            }
+                        </select>
+                    </div>
+                }
+                <div class="form-field">
+                    <label class="form-label">Effective Start Date</label>
+                    <input type="date" class="form-input" @bind="_newEffectiveDt" />
+                </div>
+            </div>
+
+            @if (_addError is not null)
+            {
+                <p class="form-error">@_addError</p>
+            }
+
+            <div class="panel-actions">
+                <button class="btn-primary" @onclick="SaveOrgUnitAsync" disabled="@_saving">
+                    @(_saving ? "Saving…" : "Save")
+                </button>
+                <button class="btn-secondary" @onclick="CloseAddOrgUnitPanel">Cancel</button>
+            </div>
         </div>
     </div>
 }
 
 @code {
-    private bool              _loading     = true;
-    private string            _activeView  = "hierarchy";
-    private bool              _showAddPanel = false;
-    private List<OrgUnit>     _orgUnits    = [];
-    private HashSet<Guid>     _expanded    = [];
+    [CascadingParameter] private Task<AuthenticationState> AuthStateTask { get; set; } = default!;
+
+    private bool          _loading      = true;
+    private string        _activeView   = "hierarchy";
+    private bool          _showAddPanel = false;
+    private List<OrgUnit> _legalEntities = [];
+    private List<OrgUnit> _orgUnits      = [];
+
+    private int LocationTypeId => LookupCache.GetId(LookupTables.OrgUnitType, "LOCATION");
+    private IEnumerable<OrgUnit> TreeUnits     => _orgUnits.Where(u => u.OrgUnitTypeId != LocationTypeId);
+    private IEnumerable<OrgUnit> LocationUnits => _orgUnits.Where(u => u.OrgUnitTypeId == LocationTypeId);
+    private Guid?         _selectedLegalEntityId;
+    private HashSet<Guid> _expanded      = [];
+    private string?       _selectError;
+    private string        _entitySearchTerm  = "";
+    private Guid?         _selectedNodeId;
+    private string        _selectedNodeName  = "";
+    private List<OrgUnitEmployee> _workforce = [];
+    private bool          _workforceLoading  = false;
+
+    // Add panel state
+    private string   _newUnitType       = "";
+    private string   _newUnitName       = "";
+    private string   _newUnitCode       = "";
+    private string   _newLegalEntityIdStr = "";
+    private string   _newParentIdStr    = "";
+    private DateTime _newEffectiveDt    = DateTime.Today;
+    private string?  _addError;
+    private bool     _saving            = false;
 
     protected override async Task OnInitializedAsync()
     {
         _loading = true;
         try
         {
-            var units = await OrgStructureService.GetAllActiveAsync();
-            _orgUnits = units.ToList();
-            // Expand root nodes by default
-            foreach (var root in RootUnits)
-                _expanded.Add(root.OrgUnitId);
+            var entities = await OrgStructureService.GetLegalEntitiesAsync();
+            _legalEntities = entities.ToList();
+
+            if (_legalEntities.Count == 1)
+                await SelectLegalEntityAsync(_legalEntities[0].OrgUnitId);
+        }
+        finally { _loading = false; }
+    }
+
+    private async Task SelectNodeAsync(Guid nodeId, string nodeName)
+    {
+        _selectedNodeId   = nodeId;
+        _selectedNodeName = nodeName;
+        _expanded.Add(nodeId);
+        _workforceLoading = true;
+        _workforce        = [];
+        try
+        {
+            var result = await OrgStructureService.GetOrgUnitWorkforceAsync(nodeId);
+            _workforce = result.ToList();
+        }
+        catch (Exception ex)
+        {
+            _selectError = ex.Message;
         }
         finally
         {
-            _loading = false;
+            _workforceLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task SelectLegalEntityAsync(Guid legalEntityId)
+    {
+        _selectError      = null;
+        _selectedNodeId   = null;
+        _workforce        = [];
+        try
+        {
+            _selectedLegalEntityId = legalEntityId;
+            _expanded.Clear();
+
+            var units = await OrgStructureService.GetAllActiveAsync(legalEntityId);
+            _orgUnits = units.ToList();
+
+            foreach (var unit in _orgUnits)
+                _expanded.Add(unit.OrgUnitId);
+        }
+        catch (Exception ex)
+        {
+            _selectError = ex.Message;
+        }
+        finally
+        {
+            StateHasChanged();
         }
     }
 
     private IEnumerable<OrgUnit> RootUnits =>
         _orgUnits.Where(u => u.ParentOrgUnitId is null);
-
-    private IEnumerable<OrgUnit> ChildrenOf(Guid parentId) =>
-        _orgUnits.Where(u => u.ParentOrgUnitId == parentId);
 
     private bool IsExpanded(Guid id) => _expanded.Contains(id);
 
@@ -171,8 +458,85 @@
         else _expanded.Add(id);
     }
 
-    private void OpenAddOrgUnitPanel()  => _showAddPanel = true;
+    private IEnumerable<(OrgUnit Unit, int Depth)> GetTreeOrder()
+    {
+        var result = new List<(OrgUnit, int)>();
+        void Visit(Guid? parentId, int depth)
+        {
+            foreach (var unit in TreeUnits
+                .Where(u => u.ParentOrgUnitId == parentId)
+                .OrderBy(u => u.OrgUnitName))
+            {
+                result.Add((unit, depth));
+                if (_expanded.Contains(unit.OrgUnitId))
+                    Visit(unit.OrgUnitId, depth + 1);
+            }
+        }
+        Visit(null, 0);
+        return result;
+    }
+
+    private void OpenAddOrgUnitPanel()
+    {
+        _newUnitType = _newUnitName = _newUnitCode = _newParentIdStr = "";
+        _newLegalEntityIdStr = _selectedLegalEntityId?.ToString() ?? "";
+        _newEffectiveDt = DateTime.Today;
+        _addError = null;
+        _showAddPanel = true;
+    }
+
     private void CloseAddOrgUnitPanel() => _showAddPanel = false;
+
+    private async Task SaveOrgUnitAsync()
+    {
+        _addError = null;
+        if (string.IsNullOrWhiteSpace(_newUnitType)) { _addError = "Type is required."; return; }
+        if (string.IsNullOrWhiteSpace(_newUnitName)) { _addError = "Name is required."; return; }
+        if (string.IsNullOrWhiteSpace(_newUnitCode)) { _addError = "Code is required."; return; }
+        if (_newUnitType != "LEGAL_ENTITY" && string.IsNullOrWhiteSpace(_newLegalEntityIdStr))
+        {
+            _addError = "Legal entity is required."; return;
+        }
+
+        var parentId      = Guid.TryParse(_newParentIdStr,      out var pid) ? pid : (Guid?)null;
+        var legalEntityId = Guid.TryParse(_newLegalEntityIdStr, out var lid) ? lid : (Guid?)null;
+
+        _saving = true;
+        try
+        {
+            var state   = await AuthStateTask;
+            var sub     = state.User.FindFirst("sub")?.Value;
+            var actorId = Guid.TryParse(sub, out var g) ? g : Guid.Empty;
+
+            var command = new CreateOrgUnitCommand
+            {
+                OrgUnitTypeCode    = _newUnitType,
+                OrgUnitCode        = _newUnitCode.Trim().ToUpper(),
+                OrgUnitName        = _newUnitName.Trim(),
+                ParentOrgUnitId    = parentId,
+                LegalEntityId      = legalEntityId,
+                EffectiveStartDate = DateOnly.FromDateTime(_newEffectiveDt),
+                InitiatedBy        = actorId
+            };
+
+            var newId = await OrgStructureService.CreateOrgUnitAsync(command);
+            _showAddPanel = false;
+
+            // If a new legal entity was created, refresh the selector list
+            if (_newUnitType == "LEGAL_ENTITY")
+            {
+                var entities = await OrgStructureService.GetLegalEntitiesAsync();
+                _legalEntities = entities.ToList();
+                await SelectLegalEntityAsync(newId);
+            }
+            else if (_selectedLegalEntityId.HasValue)
+            {
+                await SelectLegalEntityAsync(_selectedLegalEntityId.Value);
+            }
+        }
+        catch (Exception ex) { _addError = ex.Message; }
+        finally { _saving = false; }
+    }
 
     private string LookupLabel(string tableName, int id)
         => LookupCache.GetAll(tableName).FirstOrDefault(e => e.Id == id)?.Label ?? id.ToString();
@@ -197,6 +561,102 @@
         color: var(--aw-navy);
         margin: 0;
     }
+
+    .entity-selector-bar {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        margin-bottom: var(--space-4);
+        padding: var(--space-3) var(--space-4);
+        background: white;
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-sm);
+    }
+
+    .entity-selector-label {
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-medium);
+        color: #6B7280;
+        white-space: nowrap;
+    }
+
+    .entity-tabs {
+        display: flex;
+        gap: var(--space-2);
+        flex-wrap: wrap;
+    }
+
+    .entity-tab {
+        padding: var(--space-1) var(--space-3);
+        border: 1px solid #E5E7EB;
+        border-radius: var(--radius-md);
+        background: white;
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-medium);
+        color: #374151;
+        cursor: pointer;
+        transition: all 0.15s;
+    }
+
+    .entity-tab:hover { border-color: var(--aw-teal); color: var(--aw-teal); }
+
+    .entity-tab.active {
+        background: var(--aw-teal);
+        border-color: var(--aw-teal);
+        color: white;
+    }
+
+    .entity-none {
+        font-size: var(--font-size-sm);
+        color: #9CA3AF;
+        font-style: italic;
+    }
+
+    .entity-search-wrap {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+        width: 280px;
+    }
+
+    .entity-search-input {
+        padding: var(--space-2) var(--space-3);
+        border: 1px solid #D1D5DB;
+        border-radius: var(--radius-md);
+        font-size: var(--font-size-sm);
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    .entity-search-input:focus {
+        outline: none;
+        border-color: var(--aw-teal);
+    }
+
+    .entity-search-list {
+        max-height: 200px;
+        overflow-y: auto;
+        border: 1px solid #E5E7EB;
+        border-radius: var(--radius-md);
+        background: white;
+    }
+
+    .entity-search-item {
+        display: block;
+        width: 100%;
+        padding: var(--space-2) var(--space-3);
+        border: none;
+        background: transparent;
+        text-align: left;
+        font-size: var(--font-size-sm);
+        color: #374151;
+        cursor: pointer;
+        border-bottom: 1px solid #F3F4F6;
+    }
+
+    .entity-search-item:last-child { border-bottom: none; }
+    .entity-search-item:hover { background: #F9FAFB; }
+    .entity-search-item.active { background: #EFF6FF; color: var(--aw-teal); font-weight: var(--font-weight-medium); }
 
     .view-toggle {
         display: flex;
@@ -223,6 +683,51 @@
         color: white;
     }
 
+    .locations-section {
+        margin-top: var(--space-4);
+        background: white;
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-sm);
+        padding: var(--space-4) var(--space-5);
+    }
+
+    .locations-title {
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-semibold);
+        color: #6B7280;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin: 0 0 var(--space-3) 0;
+    }
+
+    .locations-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-2);
+    }
+
+    .location-chip {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        background: #F0F9FF;
+        border: 1px solid #BAE6FD;
+        border-radius: var(--radius-md);
+        padding: var(--space-2) var(--space-3);
+    }
+
+    .location-chip-name {
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-medium);
+        color: var(--aw-navy);
+    }
+
+    .location-chip-code {
+        font-size: var(--font-size-xs, 0.75rem);
+        color: #6B7280;
+        font-family: monospace;
+    }
+
     .org-tree-container, .grid-container {
         background: white;
         border-radius: var(--radius-lg);
@@ -230,9 +735,7 @@
         padding: var(--space-4);
     }
 
-    .org-tree-node { margin-bottom: var(--space-2); }
-
-    .org-tree-node--child { margin-left: var(--space-8); }
+    .org-tree-node { margin-bottom: 2px; }
 
     .org-node-header {
         display: flex;
@@ -260,8 +763,6 @@
         font-size: var(--font-size-sm);
         color: #6B7280;
     }
-
-    .org-node-children { margin-top: var(--space-1); }
 
     .org-type-badge {
         background: #EFF6FF;
@@ -326,6 +827,20 @@
     }
 
     .btn-primary:hover { opacity: 0.9; }
+    .btn-primary:disabled { opacity: 0.5; cursor: default; }
+
+    .btn-secondary {
+        background: white;
+        color: #374151;
+        border: 1px solid #D1D5DB;
+        border-radius: var(--radius-md);
+        padding: var(--space-2) var(--space-4);
+        font-size: var(--font-size-base);
+        font-weight: var(--font-weight-medium);
+        cursor: pointer;
+    }
+
+    .btn-secondary:hover { background: #F9FAFB; }
 
     .panel-overlay {
         position: fixed;
@@ -341,6 +856,175 @@
         background: white;
         border-radius: var(--radius-lg);
         padding: var(--space-6);
-        min-width: 400px;
+        width: 480px;
+        max-width: calc(100vw - var(--space-8));
+        box-shadow: var(--shadow-lg);
     }
+
+    .panel-title {
+        font-size: var(--font-size-lg);
+        font-weight: var(--font-weight-semibold);
+        color: var(--aw-navy);
+        margin: 0 0 var(--space-5) 0;
+    }
+
+    .panel-form {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-3);
+        margin-bottom: var(--space-4);
+    }
+
+    .form-field { display: flex; flex-direction: column; gap: var(--space-1); }
+
+    .form-label {
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-medium);
+        color: #374151;
+    }
+
+    .form-input, .form-select {
+        padding: var(--space-2);
+        border: 1px solid #D1D5DB;
+        border-radius: var(--radius-md);
+        font-size: var(--font-size-sm);
+        color: var(--aw-navy);
+        background: white;
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    .form-input:focus, .form-select:focus {
+        outline: none;
+        border-color: var(--aw-teal);
+    }
+
+    .form-error { color: #DC2626; font-size: var(--font-size-sm); margin: var(--space-2) 0; }
+
+    .panel-actions { display: flex; gap: var(--space-2); margin-top: var(--space-2); }
+
+    /* Hierarchy node selection */
+    .org-node-header.selected { background: #EFF6FF; }
+    .org-node-header.selected .org-node-name { color: var(--aw-teal); }
+
+    /* Workforce panel */
+    .workforce-panel {
+        margin-top: var(--space-6);
+        background: white;
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-sm);
+        overflow: hidden;
+    }
+
+    .workforce-panel-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: var(--space-4) var(--space-5);
+        border-bottom: 1px solid #E5E7EB;
+        background: #F9FAFB;
+    }
+
+    .workforce-panel-title {
+        font-size: var(--font-size-base);
+        font-weight: var(--font-weight-semibold);
+        color: var(--aw-navy);
+        margin-right: var(--space-2);
+    }
+
+    .workforce-panel-subtitle {
+        font-size: var(--font-size-sm);
+        color: #6B7280;
+    }
+
+    .workforce-close {
+        background: none;
+        border: none;
+        color: #9CA3AF;
+        font-size: var(--font-size-base);
+        cursor: pointer;
+        padding: var(--space-1);
+        line-height: 1;
+    }
+
+    .workforce-close:hover { color: #374151; }
+
+    .wf-summary {
+        display: flex;
+        gap: 0;
+        border-bottom: 1px solid #E5E7EB;
+        margin-bottom: var(--space-5);
+    }
+
+    .wf-card {
+        flex: 1;
+        padding: var(--space-4) var(--space-5);
+        border-right: 1px solid #E5E7EB;
+        text-align: center;
+    }
+
+    .wf-card:last-child { border-right: none; }
+
+    .wf-card-cost { background: #F0FDF4; }
+
+    .wf-card-value {
+        font-size: var(--font-size-xl);
+        font-weight: var(--font-weight-semibold);
+        color: var(--aw-navy);
+    }
+
+    .wf-card-sub {
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-normal);
+        color: #6B7280;
+    }
+
+    .wf-card-label {
+        font-size: var(--font-size-xs, 0.75rem);
+        color: #9CA3AF;
+        margin-top: var(--space-1);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }
+
+    .wf-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: var(--font-size-sm);
+    }
+
+    .wf-table th {
+        background: #F9FAFB;
+        padding: var(--space-2) var(--space-4);
+        text-align: left;
+        font-weight: var(--font-weight-medium);
+        color: #6B7280;
+        font-size: var(--font-size-xs, 0.75rem);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        border-bottom: 1px solid #E5E7EB;
+    }
+
+    .wf-table td {
+        padding: var(--space-2) var(--space-4);
+        border-bottom: 1px solid #F3F4F6;
+        color: var(--aw-navy);
+    }
+
+    .wf-table tr:last-child td { border-bottom: none; }
+
+    .wf-badge {
+        padding: 1px var(--space-2);
+        border-radius: var(--radius-sm);
+        font-size: var(--font-size-xs, 0.75rem);
+        font-weight: var(--font-weight-medium);
+    }
+
+    .wf-full_time   { background: #DBEAFE; color: #1D4ED8; }
+    .wf-part_time   { background: #FEF3C7; color: #92400E; }
+    .wf-exempt      { background: #D1FAE5; color: #065F46; }
+    .wf-non_exempt  { background: #FEE2E2; color: #991B1B; }
+    .wf-unknown     { background: #F3F4F6; color: #6B7280; }
+
+    .mono { font-family: monospace; }
 </style>

@@ -52,6 +52,13 @@ public class HireEmployeeIntegrationTests : IDisposable
         var eventPublisher    = new InProcessEventBus();
         var temporalContext   = new SystemTemporalContext();
 
+        var workQueueRepo     = new WorkQueueRepository(_connectionFactory);
+        var workQueueService  = new WorkQueueService(workQueueRepo);
+        var onboardingRepo    = new OnboardingRepository(_connectionFactory);
+        var onboardingService = new OnboardingService(
+            _connectionFactory, onboardingRepo, workQueueService,
+            eventPublisher, _lookupCache);
+
         _employmentService = new EmploymentService(
             _connectionFactory,
             personRepo,
@@ -62,7 +69,8 @@ public class HireEmployeeIntegrationTests : IDisposable
             eventRepo,
             eventPublisher,
             temporalContext,
-            _lookupCache);
+            _lookupCache,
+            onboardingService);
     }
 
     // -----------------------------------------------------------------------

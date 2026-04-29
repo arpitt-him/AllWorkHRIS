@@ -7,6 +7,9 @@ public sealed record HireEmployeeCommand
     public required string   LegalLastName        { get; init; }
     public string?           LegalMiddleName      { get; init; }
     public string?           PreferredName        { get; init; }
+    public string?           Gender               { get; init; }
+    public string?           Pronouns             { get; init; }
+    public string?           MaritalStatus        { get; init; }
     public required DateOnly DateOfBirth          { get; init; }
     public required string   NationalIdentifier   { get; init; }
 
@@ -121,4 +124,124 @@ public sealed record ChangeManagerCommand
     public required DateOnly EffectiveDate          { get; init; }
     public required Guid     InitiatedBy            { get; init; }
     public string?           Notes                  { get; init; }
+}
+
+// ============================================================
+// LEAVE COMMANDS
+// ============================================================
+
+public sealed record SubmitLeaveRequestCommand
+{
+    public required Guid     EmploymentId    { get; init; }
+    public required string   LeaveType       { get; init; }
+    public required DateOnly LeaveStartDate  { get; init; }
+    public required DateOnly LeaveEndDate    { get; init; }
+    public required string   LeaveReasonCode { get; init; }
+    public required Guid     SubmittedBy     { get; init; }
+    public string?           Notes           { get; init; }
+}
+
+public sealed record ApproveLeaveRequestCommand
+{
+    public required Guid  LeaveRequestId { get; init; }
+    public required Guid  ApprovedBy     { get; init; }
+    public string?        Notes          { get; init; }
+}
+
+public sealed record DenyLeaveRequestCommand
+{
+    public required Guid  LeaveRequestId { get; init; }
+    public required Guid  DeniedBy       { get; init; }
+    public required string DenialReason  { get; init; }
+}
+
+public sealed record ReturnFromLeaveCommand
+{
+    public required Guid     EmploymentId { get; init; }
+    public required DateOnly ReturnDate   { get; init; }
+    public required Guid     InitiatedBy  { get; init; }
+}
+
+// ============================================================
+// DOCUMENT COMMANDS
+// ============================================================
+
+public sealed record UploadDocumentCommand
+{
+    public required Guid      PersonId      { get; init; }
+    public Guid?              EmploymentId  { get; init; }
+    public required string    DocumentType  { get; init; }
+    public required string    DocumentName  { get; init; }
+    public required Stream    FileContent   { get; init; }
+    public required string    FileFormat    { get; init; }
+    public required DateOnly  EffectiveDate { get; init; }
+    public DateOnly?          ExpirationDate { get; init; }
+    public required Guid      UploadedBy    { get; init; }
+}
+
+public sealed record VerifyDocumentCommand
+{
+    public required Guid DocumentId  { get; init; }
+    public required Guid VerifiedBy  { get; init; }
+}
+
+public sealed record ArchiveDocumentCommand
+{
+    public required Guid DocumentId  { get; init; }
+    public required Guid ArchivedBy  { get; init; }
+}
+
+// ============================================================
+// ORG STRUCTURE COMMANDS
+// ============================================================
+
+public sealed record CreateOrgUnitCommand
+{
+    public required string   OrgUnitTypeCode    { get; init; }
+    public required string   OrgUnitCode        { get; init; }
+    public required string   OrgUnitName        { get; init; }
+    public Guid?             ParentOrgUnitId    { get; init; }
+    public Guid?             LegalEntityId      { get; init; }
+    public required DateOnly EffectiveStartDate { get; init; }
+    public required Guid     InitiatedBy        { get; init; }
+}
+
+// ============================================================
+// JOB AND POSITION COMMANDS
+// ============================================================
+
+public sealed record CreateJobCommand
+{
+    public required string   JobCode              { get; init; }
+    public required string   JobTitle             { get; init; }
+    public string?           JobFamily            { get; init; }
+    public string?           JobLevel             { get; init; }
+    public required string   FlsaClassificationCode { get; init; }
+    public required string   EeoCategoryCode      { get; init; }
+    public required DateOnly EffectiveStartDate   { get; init; }
+    public required Guid     InitiatedBy          { get; init; }
+}
+
+public sealed record CreatePositionCommand
+{
+    public required Guid     JobId                { get; init; }
+    public required Guid     OrgUnitId            { get; init; }
+    public string?           PositionTitle        { get; init; }
+    public int?              HeadcountBudget      { get; init; }
+    public required DateOnly EffectiveStartDate   { get; init; }
+    public required Guid     InitiatedBy          { get; init; }
+}
+
+public sealed record SupersedeDocumentCommand
+{
+    public required Guid      SupersededDocumentId { get; init; }
+    public required Guid      PersonId             { get; init; }
+    public Guid?              EmploymentId         { get; init; }
+    public required string    DocumentType         { get; init; }
+    public required string    DocumentName         { get; init; }
+    public required Stream    FileContent          { get; init; }
+    public required string    FileFormat           { get; init; }
+    public required DateOnly  EffectiveDate        { get; init; }
+    public DateOnly?          ExpirationDate       { get; init; }
+    public required Guid      UploadedBy           { get; init; }
 }

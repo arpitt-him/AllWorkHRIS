@@ -73,6 +73,18 @@
                         <label>National Identifier (SSN) <span class="required">*</span></label>
                         <input type="password" @bind="_cmd.NationalIdentifier" placeholder="SSN" autocomplete="off" />
                     </div>
+                    <div class="form-field">
+                        <label>Gender</label>
+                        <input @bind="_cmd.Gender" placeholder="e.g. Male, Female, Non-binary (optional)" />
+                    </div>
+                    <div class="form-field">
+                        <label>Pronouns</label>
+                        <input @bind="_cmd.Pronouns" placeholder="e.g. he/him, she/her, they/them (optional)" />
+                    </div>
+                    <div class="form-field">
+                        <label>Marital Status</label>
+                        <input @bind="_cmd.MaritalStatus" placeholder="e.g. Single, Married (optional)" />
+                    </div>
                 </div>
             }
 
@@ -265,6 +277,18 @@
                         <h5>Identity</h5>
                         <div class="review-row"><span>Name</span><span>@_cmd.LegalFirstName @_cmd.LegalMiddleName @_cmd.LegalLastName</span></div>
                         <div class="review-row"><span>Date of Birth</span><span>@_dateOfBirth?.ToString("yyyy-MM-dd")</span></div>
+                        @if (!string.IsNullOrWhiteSpace(_cmd.Gender))
+                        {
+                            <div class="review-row"><span>Gender</span><span>@_cmd.Gender</span></div>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(_cmd.Pronouns))
+                        {
+                            <div class="review-row"><span>Pronouns</span><span>@_cmd.Pronouns</span></div>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(_cmd.MaritalStatus))
+                        {
+                            <div class="review-row"><span>Marital Status</span><span>@_cmd.MaritalStatus</span></div>
+                        }
                     </div>
                     <div class="review-group">
                         <h5>Contact</h5>
@@ -443,6 +467,9 @@
                 LegalLastName        = _cmd.LegalLastName!,
                 LegalMiddleName      = _cmd.LegalMiddleName,
                 PreferredName        = _cmd.PreferredName,
+                Gender               = _cmd.Gender,
+                Pronouns             = _cmd.Pronouns,
+                MaritalStatus        = _cmd.MaritalStatus,
                 DateOfBirth          = DateOnly.FromDateTime(_dateOfBirth!.Value),
                 NationalIdentifier   = _cmd.NationalIdentifier!,
                 PhonePrimary         = _cmd.PhonePrimary,
@@ -516,6 +543,9 @@
         public string?  LegalMiddleName        { get; set; }
         public string?  LegalLastName          { get; set; }
         public string?  PreferredName          { get; set; }
+        public string?  Gender                 { get; set; }
+        public string?  Pronouns               { get; set; }
+        public string?  MaritalStatus          { get; set; }
         public string?  NationalIdentifier     { get; set; }
         public string?  PhonePrimary           { get; set; }
         public string?  EmailPersonal          { get; set; }

@@ -65,13 +65,9 @@
                         <th>Employee</th>
                         <th>Job Title</th>
                         <th>Department</th>
+                        <th>Location</th>
                         <th>Status</th>
                         <th>Start Date</th>
-                        <AuthorizeView Roles="HrisAdmin">
-                            <Authorized>
-                                <th>Salary</th>
-                            </Authorized>
-                        </AuthorizeView>
                         <th></th>
                     </tr>
                 </thead>
@@ -89,14 +85,10 @@
                             </td>
                             <td>@emp.JobTitle</td>
                             <td>@emp.DepartmentName</td>
+                            <td>@emp.LocationName</td>
                             <td><span class="status-badge status-@emp.EmploymentStatus.ToLower()">@emp.EmploymentStatus</span></td>
                             <td>@emp.EmploymentStartDate.ToString("yyyy-MM-dd")</td>
-                            <AuthorizeView Roles="HrisAdmin">
-                                <Authorized>
-                                    <td>@(emp.BaseRate.HasValue ? emp.BaseRate.Value.ToString("C") : "—")</td>
-                                </Authorized>
-                            </AuthorizeView>
-                            <td><a href="/hris/employees/@emp.EmploymentId" class="btn-link">Edit</a></td>
+                            <td><a href="/hris/employees/@emp.EmploymentId" class="btn-link">View</a></td>
                         </tr>
                     }
                 </tbody>

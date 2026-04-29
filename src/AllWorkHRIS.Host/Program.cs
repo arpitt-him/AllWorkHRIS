@@ -15,6 +15,8 @@ using AllWorkHRIS.Core.Lookups;
 using AllWorkHRIS.Core.Temporal;
 using AllWorkHRIS.Host;
 using AllWorkHRIS.Host.Components;
+using AllWorkHRIS.Host.Hris.Domain;
+using AllWorkHRIS.Host.Hris.Jobs;
 using AllWorkHRIS.Host.Hris.Repositories;
 using AllWorkHRIS.Host.Hris.Services;
 
@@ -147,6 +149,70 @@ builder.Host.ConfigureContainer<ContainerBuilder>(autofacBuilder =>
                   .As<IOrgStructureService>()
                   .InstancePerLifetimeScope();
 
+    autofacBuilder.RegisterType<JobService>()
+                  .As<IJobService>()
+                  .InstancePerLifetimeScope();
+
+    autofacBuilder.RegisterType<PositionService>()
+                  .As<IPositionService>()
+                  .InstancePerLifetimeScope();
+
+    // -----------------------------------------------------------------------
+    // PHASE 3 — Leave, Documents, Onboarding, Work Queue
+    // -----------------------------------------------------------------------
+
+    // Repositories
+    autofacBuilder.RegisterType<LeaveRequestRepository>()
+                  .As<ILeaveRequestRepository>()
+                  .InstancePerLifetimeScope();
+
+    autofacBuilder.RegisterType<LeaveBalanceRepository>()
+                  .As<ILeaveBalanceRepository>()
+                  .InstancePerLifetimeScope();
+
+    autofacBuilder.RegisterType<LeaveTypeConfigRepository>()
+                  .As<ILeaveTypeConfigRepository>()
+                  .InstancePerLifetimeScope();
+
+    autofacBuilder.RegisterType<DocumentRepository>()
+                  .As<IDocumentRepository>()
+                  .InstancePerLifetimeScope();
+
+    autofacBuilder.RegisterType<OnboardingRepository>()
+                  .As<IOnboardingRepository>()
+                  .InstancePerLifetimeScope();
+
+    autofacBuilder.RegisterType<WorkQueueRepository>()
+                  .As<IWorkQueueRepository>()
+                  .InstancePerLifetimeScope();
+
+    // DocumentStorageOptions — bound from configuration
+    var storageOptions = builder.Configuration
+        .GetSection("DocumentStorage")
+        .Get<DocumentStorageOptions>() ?? new DocumentStorageOptions();
+    autofacBuilder.RegisterInstance(storageOptions).SingleInstance();
+
+    // Services
+    autofacBuilder.RegisterType<WorkQueueService>()
+                  .As<IWorkQueueService>()
+                  .InstancePerLifetimeScope();
+
+    autofacBuilder.RegisterType<LeaveService>()
+                  .As<ILeaveService>()
+                  .InstancePerLifetimeScope();
+
+    autofacBuilder.RegisterType<LocalFileSystemDocumentStorageService>()
+                  .As<IDocumentStorageService>()
+                  .SingleInstance();
+
+    autofacBuilder.RegisterType<DocumentService>()
+                  .As<IDocumentService>()
+                  .InstancePerLifetimeScope();
+
+    autofacBuilder.RegisterType<OnboardingService>()
+                  .As<IOnboardingService>()
+                  .InstancePerLifetimeScope();
+
     // Register each discovered module's services
     foreach (var module in platformModules)
         module.Register(autofacBuilder);
@@ -190,6 +256,24 @@ var hrisMenuItems = new List<MenuContribution>
         Href         = "/hris/jobs",
         Icon         = "HrisIcon",
         SortOrder    = 3,
+        ParentLabel  = "Employees",
+        RequiredRole = "HrisAdmin"
+    },
+    new MenuContribution
+    {
+        Label        = "Work Queue",
+        Href         = "/hris/workqueue",
+        Icon         = "HrisIcon",
+        SortOrder    = 4,
+        ParentLabel  = "Employees",
+        RequiredRole = "HrisAdmin"
+    },
+    new MenuContribution
+    {
+        Label        = "Doc Expiration",
+        Href         = "/hris/documents/expiring",
+        Icon         = "HrisIcon",
+        SortOrder    = 5,
         ParentLabel  = "Employees",
         RequiredRole = "HrisAdmin"
     }
@@ -266,12 +350,38 @@ builder.Services.AddAuthorization(options =>
 builder.Services.AddCascadingAuthenticationState();
 
 // ---------------------------------------------------------------------------
+// 9b. Background jobs (hosted services — registered before Build)
+// ---------------------------------------------------------------------------
+builder.Services.AddHostedService<LeaveStatusTransitionJob>();
+builder.Services.AddHostedService<DocumentExpirationCheckJob>();
+
+// ---------------------------------------------------------------------------
 // 10. Build
 // ---------------------------------------------------------------------------
 var app = builder.Build();
 
 // ---------------------------------------------------------------------------
-// 10b. Initialise lookup cache — must run before any request is served
+// 10b. --check-db mode: verify DB connectivity and exit immediately.
+//      Used by build scripts; must not start the HTTP server.
+// ---------------------------------------------------------------------------
+if (args.Contains("--check-db"))
+{
+    try
+    {
+        var cf = app.Services.GetRequiredService<IConnectionFactory>();
+        using var conn = cf.CreateConnection();
+        Console.WriteLine("--check-db: connection OK");
+        return;
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"--check-db: FAILED — {ex.Message}");
+        Environment.Exit(1);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 10c. Initialise lookup cache — must run before any request is served
 // ---------------------------------------------------------------------------
 await app.Services.GetRequiredService<ILookupCache>().RefreshAsync();
 
@@ -293,9 +403,33 @@ app.UseMiddleware<TenantConnectionMiddleware>();  // ADR-010 — after auth so c
 app.UseAntiforgery();
 
 // ---------------------------------------------------------------------------
-// 12. Minimal API endpoints — placeholder; module endpoints registered here
+// 12. Minimal API endpoints
 // ---------------------------------------------------------------------------
 // HrisEndpoints.Map(app);   // added in Phase 2
+
+// Document file download — streams stored file and logs the audit record.
+app.MapGet("/api/documents/{id:guid}/content", async (
+    Guid id,
+    IDocumentService    docService,
+    IDocumentRepository docRepo,
+    HttpContext         ctx) =>
+{
+    var sub     = ctx.User.FindFirst("sub")?.Value;
+    var actorId = Guid.TryParse(sub, out var g) ? g : Guid.Empty;
+    try
+    {
+        var doc = await docRepo.GetByIdAsync(id);
+        if (doc is null) return Results.NotFound();
+        var stream   = await docService.DownloadDocumentAsync(id, actorId);
+        var fileName = $"{doc.DocumentName}.{doc.FileFormat.ToLower()}";
+        return Results.File(stream, "application/octet-stream", fileName);
+    }
+    catch (NotFoundException)
+    {
+        return Results.NotFound();
+    }
+})
+.RequireAuthorization();
 
 app.MapGet("/account/login", async (HttpContext ctx, string? returnUrl) =>
 {
