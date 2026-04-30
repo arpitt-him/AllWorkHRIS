@@ -64,7 +64,8 @@ public sealed class PayrollModuleCompositionTests
         using var container = builder.Build();
 
         // Assert — every service interface declared in the Payroll module is registered
-        Assert.True(container.IsRegistered<IPayrollRunRepository>(),         "IPayrollRunRepository");
+        Assert.True(container.IsRegistered<IPayrollProfileRepository>(),      "IPayrollProfileRepository");
+        Assert.True(container.IsRegistered<IPayrollRunRepository>(),          "IPayrollRunRepository");
         Assert.True(container.IsRegistered<IPayrollRunResultSetRepository>(), "IPayrollRunResultSetRepository");
         Assert.True(container.IsRegistered<IEmployeePayrollResultRepository>(),"IEmployeePayrollResultRepository");
         Assert.True(container.IsRegistered<IResultLineRepository>(),          "IResultLineRepository");

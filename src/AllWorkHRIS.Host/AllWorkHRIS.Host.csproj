@@ -16,6 +16,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\AllWorkHRIS.Core\AllWorkHRIS.Core.csproj" />
+    <ProjectReference Include="..\AllWorkHRIS.Module.Payroll\AllWorkHRIS.Module.Payroll.csproj" />
   </ItemGroup>
 
 </Project>

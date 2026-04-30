@@ -1,0 +1,493 @@
+@page "/payroll/calendar/{ContextId:guid}"
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = "PayrollAdmin")]
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using AllWorkHRIS.Core.Lookups
+@using AllWorkHRIS.Module.Payroll.Domain.Calendar
+@using AllWorkHRIS.Module.Payroll.Repositories
+@inject IPayrollContextRepository   ContextRepo
+@inject ILookupCache                LookupCache
+@inject AuthenticationStateProvider AuthState
+
+<PageTitle>Pay Calendar Detail — AllWork HRIS</PageTitle>
+
+<div class="page-container">
+
+    @if (_loading)
+    {
+        <p class="loading-state">Loading…</p>
+    }
+    else if (_context is null)
+    {
+        <div class="alert-error" style="margin-bottom:1rem;">Context not found.</div>
+        <a href="/payroll/calendar" class="btn-link">← Pay Calendars</a>
+    }
+    else
+    {
+        <div class="page-header">
+            <div>
+                <a href="/payroll/calendar" class="btn-link" style="font-size:var(--font-size-sm)">← Pay Calendars</a>
+                <h2 class="page-title" style="margin-top:var(--space-1)">@_context.PayrollContextName</h2>
+            </div>
+            <span class="badge @StatusClass(_context.ContextStatus)" style="font-size:var(--font-size-base)">
+                @_context.ContextStatus
+            </span>
+        </div>
+
+        @* Context metadata *@
+        <div class="panel-card" style="margin-bottom:1.5rem;">
+            <div class="detail-grid">
+                <div class="detail-field">
+                    <span class="detail-label">Code</span>
+                    <span class="detail-value" style="font-family:monospace">@_context.PayrollContextCode</span>
+                </div>
+                <div class="detail-field">
+                    <span class="detail-label">Pay Frequency</span>
+                    <span class="detail-value">@FrequencyLabel(_context.PayFrequencyId)</span>
+                </div>
+                <div class="detail-field">
+                    <span class="detail-label">Effective From</span>
+                    <span class="detail-value">@_context.EffectiveStartDate.ToString("yyyy-MM-dd")</span>
+                </div>
+                <div class="detail-field">
+                    <span class="detail-label">Effective To</span>
+                    <span class="detail-value">@(_context.EffectiveEndDate?.ToString("yyyy-MM-dd") ?? "—")</span>
+                </div>
+                <div class="detail-field">
+                    <span class="detail-label">Periods on Record</span>
+                    <span class="detail-value">@_allPeriods.Count</span>
+                </div>
+                <div class="detail-field">
+                    <span class="detail-label">Open Periods</span>
+                    <span class="detail-value">@_allPeriods.Count(p => p.CalendarStatus == "OPEN")</span>
+                </div>
+            </div>
+        </div>
+
+        @* Year selector + Generate button *@
+        <div class="filter-row" style="margin-bottom:var(--space-4)">
+            <label class="filter-label">Year</label>
+            <select class="filter-select" value="@_selectedYear" @onchange="OnYearChangedAsync">
+                @for (int y = DateTime.Today.Year + 1; y >= DateTime.Today.Year - 3; y--)
+                {
+                    <option value="@y">@y</option>
+                }
+            </select>
+            <label class="filter-label" style="margin-left:var(--space-4)">Status</label>
+            <select class="filter-select" @bind="_periodStatusFilter">
+                <option value="">All</option>
+                <option value="OPEN">Open</option>
+                <option value="CLOSED">Closed</option>
+                <option value="LOCKED">Locked</option>
+            </select>
+            @if (!_showGenerateForm && !_showClearConfirm)
+            {
+                <div style="margin-left:auto;display:flex;gap:var(--space-2)">
+                    <button class="btn-secondary" @onclick="ToggleGenerateForm">
+                        Generate Calendar for @_selectedYear
+                    </button>
+                    @if (_yearPeriods.Count > 0)
+                    {
+                        <button class="btn-danger"
+                                style="border:1px solid var(--color-danger);border-radius:var(--radius-md);padding:var(--space-2) var(--space-4)"
+                                @onclick="() => _showClearConfirm = true">
+                            Clear @_selectedYear Calendar
+                        </button>
+                    }
+                </div>
+            }
+        </div>
+
+        @* ── Clear year confirmation ───────────────────────────── *@
+        @if (_showClearConfirm)
+        {
+            <div class="panel-card" style="margin-bottom:1.5rem;border:1px solid #FECACA;">
+                <h3 class="panel-title" style="color:var(--color-danger)">Clear @_selectedYear Calendar?</h3>
+                <p style="font-size:var(--font-size-sm);color:#374151;margin:0 0 var(--space-3)">
+                    This will permanently delete all <strong>@_yearPeriods.Count</strong> period(s) for @_selectedYear
+                    that are not referenced by a payroll run. Periods used in existing runs cannot be removed.
+                </p>
+                @if (_clearResultMessage is not null)
+                {
+                    <div class="@(_clearHadError ? "alert-error" : "alert-info")" style="margin-bottom:var(--space-3)">
+                        @_clearResultMessage
+                    </div>
+                }
+                <div class="form-actions">
+                    <button class="btn-primary"
+                            style="background:var(--color-danger)"
+                            @onclick="ClearYearAsync"
+                            disabled="@_submitting">
+                        @(_submitting ? "Deleting…" : $"Yes, delete {_selectedYear} periods")
+                    </button>
+                    <button class="btn-secondary" @onclick="CancelClear">Cancel</button>
+                </div>
+            </div>
+        }
+
+        @* ── Generate Calendar Form ───────────────────────────── *@
+        @if (_showGenerateForm)
+        {
+            var freqCode = _frequencies.FirstOrDefault(f => f.Id == _context.PayFrequencyId)?.Code ?? "";
+            var needsAnchor = freqCode is "WEEKLY" or "BIWEEKLY";
+            <div class="panel-card" style="margin-bottom:1.5rem;">
+                <h3 class="panel-title">Generate @_selectedYear Calendar</h3>
+                @if (_yearPeriods.Count > 0)
+                {
+                    <div class="alert-info" style="margin-bottom:var(--space-3)">
+                        @_yearPeriods.Count period(s) already exist for @_selectedYear.
+                        Only missing period numbers will be added.
+                    </div>
+                }
+                <div class="form-grid form-grid-3">
+                    @if (needsAnchor)
+                    {
+                        <div class="form-field">
+                            <label class="form-label">First Period Start Date <span style="color:var(--color-danger)">*</span></label>
+                            <input type="date" class="form-control" @bind="_genForm.FirstPeriodStart" />
+                            <span style="font-size:var(--font-size-sm);color:#6B7280">Start date of period 1 in @_selectedYear</span>
+                        </div>
+                    }
+                    <div class="form-field">
+                        <label class="form-label">Pay Date Offset (days after period end)</label>
+                        <input type="number" class="form-control" @bind="_genForm.PayDateOffsetDays" min="0" max="30" />
+                    </div>
+                    <div class="form-field">
+                        <label class="form-label">Input Cutoff (days before pay date)</label>
+                        <input type="number" class="form-control" @bind="_genForm.CutoffOffsetDays" min="0" max="30" />
+                    </div>
+                </div>
+                <p style="font-size:var(--font-size-sm);color:#6B7280;margin:var(--space-2) 0 var(--space-3)">
+                    Frequency: <strong>@freqCode</strong> —
+                    @GetPeriodsPerYear(freqCode) period(s) for @_selectedYear.
+                    Past-end periods are set to <strong>CLOSED</strong>, future to <strong>OPEN</strong>.
+                </p>
+                @if (_generateError is not null)
+                {
+                    <div class="alert-error" style="margin-bottom:var(--space-3)">@_generateError</div>
+                }
+                <div class="form-actions">
+                    <button class="btn-primary" @onclick="GenerateCalendarAsync" disabled="@_submitting">
+                        @(_submitting ? "Generating…" : "Generate Periods")
+                    </button>
+                    <button class="btn-secondary" @onclick="ToggleGenerateForm">Cancel</button>
+                </div>
+            </div>
+        }
+
+        @* ── Period table ─────────────────────────────────────── *@
+        @if (_periodLoading)
+        {
+            <p class="loading-state">Loading periods…</p>
+        }
+        else if (_yearPeriods.Count == 0)
+        {
+            <p class="empty-state">
+                No periods for @_selectedYear.
+                Click <strong>Generate Calendar for @_selectedYear</strong> to create them.
+            </p>
+        }
+        else
+        {
+            var visible = string.IsNullOrEmpty(_periodStatusFilter)
+                ? _yearPeriods
+                : _yearPeriods.Where(p => p.CalendarStatus == _periodStatusFilter).ToList();
+
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Period</th>
+                        <th>Start Date</th>
+                        <th>End Date</th>
+                        <th>Pay Date</th>
+                        <th>Input Cutoff</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var p in visible.OrderBy(p => p.PeriodNumber))
+                    {
+                        <tr>
+                            <td style="font-weight:var(--font-weight-medium)">P@(p.PeriodNumber)</td>
+                            <td>@p.PeriodStartDate.ToString("yyyy-MM-dd")</td>
+                            <td>@p.PeriodEndDate.ToString("yyyy-MM-dd")</td>
+                            <td>@p.PayDate.ToString("yyyy-MM-dd")</td>
+                            <td>@p.InputCutoffDate.ToString("yyyy-MM-dd")</td>
+                            <td><span class="badge @PeriodStatusClass(p.CalendarStatus)">@p.CalendarStatus</span></td>
+                        </tr>
+                    }
+                </tbody>
+                <tfoot>
+                    <tr style="background:#F9FAFB">
+                        <td colspan="5" style="padding:var(--space-3) var(--space-4);font-size:var(--font-size-sm);color:#6B7280">
+                            Showing @visible.Count of @_yearPeriods.Count period(s) for @_selectedYear
+                        </td>
+                        <td></td>
+                    </tr>
+                </tfoot>
+            </table>
+        }
+    }
+
+</div>
+
+@code {
+    [Parameter] public Guid ContextId { get; set; }
+
+    private PayrollContext?  _context;
+    private List<PayrollPeriod> _allPeriods  = [];
+    private List<PayrollPeriod> _yearPeriods = [];
+    private List<LookupEntry>   _frequencies = [];
+
+    private int     _selectedYear      = DateTime.Today.Year;
+    private string  _periodStatusFilter = "";
+    private bool    _loading           = true;
+    private bool    _periodLoading;
+    private bool    _submitting;
+    private bool    _showGenerateForm;
+    private bool    _showClearConfirm;
+    private string? _generateError;
+    private string? _clearResultMessage;
+    private bool    _clearHadError;
+    private Guid    _currentUserId;
+
+    private GenerateForm _genForm = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _currentUserId = Guid.TryParse(auth.User.FindFirst("sub")?.Value, out var g) ? g : Guid.Empty;
+
+        try { _frequencies = LookupCache.GetAll(LookupTables.PayFrequency).OrderBy(f => f.Id).ToList(); }
+        catch { _frequencies = DefaultFrequencies(); }
+
+        _context = await ContextRepo.GetByIdAsync(ContextId);
+        if (_context is not null)
+            await LoadPeriodsAsync();
+
+        _loading = false;
+    }
+
+    private async Task LoadPeriodsAsync()
+    {
+        _periodLoading = true;
+        var current = await ContextRepo.GetPeriodsByContextAsync(ContextId, _selectedYear);
+        _yearPeriods  = current.ToList();
+
+        // Fetch a broader set for the header totals (current + prev year)
+        var prev = await ContextRepo.GetPeriodsByContextAsync(ContextId, _selectedYear - 1);
+        _allPeriods   = current.Concat(prev).ToList();
+        _periodLoading = false;
+    }
+
+    private async Task OnYearChangedAsync(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var year))
+        {
+            _selectedYear     = year;
+            _showGenerateForm = false;
+            await LoadPeriodsAsync();
+        }
+    }
+
+    private async Task ClearYearAsync()
+    {
+        _submitting         = true;
+        _clearResultMessage = null;
+        try
+        {
+            var (deleted, skipped) = await ContextRepo.DeletePeriodsForYearAsync(ContextId, _selectedYear);
+            await LoadPeriodsAsync();
+            _clearHadError = skipped > 0 && deleted == 0;
+
+            _clearResultMessage = (deleted, skipped) switch
+            {
+                (0, 0)       => "No periods found to delete.",
+                (0, var s)   => $"Cannot delete: all {s} period(s) are referenced by existing payroll runs.",
+                (var d, 0)   => $"{d} period(s) deleted. Calendar cleared.",
+                (var d, var s) => $"{d} period(s) deleted. {s} period(s) skipped — referenced by payroll runs."
+            };
+
+            if (deleted > 0)
+                _showClearConfirm = false;
+        }
+        catch (Exception ex)
+        {
+            _clearResultMessage = ex.Message;
+            _clearHadError      = true;
+        }
+        finally { _submitting = false; }
+    }
+
+    private void CancelClear()
+    {
+        _showClearConfirm   = false;
+        _clearResultMessage = null;
+    }
+
+    private void ToggleGenerateForm()
+    {
+        _showGenerateForm = !_showGenerateForm;
+        _generateError    = null;
+        if (_showGenerateForm)
+        {
+            _genForm = new GenerateForm
+            {
+                FirstPeriodStart  = new DateOnly(_selectedYear, 1, 1),
+                PayDateOffsetDays = 5,
+                CutoffOffsetDays  = 3
+            };
+        }
+    }
+
+    private async Task GenerateCalendarAsync()
+    {
+        if (_context is null) return;
+
+        var freqCode = _frequencies.FirstOrDefault(f => f.Id == _context.PayFrequencyId)?.Code ?? "";
+
+        if ((freqCode is "WEEKLY" or "BIWEEKLY") && _genForm.FirstPeriodStart.Year != _selectedYear)
+        {
+            _generateError = $"First period start date must be in {_selectedYear}.";
+            return;
+        }
+
+        _submitting    = true;
+        _generateError = null;
+        try
+        {
+            var spans    = ComputePeriodSpans(_genForm.FirstPeriodStart, _selectedYear, freqCode);
+            var existing = _yearPeriods.Select(p => p.PeriodNumber).ToHashSet();
+            var now      = DateTimeOffset.UtcNow;
+
+            for (int i = 0; i < spans.Count; i++)
+            {
+                int periodNumber = i + 1;
+                if (existing.Contains(periodNumber)) continue;
+
+                var (start, end) = spans[i];
+                var payDate  = end.AddDays(_genForm.PayDateOffsetDays);
+                var cutoff   = payDate.AddDays(-_genForm.CutoffOffsetDays);
+                var status   = end < DateOnly.FromDateTime(DateTime.Today) ? "CLOSED" : "OPEN";
+
+                await ContextRepo.InsertPeriodAsync(new PayrollPeriod
+                {
+                    PeriodId                  = Guid.NewGuid(),
+                    PayrollContextId          = ContextId,
+                    PeriodYear                = _selectedYear,
+                    PeriodNumber              = periodNumber,
+                    PeriodStartDate           = start,
+                    PeriodEndDate             = end,
+                    PayDate                   = payDate,
+                    InputCutoffDate           = cutoff,
+                    CalculationDate           = null,
+                    CorrectionWindowCloseDate = null,
+                    FinalizationDate          = null,
+                    TransmissionDate          = null,
+                    CalendarStatus            = status,
+                    ParentCalendarEntryId     = null,
+                    RootCalendarEntryId       = null,
+                    CalendarVersionNumber     = 1,
+                    CalendarChangeReasonCode  = null,
+                    CreatedBy                 = _currentUserId,
+                    CreationTimestamp         = now,
+                    LastUpdatedBy             = _currentUserId,
+                    LastUpdateTimestamp       = now
+                });
+            }
+
+            await LoadPeriodsAsync();
+            _showGenerateForm = false;
+        }
+        catch (Exception ex) { _generateError = ex.Message; }
+        finally { _submitting = false; }
+    }
+
+    private static List<(DateOnly start, DateOnly end)> ComputePeriodSpans(
+        DateOnly firstStart, int year, string freqCode)
+    {
+        var result = new List<(DateOnly, DateOnly)>();
+        switch (freqCode)
+        {
+            case "WEEKLY":
+                for (var s = firstStart; s.Year == year; s = s.AddDays(7))
+                    result.Add((s, s.AddDays(6)));
+                break;
+            case "BIWEEKLY":
+                for (var s = firstStart; s.Year == year; s = s.AddDays(14))
+                    result.Add((s, s.AddDays(13)));
+                break;
+            case "SEMI_MONTHLY":
+                for (int m = 1; m <= 12; m++)
+                {
+                    result.Add((new DateOnly(year, m, 1), new DateOnly(year, m, 15)));
+                    result.Add((new DateOnly(year, m, 16),
+                                new DateOnly(year, m, DateTime.DaysInMonth(year, m))));
+                }
+                break;
+            case "MONTHLY":
+                for (int m = 1; m <= 12; m++)
+                    result.Add((new DateOnly(year, m, 1),
+                                new DateOnly(year, m, DateTime.DaysInMonth(year, m))));
+                break;
+            case "QUARTERLY":
+                result.Add((new DateOnly(year, 1,  1), new DateOnly(year, 3,  31)));
+                result.Add((new DateOnly(year, 4,  1), new DateOnly(year, 6,  30)));
+                result.Add((new DateOnly(year, 7,  1), new DateOnly(year, 9,  30)));
+                result.Add((new DateOnly(year, 10, 1), new DateOnly(year, 12, 31)));
+                break;
+            case "ANNUAL":
+                result.Add((new DateOnly(year, 1, 1), new DateOnly(year, 12, 31)));
+                break;
+        }
+        return result;
+    }
+
+    private static int GetPeriodsPerYear(string freqCode) => freqCode switch
+    {
+        "WEEKLY"       => 52,
+        "BIWEEKLY"     => 26,
+        "SEMI_MONTHLY" => 24,
+        "MONTHLY"      => 12,
+        "QUARTERLY"    => 4,
+        "ANNUAL"       => 1,
+        _              => 0
+    };
+
+    private string FrequencyLabel(int id)
+        => _frequencies.FirstOrDefault(f => f.Id == id)?.Label ?? id.ToString();
+
+    private static string StatusClass(string status) => status switch
+    {
+        "ACTIVE"   => "badge-success",
+        "INACTIVE" => "badge-warning",
+        "CLOSED"   => "badge-neutral",
+        _          => "badge-neutral"
+    };
+
+    private static string PeriodStatusClass(string status) => status switch
+    {
+        "OPEN"   => "badge-teal",
+        "CLOSED" => "badge-neutral",
+        "LOCKED" => "badge-warning",
+        _        => "badge-neutral"
+    };
+
+    private static List<LookupEntry> DefaultFrequencies() =>
+    [
+        new LookupEntry { Id = 1, Code = "WEEKLY",       Label = "Weekly"       },
+        new LookupEntry { Id = 2, Code = "BIWEEKLY",     Label = "Biweekly"     },
+        new LookupEntry { Id = 3, Code = "SEMI_MONTHLY", Label = "Semi-Monthly" },
+        new LookupEntry { Id = 4, Code = "MONTHLY",      Label = "Monthly"      },
+        new LookupEntry { Id = 5, Code = "QUARTERLY",    Label = "Quarterly"    },
+        new LookupEntry { Id = 6, Code = "ANNUAL",       Label = "Annual"       },
+    ];
+
+    private sealed class GenerateForm
+    {
+        public DateOnly FirstPeriodStart  { get; set; }
+        public int      PayDateOffsetDays { get; set; } = 5;
+        public int      CutoffOffsetDays  { get; set; } = 3;
+    }
+}

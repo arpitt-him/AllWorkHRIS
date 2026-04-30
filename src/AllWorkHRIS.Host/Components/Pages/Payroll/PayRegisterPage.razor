@@ -1,0 +1,22 @@
+@page "/payroll/register"
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = "PayrollOperator,PayrollAdmin")]
+@using Microsoft.AspNetCore.Authorization
+
+<PageTitle>Pay Register — AllWork HRIS</PageTitle>
+
+<div class="page-container">
+    <div class="page-header">
+        <h2 class="page-title">Pay Register</h2>
+    </div>
+    <div class="panel-card">
+        <p style="color:#6B7280;font-size:var(--font-size-sm);">
+            To view the pay register for a specific run, open that run from
+            <a href="/payroll/runs" class="table-link">Payroll Runs</a> and select the
+            <strong>Pay Register</strong> tab.
+        </p>
+        <p style="color:#6B7280;font-size:var(--font-size-sm);margin-top:var(--space-3);">
+            A cross-run register report with filtering and export will be available in a future release.
+        </p>
+    </div>
+</div>

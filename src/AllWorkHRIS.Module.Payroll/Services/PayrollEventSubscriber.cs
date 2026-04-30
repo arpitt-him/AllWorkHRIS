@@ -3,7 +3,7 @@ using AllWorkHRIS.Module.Payroll.Domain.Events;
 
 namespace AllWorkHRIS.Module.Payroll.Services;
 
-public sealed class PayrollEventSubscriber : IPayrollEventSubscriber
+public sealed class PayrollEventSubscriber : IPayrollEventSubscriber, IEventSubscriber
 {
     private readonly HireEventHandler           _hireHandler;
     private readonly TerminationEventHandler    _terminationHandler;

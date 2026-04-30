@@ -2,6 +2,7 @@ using Dapper;
 using AllWorkHRIS.Core.Data;
 using AllWorkHRIS.Module.Payroll.Domain.Accumulators;
 using AllWorkHRIS.Module.Payroll.Domain.Calendar;
+using AllWorkHRIS.Module.Payroll.Domain.Profile;
 using AllWorkHRIS.Module.Payroll.Domain.ResultSet;
 using AllWorkHRIS.Module.Payroll.Domain.Results;
 using AllWorkHRIS.Module.Payroll.Domain.Run;
@@ -683,6 +684,13 @@ public sealed class PayrollContextRepository : IPayrollContextRepository
         return await conn.QueryFirstOrDefaultAsync<PayrollContext>(sql, new { PayrollContextId = payrollContextId });
     }
 
+    public async Task<IReadOnlyList<PayrollContext>> GetAllAsync()
+    {
+        const string sql = "SELECT * FROM payroll_context ORDER BY payroll_context_code";
+        using var conn = _connectionFactory.CreateConnection();
+        return (await conn.QueryAsync<PayrollContext>(sql)).ToList();
+    }
+
     public async Task<IReadOnlyList<PayrollContext>> GetAllActiveAsync()
     {
         const string sql = """
@@ -780,6 +788,18 @@ public sealed class PayrollContextRepository : IPayrollContextRepository
         return await conn.QueryFirstOrDefaultAsync<PayrollPeriod>(sql, new { PayrollContextId = payrollContextId });
     }
 
+    public async Task<IReadOnlyList<PayrollPeriod>> GetOpenPeriodsAsync(Guid payrollContextId)
+    {
+        const string sql = """
+            SELECT * FROM payroll_period
+            WHERE payroll_context_id = @PayrollContextId
+              AND calendar_status    = 'OPEN'
+            ORDER BY period_year, period_number
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        return (await conn.QueryAsync<PayrollPeriod>(sql, new { PayrollContextId = payrollContextId })).ToList();
+    }
+
     public async Task<IReadOnlyList<PayrollPeriod>> GetPeriodsByContextAsync(Guid payrollContextId, int year)
     {
         const string sql = """
@@ -840,6 +860,37 @@ public sealed class PayrollContextRepository : IPayrollContextRepository
         return period.PeriodId;
     }
 
+    public async Task<(int Deleted, int Skipped)> DeletePeriodsForYearAsync(Guid contextId, int year)
+    {
+        using var conn = _connectionFactory.CreateConnection();
+
+        // Count periods that ARE referenced by a run — cannot be deleted
+        const string countSkipped = """
+            SELECT COUNT(*) FROM payroll_period pp
+            WHERE pp.payroll_context_id = @ContextId
+              AND pp.period_year        = @Year
+              AND EXISTS (
+                  SELECT 1 FROM payroll_run pr
+                  WHERE pr.period_id = pp.period_id
+              )
+            """;
+        int skipped = await conn.ExecuteScalarAsync<int>(countSkipped, new { ContextId = contextId, Year = year });
+
+        // Delete only periods with no run references
+        const string deleteSql = """
+            DELETE FROM payroll_period
+            WHERE payroll_context_id = @ContextId
+              AND period_year        = @Year
+              AND period_id NOT IN (
+                  SELECT period_id FROM payroll_run
+                  WHERE payroll_context_id = @ContextId
+              )
+            """;
+        int deleted = await conn.ExecuteAsync(deleteSql, new { ContextId = contextId, Year = year });
+
+        return (deleted, skipped);
+    }
+
     public async Task UpdatePeriodStatusAsync(Guid periodId, string status, Guid updatedBy)
     {
         const string sql = """
@@ -851,5 +902,111 @@ public sealed class PayrollContextRepository : IPayrollContextRepository
             """;
         using var conn = _connectionFactory.CreateConnection();
         await conn.ExecuteAsync(sql, new { PeriodId = periodId, Status = status, UpdatedBy = updatedBy });
+    }
+}
+
+// ============================================================
+// PAYROLL PROFILE
+// ============================================================
+
+public sealed class PayrollProfileRepository : IPayrollProfileRepository
+{
+    private readonly IConnectionFactory _connectionFactory;
+
+    public PayrollProfileRepository(IConnectionFactory connectionFactory)
+        => _connectionFactory = connectionFactory;
+
+    public async Task<Guid> InsertAsync(PayrollProfile profile)
+    {
+        const string sql = """
+            INSERT INTO payroll_profile (
+                payroll_profile_id, employment_id, person_id, payroll_context_id,
+                enrollment_status, effective_start_date, effective_end_date,
+                final_pay_flag, enrollment_source,
+                created_by, creation_timestamp, last_updated_by, last_update_timestamp
+            ) VALUES (
+                @PayrollProfileId, @EmploymentId, @PersonId, @PayrollContextId,
+                @EnrollmentStatus, @EffectiveStartDate, @EffectiveEndDate,
+                @FinalPayFlag, @EnrollmentSource,
+                @CreatedBy, @CreationTimestamp, @LastUpdatedBy, @LastUpdateTimestamp
+            )
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        await conn.ExecuteAsync(sql, new
+        {
+            profile.PayrollProfileId,
+            profile.EmploymentId,
+            profile.PersonId,
+            profile.PayrollContextId,
+            profile.EnrollmentStatus,
+            EffectiveStartDate = profile.EffectiveStartDate.ToDateTime(TimeOnly.MinValue),
+            EffectiveEndDate   = profile.EffectiveEndDate?.ToDateTime(TimeOnly.MinValue),
+            profile.FinalPayFlag,
+            profile.EnrollmentSource,
+            profile.CreatedBy,
+            profile.CreationTimestamp,
+            profile.LastUpdatedBy,
+            profile.LastUpdateTimestamp
+        });
+        return profile.PayrollProfileId;
+    }
+
+    public async Task<PayrollProfile?> GetByEmploymentIdAsync(Guid employmentId)
+    {
+        const string sql = """
+            SELECT * FROM payroll_profile
+            WHERE employment_id = @EmploymentId
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        return await conn.QueryFirstOrDefaultAsync<PayrollProfile>(sql, new { EmploymentId = employmentId });
+    }
+
+    public async Task<IReadOnlyList<PayrollProfile>> GetByContextAsync(Guid payrollContextId)
+    {
+        const string sql = """
+            SELECT * FROM payroll_profile
+            WHERE payroll_context_id = @PayrollContextId
+            ORDER BY effective_start_date DESC
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        return (await conn.QueryAsync<PayrollProfile>(sql, new { PayrollContextId = payrollContextId })).ToList();
+    }
+
+    public async Task<IReadOnlyList<Guid>> GetActiveEmploymentIdsByContextAsync(Guid payrollContextId)
+    {
+        const string sql = """
+            SELECT employment_id FROM payroll_profile
+            WHERE payroll_context_id = @PayrollContextId
+              AND enrollment_status  = 'ACTIVE'
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        return (await conn.QueryAsync<Guid>(sql, new { PayrollContextId = payrollContextId })).ToList();
+    }
+
+    public async Task UpdateStatusAsync(Guid employmentId, string status, Guid updatedBy)
+    {
+        const string sql = """
+            UPDATE payroll_profile
+            SET enrollment_status     = @Status,
+                last_updated_by       = @UpdatedBy,
+                last_update_timestamp = NOW()
+            WHERE employment_id = @EmploymentId
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        await conn.ExecuteAsync(sql, new { EmploymentId = employmentId, Status = status, UpdatedBy = updatedBy });
+    }
+
+    public async Task SetFinalPayFlagAsync(Guid employmentId, bool finalPayFlag, Guid updatedBy)
+    {
+        const string sql = """
+            UPDATE payroll_profile
+            SET final_pay_flag        = @FinalPayFlag,
+                enrollment_status     = CASE WHEN @FinalPayFlag THEN 'FINAL_PAY_PENDING' ELSE enrollment_status END,
+                last_updated_by       = @UpdatedBy,
+                last_update_timestamp = NOW()
+            WHERE employment_id = @EmploymentId
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        await conn.ExecuteAsync(sql, new { EmploymentId = employmentId, FinalPayFlag = finalPayFlag, UpdatedBy = updatedBy });
     }
 }

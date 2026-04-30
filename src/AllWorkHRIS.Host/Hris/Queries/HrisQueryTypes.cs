@@ -34,8 +34,12 @@ public sealed record EmploymentListItem
     public string   EmploymentType      { get; init; } = default!;
     public DateOnly EmploymentStartDate { get; init; }
     public string?  JobTitle            { get; init; }
+    public string?  DivisionName        { get; init; }
+    public Guid?    DivisionId          { get; init; }
     public string?  DepartmentName      { get; init; }
+    public Guid?    DepartmentId        { get; init; }
     public string?  LocationName        { get; init; }
+    public Guid?    LocationId          { get; init; }
 }
 
 public sealed record HireResult

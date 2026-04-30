@@ -1,0 +1,46 @@
+@using AllWorkHRIS.Core.Temporal
+@inject ITemporalOverrideService TemporalOverride
+
+@if (TemporalOverride.IsEnabled)
+{
+    <div class="temporal-bar @(TemporalOverride.IsOverrideActive ? "temporal-bar--active" : "")">
+        <span class="temporal-bar__label">
+            @if (TemporalOverride.IsOverrideActive)
+            {
+                <span>&#9200; Temporal Override Active</span>
+            }
+            else
+            {
+                <span>&#128336; Dev — System Date</span>
+            }
+        </span>
+        <span class="temporal-bar__current">
+            @(TemporalOverride.IsOverrideActive
+                ? TemporalOverride.OverrideDate!.Value.ToString("yyyy-MM-dd")
+                : DateOnly.FromDateTime(DateTime.UtcNow).ToString("yyyy-MM-dd"))
+        </span>
+        <input type="date" class="temporal-bar__input" @bind="_inputDate" />
+        <button class="temporal-bar__btn" @onclick="SetOverride">Set</button>
+        @if (TemporalOverride.IsOverrideActive)
+        {
+            <button class="temporal-bar__btn temporal-bar__btn--clear" @onclick="ClearOverride">Clear</button>
+        }
+    </div>
+}
+
+@code {
+    private DateOnly _inputDate = DateOnly.FromDateTime(DateTime.Today);
+
+    private void SetOverride()
+    {
+        TemporalOverride.SetOverride(_inputDate);
+        StateHasChanged();
+    }
+
+    private void ClearOverride()
+    {
+        TemporalOverride.ClearOverride();
+        _inputDate = DateOnly.FromDateTime(DateTime.Today);
+        StateHasChanged();
+    }
+}

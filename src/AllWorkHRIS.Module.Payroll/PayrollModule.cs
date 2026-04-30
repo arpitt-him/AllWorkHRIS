@@ -4,8 +4,10 @@ using Autofac;
 using AllWorkHRIS.Core.Composition;
 using AllWorkHRIS.Core.Events;
 using AllWorkHRIS.Module.Payroll.Domain.Events;
+using AllWorkHRIS.Module.Payroll.Jobs;
 using AllWorkHRIS.Module.Payroll.Repositories;
 using AllWorkHRIS.Module.Payroll.Services;
+using Microsoft.Extensions.Hosting;
 
 namespace AllWorkHRIS.Module.Payroll;
 
@@ -24,6 +26,9 @@ public sealed class PayrollModule : IPlatformModule
                .SingleInstance();
 
         // Repositories
+        builder.RegisterType<PayrollProfileRepository>()
+               .As<IPayrollProfileRepository>()
+               .InstancePerLifetimeScope();
         builder.RegisterType<PayrollRunRepository>()
                .As<IPayrollRunRepository>()
                .InstancePerLifetimeScope();
@@ -44,9 +49,15 @@ public sealed class PayrollModule : IPlatformModule
                .InstancePerLifetimeScope();
 
         // Services
+        builder.RegisterType<PayrollRunService>().As<IPayrollRunService>().InstancePerLifetimeScope();
         builder.RegisterType<CalculationEngine>().As<ICalculationEngine>().InstancePerLifetimeScope();
         builder.RegisterType<AccumulatorService>().As<IAccumulatorService>().InstancePerLifetimeScope();
-        // TODO: builder.RegisterType<PayrollRunService>().As<IPayrollRunService>().InstancePerLifetimeScope(); (Phase 4.6)
+        builder.RegisterType<PayrollContextLookup>().As<IPayrollContextLookup>().InstancePerLifetimeScope();
+
+        // Background job — singleton; resolves scoped services via ILifetimeScope child scope
+        builder.RegisterType<PayrollRunJob>()
+               .As<IHostedService>()
+               .SingleInstance();
 
         // HRIS event handler singletons
         builder.RegisterType<HireEventHandler>().SingleInstance();
@@ -58,6 +69,7 @@ public sealed class PayrollModule : IPlatformModule
         // This is called after the bus is resolved by the host; see Phase 4.3 notes
         builder.RegisterType<PayrollEventSubscriber>()
                .As<IPayrollEventSubscriber>()
+               .As<IEventSubscriber>()
                .SingleInstance();
     }
 
@@ -68,18 +80,18 @@ public sealed class PayrollModule : IPlatformModule
             Label        = "Payroll",
             Href         = null,
             Icon         = "PayrollIcon",
-            SortOrder    = 10,
-            RequiredRole = "PayrollOperator",
+            SortOrder    = 20,
+            RequiredRole = "PayrollOperator,PayrollAdmin",
             BadgeLabel   = "PAY",
-            AccentColor  = "var(--module-blue)"
+            AccentColor  = "var(--module-payroll)"
         };
         yield return new MenuContribution
         {
             Label        = "Payroll Runs",
             Href         = "/payroll/runs",
             Icon         = "PayrollIcon",
-            SortOrder    = 11,
-            RequiredRole = "PayrollOperator",
+            SortOrder    = 1,
+            RequiredRole = "PayrollOperator,PayrollAdmin",
             ParentLabel  = "Payroll"
         };
         yield return new MenuContribution
@@ -87,8 +99,8 @@ public sealed class PayrollModule : IPlatformModule
             Label        = "Pay Register",
             Href         = "/payroll/register",
             Icon         = "PayrollIcon",
-            SortOrder    = 12,
-            RequiredRole = "PayrollOperator",
+            SortOrder    = 2,
+            RequiredRole = "PayrollOperator,PayrollAdmin",
             ParentLabel  = "Payroll"
         };
         yield return new MenuContribution
@@ -96,7 +108,25 @@ public sealed class PayrollModule : IPlatformModule
             Label        = "Accumulators",
             Href         = "/payroll/accumulators",
             Icon         = "PayrollIcon",
-            SortOrder    = 13,
+            SortOrder    = 3,
+            RequiredRole = "PayrollAdmin",
+            ParentLabel  = "Payroll"
+        };
+        yield return new MenuContribution
+        {
+            Label        = "Pay Calendars",
+            Href         = "/payroll/calendar",
+            Icon         = "PayrollIcon",
+            SortOrder    = 4,
+            RequiredRole = "PayrollAdmin",
+            ParentLabel  = "Payroll"
+        };
+        yield return new MenuContribution
+        {
+            Label        = "Payroll Profiles",
+            Href         = "/payroll/profiles",
+            Icon         = "PayrollIcon",
+            SortOrder    = 5,
             RequiredRole = "PayrollAdmin",
             ParentLabel  = "Payroll"
         };

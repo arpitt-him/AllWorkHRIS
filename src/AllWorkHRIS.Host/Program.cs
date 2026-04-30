@@ -15,6 +15,7 @@ using AllWorkHRIS.Core.Lookups;
 using AllWorkHRIS.Core.Temporal;
 using AllWorkHRIS.Host;
 using AllWorkHRIS.Host.Components;
+using AllWorkHRIS.Host.Hubs;
 using AllWorkHRIS.Host.Hris.Domain;
 using AllWorkHRIS.Host.Hris.Jobs;
 using AllWorkHRIS.Host.Hris.Repositories;
@@ -67,6 +68,11 @@ var platformModules = ModuleDiscovery.DiscoverModules(modulesPath);
 builder.Host.UseServiceProviderFactory(new AutofacServiceProviderFactory());
 builder.Host.ConfigureContainer<ContainerBuilder>(autofacBuilder =>
 {
+    // Run progress notifier — singleton shared by PayrollRunJob and Blazor pages
+    autofacBuilder.RegisterType<RunProgressNotifier>()
+                  .As<IRunProgressNotifier>()
+                  .SingleInstance();
+
     // Core platform services
     autofacBuilder.RegisterType<ConnectionFactory>()
                   .As<IConnectionFactory>()
@@ -77,10 +83,22 @@ builder.Host.ConfigureContainer<ContainerBuilder>(autofacBuilder =>
                   .As<IEventPublisher>()
                   .SingleInstance();
 
-    // Temporal context
-    autofacBuilder.RegisterType<SystemTemporalContext>()
-                  .As<ITemporalContext>()
-                  .SingleInstance();
+    // Temporal context — overridable when TEMPORAL_OVERRIDE_ENABLED = true
+    if (Environment.GetEnvironmentVariable("TEMPORAL_OVERRIDE_ENABLED") == "true")
+    {
+        var overridableCtx = new OverridableTemporalContext();
+        autofacBuilder.RegisterInstance(overridableCtx).As<ITemporalContext>().SingleInstance();
+        autofacBuilder.RegisterInstance(overridableCtx).As<ITemporalOverrideService>().SingleInstance();
+    }
+    else
+    {
+        autofacBuilder.RegisterType<SystemTemporalContext>()
+                      .As<ITemporalContext>()
+                      .SingleInstance();
+        autofacBuilder.RegisterInstance(new NullTemporalOverrideService())
+                      .As<ITemporalOverrideService>()
+                      .SingleInstance();
+    }
 
     // Lookup cache — must be singleton so it is initialised once and shared
     autofacBuilder.RegisterType<LookupCache>()
@@ -212,6 +230,11 @@ builder.Host.ConfigureContainer<ContainerBuilder>(autofacBuilder =>
     autofacBuilder.RegisterType<OnboardingService>()
                   .As<IOnboardingService>()
                   .InstancePerLifetimeScope();
+
+    // Fallback no-op for optional Core abstractions — modules override via last-registration-wins
+    autofacBuilder.RegisterType<NullPayrollContextLookup>()
+                  .As<IPayrollContextLookup>()
+                  .SingleInstance();
 
     // Register each discovered module's services
     foreach (var module in platformModules)
@@ -362,7 +385,18 @@ builder.Services.AddHostedService<DocumentExpirationCheckJob>();
 var app = builder.Build();
 
 // ---------------------------------------------------------------------------
-// 10b. --check-db mode: verify DB connectivity and exit immediately.
+// 10b. Wire module event subscriptions — must run after container is built
+//      so all singleton handlers are available for resolution.
+// ---------------------------------------------------------------------------
+{
+    var eventPublisher  = app.Services.GetRequiredService<IEventPublisher>();
+    var eventSubscribers = app.Services.GetServices<IEventSubscriber>();
+    foreach (var subscriber in eventSubscribers)
+        subscriber.RegisterHandlers(eventPublisher);
+}
+
+// ---------------------------------------------------------------------------
+// 10d. --check-db mode: verify DB connectivity and exit immediately.
 //      Used by build scripts; must not start the HTTP server.
 // ---------------------------------------------------------------------------
 if (args.Contains("--check-db"))
@@ -382,7 +416,7 @@ if (args.Contains("--check-db"))
 }
 
 // ---------------------------------------------------------------------------
-// 10c. Initialise lookup cache — must run before any request is served
+// 10e. Initialise lookup cache — must run before any request is served
 // ---------------------------------------------------------------------------
 await app.Services.GetRequiredService<ILookupCache>().RefreshAsync();
 

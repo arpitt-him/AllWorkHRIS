@@ -34,8 +34,9 @@ public interface IEmploymentService
     Task              TerminateEmployeeAsync(TerminateEmployeeCommand command);
     Task<Employment?> GetByIdAsync(Guid employmentId);
     Task<Employment?> GetActiveEmploymentAsync(Guid employmentId, DateOnly? asOf = null);
-    Task<PagedResult<EmploymentListItem>> GetPagedListAsync(EmployeeListQuery query);
-    Task<EmployeeStatCards>               GetStatCardsAsync(DateOnly asOf);
+    Task<PagedResult<EmploymentListItem>>   GetPagedListAsync(EmployeeListQuery query);
+    Task<IReadOnlyList<EmploymentListItem>> GetAllActiveListAsync();
+    Task<EmployeeStatCards>                GetStatCardsAsync(DateOnly asOf);
 }
 
 public sealed class EmploymentService : IEmploymentService
@@ -335,6 +336,9 @@ public sealed class EmploymentService : IEmploymentService
     public async Task<PagedResult<EmploymentListItem>> GetPagedListAsync(EmployeeListQuery query)
         => await _employmentRepository.GetPagedListAsync(query);
 
+    public async Task<IReadOnlyList<EmploymentListItem>> GetAllActiveListAsync()
+        => await _employmentRepository.GetAllActiveListAsync();
+
     public async Task<EmployeeStatCards> GetStatCardsAsync(DateOnly asOf)
         => await _employmentRepository.GetStatCardsAsync(asOf);
 
@@ -618,6 +622,7 @@ public interface IOrgStructureService
 {
     Task<OrgUnit?>                     GetOrgUnitByIdAsync(Guid orgUnitId);
     Task<IEnumerable<OrgUnit>>         GetLegalEntitiesAsync();
+    Task<IEnumerable<OrgUnit>>         GetDivisionsAsync();
     Task<IEnumerable<OrgUnit>>         GetDepartmentsAsync();
     Task<IEnumerable<OrgUnit>>         GetLocationsAsync();
     Task<IEnumerable<OrgUnit>>         GetChildrenAsync(Guid parentOrgUnitId);
@@ -633,6 +638,7 @@ public sealed class OrgStructureService : IOrgStructureService
     private readonly ILookupCache        _lookupCache;
 
     private readonly int _legalEntityTypeId;
+    private readonly int _divisionTypeId;
     private readonly int _departmentTypeId;
     private readonly int _locationTypeId;
     private readonly int _activeStatusId;
@@ -646,6 +652,7 @@ public sealed class OrgStructureService : IOrgStructureService
         _orgUnitRepository  = orgUnitRepository;
         _lookupCache        = lookupCache;
         _legalEntityTypeId  = lookupCache.GetId(LookupTables.OrgUnitType, "LEGAL_ENTITY");
+        _divisionTypeId     = lookupCache.GetId(LookupTables.OrgUnitType, "DIVISION");
         _departmentTypeId   = lookupCache.GetId(LookupTables.OrgUnitType, "DEPARTMENT");
         _locationTypeId     = lookupCache.GetId(LookupTables.OrgUnitType, "LOCATION");
         _activeStatusId     = lookupCache.GetId(LookupTables.OrgStatus,   "ACTIVE");
@@ -656,6 +663,9 @@ public sealed class OrgStructureService : IOrgStructureService
 
     public async Task<IEnumerable<OrgUnit>> GetLegalEntitiesAsync()
         => await _orgUnitRepository.GetByTypeAsync(_legalEntityTypeId);
+
+    public async Task<IEnumerable<OrgUnit>> GetDivisionsAsync()
+        => await _orgUnitRepository.GetByTypeAsync(_divisionTypeId);
 
     public async Task<IEnumerable<OrgUnit>> GetDepartmentsAsync()
         => await _orgUnitRepository.GetByTypeAsync(_departmentTypeId);

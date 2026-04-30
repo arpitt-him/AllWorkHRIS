@@ -1,5 +1,6 @@
 @* AllWorkHRIS.Host/Components/Pages/Hris/HireEmployeePanel.razor *@
 @* Multi-step hire form — embedded as a panel overlay *@
+@using AllWorkHRIS.Core.Composition
 @using AllWorkHRIS.Core.Lookups
 @using AllWorkHRIS.Host.Hris.Commands
 @using AllWorkHRIS.Host.Hris.Domain
@@ -10,6 +11,7 @@
 @inject IJobRepository        JobRepository
 @inject ILookupCache          LookupCache
 @inject AuthenticationStateProvider AuthStateProvider
+@inject IPayrollContextLookup PayrollContextLookup
 
 <div class="panel-overlay" @onclick="OnOverlayClick">
     <div class="hire-panel" @onclick:stopPropagation>
@@ -266,6 +268,19 @@
                             <option value="PROMOTION">Promotion</option>
                         </select>
                     </div>
+                    @if (_payrollContexts.Count > 0)
+                    {
+                        <div class="form-field">
+                            <label>Payroll Context (optional)</label>
+                            <select @bind="_payrollContextIdStr">
+                                <option value="">— Enroll later —</option>
+                                @foreach (var (id, name) in _payrollContexts)
+                                {
+                                    <option value="@id">@name</option>
+                                }
+                            </select>
+                        </div>
+                    }
                 </div>
             }
 
@@ -322,6 +337,22 @@
                         <div class="review-row"><span>Rate Type</span><span>@LookupLabel(_rateTypes, _cmd.RateTypeId)</span></div>
                         <div class="review-row"><span>Base Rate</span><span>@(_cmd.BaseRate % 1 == 0 ? _cmd.BaseRate.ToString("C0") : _cmd.BaseRate.ToString("C"))</span></div>
                         <div class="review-row"><span>Pay Frequency</span><span>@LookupLabel(_payFrequencies, _cmd.PayFrequencyId)</span></div>
+                        @if (_payrollContexts.Count > 0)
+                        {
+                            <div class="review-row">
+                                <span>Payroll Context</span>
+                                <span>
+                                    @if (Guid.TryParse(_payrollContextIdStr, out var reviewPcId))
+                                    {
+                                        @(_payrollContexts.FirstOrDefault(c => c.Id == reviewPcId).Name)
+                                    }
+                                    else
+                                    {
+                                        <span style="color:#6B7280;font-style:italic">Enroll later</span>
+                                    }
+                                </span>
+                            </div>
+                        }
                     </div>
                 </div>
             }
@@ -371,10 +402,12 @@
     private string     _locationId    = string.Empty;
 
     // Reference data — org/job loaded from DB
-    private List<OrgUnit> _legalEntities = [];
-    private List<OrgUnit> _departments   = [];
-    private List<OrgUnit> _locations     = [];
-    private List<Job>     _jobs          = [];
+    private List<OrgUnit> _legalEntities    = [];
+    private List<OrgUnit> _departments      = [];
+    private List<OrgUnit> _locations        = [];
+    private List<Job>     _jobs             = [];
+    private List<(Guid Id, string Name)> _payrollContexts = [];
+    private string _payrollContextIdStr = "";
 
     // Reference data — lookup dropdowns loaded from cache
     private IReadOnlyList<LookupEntry> _employmentTypes      = [];
@@ -395,6 +428,8 @@
         _fullPartTimeStatuses = LookupCache.GetAll(LookupTables.FullPartTimeStatus);
         _rateTypes           = LookupCache.GetAll(LookupTables.CompensationRateType);
         _payFrequencies      = LookupCache.GetAll(LookupTables.PayFrequency);
+
+        _payrollContexts = (await PayrollContextLookup.GetActiveContextsAsync()).ToList();
     }
 
     private void NextStep()
@@ -494,6 +529,7 @@
                 BaseRate             = _cmd.BaseRate,
                 PayFrequencyId       = _cmd.PayFrequencyId,
                 ChangeReasonCode     = _cmd.ChangeReasonCode!,
+                PayrollContextId     = Guid.TryParse(_payrollContextIdStr, out var pcId) ? pcId : (Guid?)null,
                 InitiatedBy          = Guid.TryParse(initiatedBy, out var uid) ? uid : Guid.Empty
             };
 

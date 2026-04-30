@@ -1,0 +1,18 @@
+@page "/payroll/accumulators"
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = "PayrollOperator,PayrollAdmin")]
+@using Microsoft.AspNetCore.Authorization
+
+<PageTitle>Accumulators — AllWork HRIS</PageTitle>
+
+<div class="page-container">
+    <div class="page-header">
+        <h2 class="page-title">Accumulators</h2>
+    </div>
+    <div class="panel-card">
+        <p style="color:#6B7280;font-size:var(--font-size-sm);">
+            Accumulator balances by employee, period, and legal entity will be displayed here.
+            This view is planned for a future release.
+        </p>
+    </div>
+</div>

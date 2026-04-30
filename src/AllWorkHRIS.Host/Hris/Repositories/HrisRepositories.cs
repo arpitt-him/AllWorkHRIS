@@ -202,6 +202,7 @@ public interface IEmploymentRepository
     Task                                      UpdateStatusAsync(Guid employmentId, int statusId,
                                                   DateOnly effectiveDate, IUnitOfWork uow);
     Task<PagedResult<EmploymentListItem>>     GetPagedListAsync(EmployeeListQuery query);
+    Task<IReadOnlyList<EmploymentListItem>>   GetAllActiveListAsync();
     Task<EmployeeStatCards>                   GetStatCardsAsync(DateOnly asOf);
 }
 
@@ -385,6 +386,39 @@ public sealed class EmploymentRepository : IEmploymentRepository
             Page       = query.Page,
             PageSize   = query.PageSize
         };
+    }
+
+    public async Task<IReadOnlyList<EmploymentListItem>> GetAllActiveListAsync()
+    {
+        const string sql = """
+            SELECT DISTINCT ON (e.employment_id)
+                e.employment_id, e.person_id, p.legal_first_name, p.legal_last_name,
+                p.preferred_name, e.employee_number,
+                les.code  AS employment_status,
+                let2.code AS employment_type,
+                e.employment_start_date, j.job_title,
+                div.org_unit_name AS division_name,  div.org_unit_id AS division_id,
+                d.org_unit_name   AS department_name, d.org_unit_id   AS department_id,
+                l.org_unit_name   AS location_name,   l.org_unit_id   AS location_id
+            FROM employment e
+            INNER JOIN person p ON p.person_id = e.person_id
+            LEFT JOIN lkp_employment_status les  ON les.id  = e.employment_status_id
+            LEFT JOIN lkp_employment_type   let2 ON let2.id = e.employment_type_id
+            LEFT JOIN assignment a ON a.employment_id = e.employment_id
+                AND a.assignment_type_id   = (SELECT id FROM lkp_assignment_type   WHERE code = 'PRIMARY')
+                AND a.assignment_status_id = (SELECT id FROM lkp_assignment_status WHERE code = 'ACTIVE')
+            LEFT JOIN job j      ON j.job_id           = a.job_id
+            LEFT JOIN org_unit d ON d.org_unit_id      = a.department_id
+            LEFT JOIN org_unit l ON l.org_unit_id      = a.location_id
+            LEFT JOIN org_unit div ON div.org_unit_id  = d.parent_org_unit_id
+                AND div.org_unit_type_id = (SELECT id FROM lkp_org_unit_type WHERE code = 'DIVISION')
+            WHERE e.employment_status_id NOT IN (
+                SELECT id FROM lkp_employment_status WHERE code IN ('TERMINATED', 'CLOSED')
+            )
+            ORDER BY e.employment_id, p.legal_last_name, p.legal_first_name
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        return (await conn.QueryAsync<EmploymentListItem>(sql)).ToList();
     }
 
     public async Task<EmployeeStatCards> GetStatCardsAsync(DateOnly asOf)

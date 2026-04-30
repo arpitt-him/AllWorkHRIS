@@ -5,7 +5,7 @@
 
 @if (_user is not null)
 {
-    @foreach (var parent in TopLevelItems)
+    @foreach (var parent in TopLevelItems.Where(p => ChildrenOf(p.Label).Any()))
     {
         <div class="nav-group">
             <div class="nav-item nav-parent">
@@ -45,7 +45,10 @@
     private IEnumerable<MenuContribution> ChildrenOf(string parentLabel) =>
         Items.Where(i => i.ParentLabel == parentLabel && IsAuthorised(i));
 
-    private bool IsAuthorised(MenuContribution item) =>
-		item.RequiredRole is null || 
-			(_user?.Claims.Any(c => c.Type == "roles" && c.Value == item.RequiredRole) ?? false);
+    private bool IsAuthorised(MenuContribution item)
+    {
+        if (item.RequiredRole is null) return true;
+        var required = item.RequiredRole.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        return required.Any(r => _user?.Claims.Any(c => c.Type == "roles" && c.Value == r) ?? false);
+    }
 }

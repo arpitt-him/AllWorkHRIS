@@ -12,7 +12,7 @@ public sealed class CalculationEngine : ICalculationEngine
 
     public async Task<CalculationOutput> CalculateAsync(CalculationInput input, CancellationToken ct = default)
     {
-        var employeePayrollResultId = Guid.NewGuid();
+        var employeePayrollResultId = input.EmployeePayrollResultId;
 
         try
         {
@@ -70,16 +70,20 @@ public sealed class CalculationEngine : ICalculationEngine
                 await _resultLineRepo.InsertEmployerContributionLineAsync(line);
 
             // Step 9 — Net pay
-            var totalDeductions = preTaxDeductions.Concat(postTaxDeductions).Sum(l => l.CalculatedAmount);
-            var totalTax        = taxLines.Sum(l => l.CalculatedAmount);
-            var netPay          = grossPay - totalDeductions - totalTax;
+            var totalDeductions  = preTaxDeductions.Concat(postTaxDeductions).Sum(l => l.CalculatedAmount);
+            var totalTax         = taxLines.Sum(l => l.CalculatedAmount);
+            var totalContribs    = employerContributions.Sum(l => l.CalculatedAmount);
+            var netPay           = grossPay - totalDeductions - totalTax;
 
             return new CalculationOutput
             {
-                EmployeePayrollResultId = employeePayrollResultId,
-                Succeeded               = true,
-                GrossPay                = grossPay,
-                NetPay                  = netPay
+                EmployeePayrollResultId    = employeePayrollResultId,
+                Succeeded                  = true,
+                GrossPay                   = grossPay,
+                TotalDeductionsAmount      = totalDeductions,
+                TotalEmployeeTaxAmount     = totalTax,
+                TotalEmployerContribAmount = totalContribs,
+                NetPay                     = netPay
             };
         }
         catch (OperationCanceledException)
@@ -90,11 +94,14 @@ public sealed class CalculationEngine : ICalculationEngine
         {
             return new CalculationOutput
             {
-                EmployeePayrollResultId = employeePayrollResultId,
-                Succeeded               = false,
-                FailureReason           = ex.Message,
-                GrossPay                = 0m,
-                NetPay                  = 0m
+                EmployeePayrollResultId    = employeePayrollResultId,
+                Succeeded                  = false,
+                FailureReason              = ex.Message,
+                GrossPay                   = 0m,
+                TotalDeductionsAmount      = 0m,
+                TotalEmployeeTaxAmount     = 0m,
+                TotalEmployerContribAmount = 0m,
+                NetPay                     = 0m
             };
         }
     }
