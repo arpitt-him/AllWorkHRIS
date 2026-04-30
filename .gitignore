@@ -42,6 +42,9 @@ publish/
 *.pubxml
 *.pubxml.user
 
+## Module drop folder — populated by post-build copy target; not source-controlled
+src/AllWorkHRIS.Host/modules/
+
 ## Resharper / Rider
 .idea/
 *.DotSettings.user

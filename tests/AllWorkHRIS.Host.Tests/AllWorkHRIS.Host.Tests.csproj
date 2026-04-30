@@ -15,7 +15,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Autofac" Version="9.1.0" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\AllWorkHRIS.Host\AllWorkHRIS.Host.csproj" />
+    <ProjectReference Include="..\..\src\AllWorkHRIS.Module.Payroll\AllWorkHRIS.Module.Payroll.csproj" />
   </ItemGroup>
 
   <ItemGroup>

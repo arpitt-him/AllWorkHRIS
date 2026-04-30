@@ -285,6 +285,7 @@ var allMenuItems = hrisMenuItems
     .ToList();
 
 builder.Services.AddSingleton<IReadOnlyList<MenuContribution>>(allMenuItems);
+builder.Services.AddSingleton<IReadOnlyList<IPlatformModule>>(platformModules);
 
 // ---------------------------------------------------------------------------
 // 6. Tenant registry — single dev tenant for Phase 1

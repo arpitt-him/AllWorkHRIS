@@ -19,7 +19,7 @@ public static class ModuleDiscovery
             .GetFiles(modulesPath, "AllWorkHRIS.Module.*.dll")
             .Select(path =>
             {
-                var assembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(path);
+                var assembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(Path.GetFullPath(path));
                 Console.WriteLine($"[ModuleDiscovery] Loaded assembly: {assembly.GetName().Name}");
                 return assembly;
             })

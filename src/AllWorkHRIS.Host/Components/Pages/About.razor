@@ -1,0 +1,112 @@
+@page "/about"
+@using AllWorkHRIS.Core.Composition
+@inject IReadOnlyList<IPlatformModule> Modules
+
+<PageTitle>About — AllWork HRIS</PageTitle>
+
+<div class="page-header">
+    <h1 class="page-title">About</h1>
+    <p class="page-subtitle">AllWork HRIS Platform — loaded modules and version information.</p>
+</div>
+
+<div class="about-section">
+    <h2 class="section-title">Platform</h2>
+    <table class="about-table">
+        <tbody>
+            <tr>
+                <th>Application</th>
+                <td>AllWork HRIS</td>
+            </tr>
+            <tr>
+                <th>Runtime</th>
+                <td>.NET @System.Environment.Version.ToString(3)</td>
+            </tr>
+            <tr>
+                <th>Environment</th>
+                <td>@(System.Environment.GetEnvironmentVariable("APP_ENVIRONMENT") ?? "development")</td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+
+<div class="about-section">
+    <h2 class="section-title">Loaded Modules</h2>
+
+    @if (Modules.Count == 0)
+    {
+        <p class="empty-state">No plug-in modules are loaded. Check the <code>MODULES_PATH</code> environment variable.</p>
+    }
+    else
+    {
+        <table class="about-table modules-table">
+            <thead>
+                <tr>
+                    <th>Module</th>
+                    <th>Version</th>
+                    <th>Description</th>
+                    <th>Menu Items</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var module in Modules.OrderBy(m => m.ModuleName))
+                {
+                    <tr>
+                        <td class="module-name">@module.ModuleName</td>
+                        <td class="module-version">@module.ModuleVersion</td>
+                        <td class="module-description">@(module.ModuleDescription ?? "—")</td>
+                        <td class="module-menu-count">@module.GetMenuContributions().Count()</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</div>
+
+<style>
+    .about-section {
+        margin-bottom: 2rem;
+    }
+
+    .section-title {
+        font-size: 1rem;
+        font-weight: 600;
+        color: var(--color-text-secondary, #6b7280);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: 0.75rem;
+    }
+
+    .about-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.875rem;
+    }
+
+    .about-table th,
+    .about-table td {
+        padding: 0.5rem 0.75rem;
+        text-align: left;
+        border-bottom: 1px solid var(--color-border, #e5e7eb);
+    }
+
+    .about-table thead th {
+        font-weight: 600;
+        color: var(--color-text-secondary, #6b7280);
+        background: var(--color-surface-alt, #f9fafb);
+    }
+
+    .about-table tbody th {
+        font-weight: 500;
+        color: var(--color-text-secondary, #6b7280);
+        width: 12rem;
+    }
+
+    .module-name    { font-weight: 600; }
+    .module-version { font-family: monospace; color: var(--color-text-secondary, #6b7280); }
+    .module-menu-count { text-align: center; }
+
+    .empty-state {
+        color: var(--color-text-secondary, #6b7280);
+        font-style: italic;
+    }
+</style>
