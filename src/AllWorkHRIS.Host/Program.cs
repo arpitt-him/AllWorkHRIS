@@ -6,8 +6,10 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.IdentityModel.Tokens;
+using Serilog;
 using Syncfusion.Blazor;
 using AllWorkHRIS.Core;
+using AllWorkHRIS.Core.Audit;
 using AllWorkHRIS.Core.Composition;
 using AllWorkHRIS.Core.Data;
 using AllWorkHRIS.Core.Events;
@@ -20,6 +22,7 @@ using AllWorkHRIS.Host.Hris.Domain;
 using AllWorkHRIS.Host.Hris.Jobs;
 using AllWorkHRIS.Host.Hris.Repositories;
 using AllWorkHRIS.Host.Hris.Services;
+using AllWorkHRIS.Host.Platform.Audit;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -63,6 +66,15 @@ var modulesPath = Environment.GetEnvironmentVariable("MODULES_PATH") ?? "./modul
 var platformModules = ModuleDiscovery.DiscoverModules(modulesPath);
 
 // ---------------------------------------------------------------------------
+// 3b. Serilog — replace default logging before any services are registered
+// ---------------------------------------------------------------------------
+builder.Host.UseSerilog((ctx, cfg) =>
+    cfg.ReadFrom.Configuration(ctx.Configuration)
+       .Enrich.FromLogContext()
+       .Enrich.WithMachineName()
+       .Enrich.WithEnvironmentUserName());
+
+// ---------------------------------------------------------------------------
 // 4. Replace default DI with Autofac
 // ---------------------------------------------------------------------------
 builder.Host.UseServiceProviderFactory(new AutofacServiceProviderFactory());
@@ -86,7 +98,8 @@ builder.Host.ConfigureContainer<ContainerBuilder>(autofacBuilder =>
     // Temporal context — overridable when TEMPORAL_OVERRIDE_ENABLED = true
     if (Environment.GetEnvironmentVariable("TEMPORAL_OVERRIDE_ENABLED") == "true")
     {
-        var overridableCtx = new OverridableTemporalContext();
+        var persistPath    = Path.Combine(AppContext.BaseDirectory, "temporal-override.dat");
+        var overridableCtx = new OverridableTemporalContext(persistPath);
         autofacBuilder.RegisterInstance(overridableCtx).As<ITemporalContext>().SingleInstance();
         autofacBuilder.RegisterInstance(overridableCtx).As<ITemporalOverrideService>().SingleInstance();
     }
@@ -175,6 +188,14 @@ builder.Host.ConfigureContainer<ContainerBuilder>(autofacBuilder =>
                   .As<IPositionService>()
                   .InstancePerLifetimeScope();
 
+    autofacBuilder.RegisterType<AllWorkHRIS.Host.Payroll.Services.PayrollSessionState>()
+                  .As<AllWorkHRIS.Host.Payroll.Services.IPayrollSessionState>()
+                  .InstancePerLifetimeScope();
+
+    autofacBuilder.RegisterType<AllWorkHRIS.Host.Hris.Services.HrisSessionState>()
+                  .As<AllWorkHRIS.Host.Hris.Services.IHrisSessionState>()
+                  .InstancePerLifetimeScope();
+
     // -----------------------------------------------------------------------
     // PHASE 3 — Leave, Documents, Onboarding, Work Queue
     // -----------------------------------------------------------------------
@@ -236,9 +257,20 @@ builder.Host.ConfigureContainer<ContainerBuilder>(autofacBuilder =>
                   .As<IPayrollContextLookup>()
                   .SingleInstance();
 
+    // Audit service — NullAuditService is the fallback for module isolation tests;
+    // AuditService (below) overrides it via last-registration-wins in the full host.
+    autofacBuilder.RegisterType<NullAuditService>()
+                  .As<IAuditService>()
+                  .SingleInstance();
+
     // Register each discovered module's services
     foreach (var module in platformModules)
         module.Register(autofacBuilder);
+
+    // AuditService overrides NullAuditService — registered after modules so it wins
+    autofacBuilder.RegisterType<AuditService>()
+                  .As<IAuditService>()
+                  .SingleInstance();
 });
 
 // ---------------------------------------------------------------------------
@@ -331,10 +363,16 @@ builder.Services.AddSingleton(tenantRegistry);
 builder.Services.AddSyncfusionBlazor();
 
 // ---------------------------------------------------------------------------
+// 7b. HTTP context accessor — needed by AuditService to resolve actor info
+// ---------------------------------------------------------------------------
+builder.Services.AddHttpContextAccessor();
+
+// ---------------------------------------------------------------------------
 // 8. Blazor Server
 // ---------------------------------------------------------------------------
 builder.Services.AddRazorComponents()
-    .AddInteractiveServerComponents();
+    .AddInteractiveServerComponents()
+    .AddHubOptions(o => o.MaximumReceiveMessageSize = 32 * 1024 * 1024); // 32 MB for file uploads (JS interop Uint8Array adds ~33% overhead)
 
 // ---------------------------------------------------------------------------
 // 9. Authentication — OIDC scaffold per ADR-009
@@ -454,7 +492,7 @@ app.MapGet("/api/documents/{id:guid}/content", async (
     try
     {
         var doc = await docRepo.GetByIdAsync(id);
-        if (doc is null) return Results.NotFound();
+        if (doc is null || string.IsNullOrEmpty(doc.StorageReference)) return Results.NotFound();
         var stream   = await docService.DownloadDocumentAsync(id, actorId);
         var fileName = $"{doc.DocumentName}.{doc.FileFormat.ToLower()}";
         return Results.File(stream, "application/octet-stream", fileName);

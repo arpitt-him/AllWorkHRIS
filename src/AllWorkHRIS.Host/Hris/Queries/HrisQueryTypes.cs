@@ -13,6 +13,7 @@ public sealed record EmployeeListQuery
 {
     public int       Page          { get; init; } = 1;
     public int       PageSize      { get; init; } = 20;
+    public Guid?     LegalEntityId { get; init; }
     public string?   SearchTerm    { get; init; }
     public string?   Status        { get; init; }
     public Guid?     DepartmentId  { get; init; }
@@ -40,6 +41,10 @@ public sealed record EmploymentListItem
     public Guid?    DepartmentId        { get; init; }
     public string?  LocationName        { get; init; }
     public Guid?    LocationId          { get; init; }
+    public int?     RateTypeId          { get; init; }
+    public string?  RateTypeCode        { get; init; }
+    public int?     PayFrequencyId      { get; init; }
+    public string?  PayFrequencyCode    { get; init; }
 }
 
 public sealed record HireResult

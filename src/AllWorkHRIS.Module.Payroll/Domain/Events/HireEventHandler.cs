@@ -30,6 +30,7 @@ public sealed class HireEventHandler
             EffectiveStartDate  = payload.EffectiveDate,
             EffectiveEndDate    = null,
             FinalPayFlag        = false,
+            BlockingTasksCleared = false,
             EnrollmentSource    = "AUTO_HIRE",
             CreatedBy           = payload.EventId,
             CreationTimestamp   = now,

@@ -28,6 +28,7 @@ public static class LookupTables
     public const string OnboardingTaskStatus   = "lkp_onboarding_task_status";
     public const string OrgUnitType            = "lkp_org_unit_type";
     public const string OrgStatus              = "lkp_org_status";
+    public const string LegalEntityType        = "lkp_legal_entity_type";
     public const string WorkLocationType       = "lkp_work_location_type";
     public const string JobStatus              = "lkp_job_status";
     public const string PositionStatus         = "lkp_position_status";

@@ -123,7 +123,7 @@ public sealed class LeaveRequestRepository : ILeaveRequestRepository
         await uow.Connection.ExecuteAsync(
             @"UPDATE leave_request
               SET leave_status_id = @StatusId, last_updated_by = @ActorId,
-                  last_update_timestamp = now()
+                  last_update_timestamp = CURRENT_TIMESTAMP
               WHERE leave_request_id = @Id",
             new { Id = leaveRequestId, StatusId = statusId, ActorId = actorId },
             uow.Transaction);
@@ -133,7 +133,7 @@ public sealed class LeaveRequestRepository : ILeaveRequestRepository
     {
         await uow.Connection.ExecuteAsync(
             @"UPDATE leave_request
-              SET actual_return_date = @ReturnDate, last_update_timestamp = now()
+              SET actual_return_date = @ReturnDate, last_update_timestamp = CURRENT_TIMESTAMP
               WHERE leave_request_id = @Id",
             new { Id = leaveRequestId, ReturnDate = returnDate.ToDateTime(TimeOnly.MinValue) },
             uow.Transaction);
@@ -145,7 +145,7 @@ public sealed class LeaveRequestRepository : ILeaveRequestRepository
         await uow.Connection.ExecuteAsync(
             @"UPDATE leave_request
               SET approved_by = @ApprovedBy, approval_timestamp = @Timestamp,
-                  last_update_timestamp = now()
+                  last_update_timestamp = CURRENT_TIMESTAMP
               WHERE leave_request_id = @Id",
             new { Id = leaveRequestId, ApprovedBy = approvedBy, Timestamp = timestamp },
             uow.Transaction);
@@ -204,7 +204,7 @@ public sealed class LeaveBalanceRepository : ILeaveBalanceRepository
               SET available_balance = available_balance - @Days,
                   pending_balance   = pending_balance + @Days,
                   used_balance      = used_balance + @Days,
-                  last_update_timestamp = now()
+                  last_update_timestamp = CURRENT_TIMESTAMP
               WHERE employment_id = @EmploymentId AND leave_type_id = @LeaveTypeId
                 AND plan_year_start = (
                     SELECT MAX(plan_year_start) FROM leave_balance
@@ -219,9 +219,9 @@ public sealed class LeaveBalanceRepository : ILeaveBalanceRepository
         await uow.Connection.ExecuteAsync(
             @"UPDATE leave_balance
               SET available_balance = available_balance + @Days,
-                  pending_balance   = GREATEST(pending_balance - @Days, 0),
-                  used_balance      = GREATEST(used_balance - @Days, 0),
-                  last_update_timestamp = now()
+                  pending_balance   = CASE WHEN pending_balance > @Days THEN pending_balance - @Days ELSE 0 END,
+                  used_balance      = CASE WHEN used_balance    > @Days THEN used_balance    - @Days ELSE 0 END,
+                  last_update_timestamp = CURRENT_TIMESTAMP
               WHERE employment_id = @EmploymentId AND leave_type_id = @LeaveTypeId
                 AND plan_year_start = (
                     SELECT MAX(plan_year_start) FROM leave_balance

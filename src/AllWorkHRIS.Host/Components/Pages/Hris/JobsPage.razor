@@ -1,5 +1,7 @@
 @page "/hris/jobs"
+@layout HrisShell
 @rendermode InteractiveServer
+@implements IDisposable
 @attribute [Authorize(Roles = "HrisViewer,HrisAdmin")]
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Components.Authorization
@@ -7,10 +9,13 @@
 @using AllWorkHRIS.Host.Hris.Commands
 @using AllWorkHRIS.Host.Hris.Services
 @using AllWorkHRIS.Host.Hris.Domain
+@using AllWorkHRIS.Core.Temporal
 @inject IJobService           JobService
 @inject IPositionService      PositionService
 @inject IOrgStructureService  OrgStructureService
+@inject IHrisSessionState     SessionState
 @inject ILookupCache          LookupCache
+@inject ITemporalContext      TemporalContext
 
 <PageTitle>Jobs & Positions — AllWork HRIS</PageTitle>
 
@@ -41,7 +46,7 @@
         <AuthorizeView Roles="HrisAdmin">
             <Authorized>
                 <button class="@(_showJobForm ? "btn-secondary btn-sm" : "btn-primary btn-sm")"
-                        @onclick="() => _showJobForm = !_showJobForm">
+                        @onclick="ToggleJobForm">
                     @(_showJobForm ? "Cancel" : "+ Add Job")
                 </button>
             </Authorized>
@@ -166,7 +171,7 @@
         <AuthorizeView Roles="HrisAdmin">
             <Authorized>
                 <button class="@(_showPositionForm ? "btn-secondary btn-sm" : "btn-primary btn-sm")"
-                        @onclick="() => _showPositionForm = !_showPositionForm"
+                        @onclick="TogglePositionForm"
                         disabled="@(_jobs.Count == 0)">
                     @(_showPositionForm ? "Cancel" : "+ Add Position")
                 </button>
@@ -293,7 +298,7 @@
     private string   _jobLevel       = "";
     private string   _jobFlsaCode    = "";
     private string   _jobEeoCode     = "";
-    private DateTime _jobEffectiveDate = DateTime.Today;
+    private DateTime _jobEffectiveDate;
     private string?  _jobError;
     private bool     _jobSaving      = false;
 
@@ -303,17 +308,35 @@
     private string   _posDeptId       = "";
     private string   _posTitle        = "";
     private int?     _posHeadcount;
-    private DateTime _posEffectiveDate = DateTime.Today;
+    private DateTime _posEffectiveDate;
     private string?  _posError;
     private bool     _posSaving       = false;
 
     protected override async Task OnInitializedAsync()
     {
+        SessionState.OnChanged += HandleEntityChanged;
+        if (SessionState.HasEntity)
+            await LoadDataAsync(SessionState.SelectedLegalEntityId!.Value);
+        else
+            _loading = false;
+    }
+
+    private void HandleEntityChanged()
+        => InvokeAsync(async () =>
+        {
+            if (SessionState.HasEntity)
+                await LoadDataAsync(SessionState.SelectedLegalEntityId!.Value);
+            StateHasChanged();
+        });
+
+    private async Task LoadDataAsync(Guid legalEntityId)
+    {
+        _loading = true;
         try
         {
-            var jobsTask  = JobService.GetAllActiveAsync();
-            var posTask   = PositionService.GetAllActiveAsync();
-            var deptTask  = OrgStructureService.GetDepartmentsAsync();
+            var jobsTask  = JobService.GetByLegalEntityAsync(legalEntityId);
+            var posTask   = PositionService.GetByLegalEntityAsync(legalEntityId);
+            var deptTask  = OrgStructureService.GetDepartmentsAsync(legalEntityId);
             await Task.WhenAll(jobsTask, posTask, deptTask);
             _jobs        = (await jobsTask).ToList();
             _positions   = (await posTask).ToList();
@@ -322,19 +345,38 @@
         finally { _loading = false; }
     }
 
+    public void Dispose()
+        => SessionState.OnChanged -= HandleEntityChanged;
+
+    private void ToggleJobForm()
+    {
+        _showJobForm = !_showJobForm;
+        if (_showJobForm)
+            _jobEffectiveDate = TemporalContext.GetOperativeDate();
+    }
+
+    private void TogglePositionForm()
+    {
+        _showPositionForm = !_showPositionForm;
+        if (_showPositionForm)
+            _posEffectiveDate = TemporalContext.GetOperativeDate();
+    }
+
     private async Task CreateJobAsync()
     {
         _jobError = null;
-        if (string.IsNullOrWhiteSpace(_jobCode))    { _jobError = "Job Code is required.";           return; }
-        if (string.IsNullOrWhiteSpace(_jobTitle))   { _jobError = "Job Title is required.";          return; }
+        if (!SessionState.HasEntity)                { _jobError = "No legal entity selected.";        return; }
+        if (string.IsNullOrWhiteSpace(_jobCode))    { _jobError = "Job Code is required.";            return; }
+        if (string.IsNullOrWhiteSpace(_jobTitle))   { _jobError = "Job Title is required.";           return; }
         if (string.IsNullOrWhiteSpace(_jobFlsaCode)){ _jobError = "FLSA Classification is required."; return; }
-        if (string.IsNullOrWhiteSpace(_jobEeoCode)) { _jobError = "EEO Category is required.";       return; }
+        if (string.IsNullOrWhiteSpace(_jobEeoCode)) { _jobError = "EEO Category is required.";        return; }
 
         _jobSaving = true;
         try
         {
             var command = new CreateJobCommand
             {
+                LegalEntityId         = SessionState.SelectedLegalEntityId!.Value,
                 JobCode               = _jobCode,
                 JobTitle              = _jobTitle,
                 JobFamily             = _jobFamily,
@@ -348,7 +390,7 @@
 
             _showJobForm = false;
             _jobCode = _jobTitle = _jobFamily = _jobLevel = _jobFlsaCode = _jobEeoCode = "";
-            _jobs = (await JobService.GetAllActiveAsync()).ToList();
+            _jobs = (await JobService.GetByLegalEntityAsync(SessionState.SelectedLegalEntityId!.Value)).ToList();
         }
         catch (Exception ex) { _jobError = ex.Message; }
         finally { _jobSaving = false; }
@@ -377,7 +419,8 @@
             _showPositionForm = false;
             _posJobId = _posDeptId = _posTitle = "";
             _posHeadcount = null;
-            _positions = (await PositionService.GetAllActiveAsync()).ToList();
+            if (SessionState.HasEntity)
+                _positions = (await PositionService.GetByLegalEntityAsync(SessionState.SelectedLegalEntityId!.Value)).ToList();
         }
         catch (Exception ex) { _posError = ex.Message; }
         finally { _posSaving = false; }

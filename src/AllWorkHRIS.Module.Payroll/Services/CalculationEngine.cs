@@ -1,18 +1,36 @@
+using Microsoft.Extensions.Logging;
 using AllWorkHRIS.Module.Payroll.Domain.Results;
 using AllWorkHRIS.Module.Payroll.Repositories;
 
 namespace AllWorkHRIS.Module.Payroll.Services;
 
-public sealed class CalculationEngine : ICalculationEngine
+public sealed partial class CalculationEngine : ICalculationEngine
 {
     private readonly IResultLineRepository _resultLineRepo;
+    private readonly ILogger<CalculationEngine> _logger;
 
-    public CalculationEngine(IResultLineRepository resultLineRepo)
-        => _resultLineRepo = resultLineRepo;
+    public CalculationEngine(IResultLineRepository resultLineRepo, ILogger<CalculationEngine> logger)
+    {
+        _resultLineRepo = resultLineRepo;
+        _logger         = logger;
+    }
+
+    [LoggerMessage(Level = LogLevel.Debug,
+        Message = "Calculating pay for employment {EmploymentId} (result {EmployeePayrollResultId})")]
+    private partial void LogCalculationStart(Guid employmentId, Guid employeePayrollResultId);
+
+    [LoggerMessage(Level = LogLevel.Debug,
+        Message = "Calculation complete for employment {EmploymentId}: gross={GrossPay:F4} net={NetPay:F4}")]
+    private partial void LogCalculationComplete(Guid employmentId, decimal grossPay, decimal netPay);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Calculation failed for employment {EmploymentId} (result {EmployeePayrollResultId}): {Reason}")]
+    private partial void LogCalculationFailed(Guid employmentId, Guid employeePayrollResultId, string reason);
 
     public async Task<CalculationOutput> CalculateAsync(CalculationInput input, CancellationToken ct = default)
     {
         var employeePayrollResultId = input.EmployeePayrollResultId;
+        LogCalculationStart(input.EmploymentId, employeePayrollResultId);
 
         try
         {
@@ -75,6 +93,8 @@ public sealed class CalculationEngine : ICalculationEngine
             var totalContribs    = employerContributions.Sum(l => l.CalculatedAmount);
             var netPay           = grossPay - totalDeductions - totalTax;
 
+            LogCalculationComplete(input.EmploymentId, grossPay, netPay);
+
             return new CalculationOutput
             {
                 EmployeePayrollResultId    = employeePayrollResultId,
@@ -92,6 +112,8 @@ public sealed class CalculationEngine : ICalculationEngine
         }
         catch (Exception ex)
         {
+            LogCalculationFailed(input.EmploymentId, employeePayrollResultId, ex.Message);
+
             return new CalculationOutput
             {
                 EmployeePayrollResultId    = employeePayrollResultId,
@@ -114,7 +136,36 @@ public sealed class CalculationEngine : ICalculationEngine
 
     private Task<IReadOnlyList<EarningsResultLine>> StepBaseEarningsAsync(
         CalculationInput input, Guid resultId, CancellationToken ct)
-        => Task.FromResult<IReadOnlyList<EarningsResultLine>>([]);
+    {
+        if (input.AnnualEquivalent is null or 0m || input.PeriodsPerYear == 0)
+            return Task.FromResult<IReadOnlyList<EarningsResultLine>>([]);
+
+        var periodAmount = Math.Round(input.AnnualEquivalent.Value / input.PeriodsPerYear, 4,
+                               MidpointRounding.AwayFromZero);
+
+        IReadOnlyList<EarningsResultLine> lines =
+        [
+            new EarningsResultLine
+            {
+                EarningsResultLineId    = Guid.NewGuid(),
+                EmployeePayrollResultId = resultId,
+                EmploymentId            = input.EmploymentId,
+                EarningsCode            = "REG",
+                EarningsDescription     = "Regular Salary",
+                Quantity                = null,
+                Rate                    = input.AnnualEquivalent.Value,
+                CalculatedAmount        = periodAmount,
+                JurisdictionSplitFlag   = false,
+                TaxableFlag             = true,
+                AccumulatorImpactFlag   = true,
+                SourceRuleVersionId     = null,
+                CorrectionFlag          = false,
+                CorrectsLineId          = null,
+                CreationTimestamp       = DateTimeOffset.UtcNow
+            }
+        ];
+        return Task.FromResult(lines);
+    }
 
     private Task<IReadOnlyList<EarningsResultLine>> StepPremiumEarningsAsync(
         CalculationInput input, Guid resultId, CancellationToken ct)

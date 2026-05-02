@@ -17,7 +17,7 @@ public interface IDocumentService
     Task<IEnumerable<HrDocument>> GetDocumentsAsync(Guid personId,
                                       Guid? employmentId = null);
     Task<Stream>                  DownloadDocumentAsync(Guid documentId, Guid requestedBy);
-    Task<IEnumerable<HrDocument>> GetExpiringDocumentsAsync(int withinDays,
+    Task<IEnumerable<HrDocument>> GetExpiringDocumentsAsync(int withinDays, DateOnly asOf,
                                       string? documentType = null);
     Task                          ExpireDocumentAsync(Guid documentId);
     Task<bool>                    IsI9VerifiedAsync(Guid personId, Guid employmentId);
@@ -235,13 +235,13 @@ public sealed class DocumentService : IDocumentService
     }
 
     public async Task<IEnumerable<HrDocument>> GetExpiringDocumentsAsync(
-        int withinDays, string? documentType = null)
+        int withinDays, DateOnly asOf, string? documentType = null)
     {
         int? documentTypeId = documentType is not null
             ? _lookupCache.GetId(LookupTables.DocumentType, documentType)
             : null;
 
-        return await _documentRepository.GetExpiringWithinAsync(withinDays, documentTypeId);
+        return await _documentRepository.GetExpiringWithinAsync(withinDays, asOf, documentTypeId);
     }
 
     public async Task ExpireDocumentAsync(Guid documentId)

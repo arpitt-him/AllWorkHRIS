@@ -35,8 +35,8 @@ public interface IEmploymentService
     Task<Employment?> GetByIdAsync(Guid employmentId);
     Task<Employment?> GetActiveEmploymentAsync(Guid employmentId, DateOnly? asOf = null);
     Task<PagedResult<EmploymentListItem>>   GetPagedListAsync(EmployeeListQuery query);
-    Task<IReadOnlyList<EmploymentListItem>> GetAllActiveListAsync();
-    Task<EmployeeStatCards>                GetStatCardsAsync(DateOnly asOf);
+    Task<IReadOnlyList<EmploymentListItem>> GetAllActiveListAsync(Guid? legalEntityId = null);
+    Task<EmployeeStatCards>                GetStatCardsAsync(DateOnly asOf, Guid? legalEntityId = null);
 }
 
 public sealed class EmploymentService : IEmploymentService
@@ -107,51 +107,58 @@ public sealed class EmploymentService : IEmploymentService
             throw new DomainException($"Employee number {command.EmployeeNumber} already exists.");
 
         using var uow = new UnitOfWork(_connectionFactory);
+
+        Guid personId;
+        Guid employmentId;
+        Guid eventId;
+
         try
         {
-            var person       = Person.CreateNew(command, _lookupCache);
-            var personId     = await _personRepository.InsertAsync(person, uow);
+            var person   = Person.CreateNew(command, _lookupCache);
+            personId     = await _personRepository.InsertAsync(person, uow);
 
-            var address      = PersonAddress.CreateFromHire(command, personId);
+            var address  = PersonAddress.CreateFromHire(command, personId);
             await _personAddressRepository.InsertAsync(address, uow);
 
-            var employment   = Employment.CreateFromHire(command, personId, _lookupCache);
-            var employmentId = await _employmentRepository.InsertAsync(employment, uow);
+            var employment = Employment.CreateFromHire(command, personId, _lookupCache);
+            employmentId   = await _employmentRepository.InsertAsync(employment, uow);
 
-            var assignment   = Assignment.CreateInitial(command, employmentId, _lookupCache);
+            var assignment = Assignment.CreateInitial(command, employmentId, _lookupCache);
             await _assignmentRepository.InsertAsync(assignment, uow);
 
             var compensation = CompensationRecord.CreateInitial(command, employmentId, _lookupCache);
             await _compensationRepository.InsertAsync(compensation, uow);
 
             var hireEvent = EmployeeEvent.CreateHire(employmentId, command, _lookupCache);
-            var eventId   = await _eventRepository.InsertAsync(hireEvent, uow);
+            eventId       = await _eventRepository.InsertAsync(hireEvent, uow);
 
             uow.Commit();
-
-            await _eventPublisher.PublishAsync(new HireEventPayload
-            {
-                EmploymentId     = employmentId,
-                PersonId         = personId,
-                EventId          = eventId,
-                TenantId         = Guid.Empty,
-                EffectiveDate    = command.EmploymentStartDate,
-                LegalEntityId    = command.LegalEntityId,
-                FlsaStatus       = _lookupCache.GetCode(LookupTables.FlsaStatus, command.FlsaStatusId),
-                PayrollContextId = command.PayrollContextId,
-                EventTimestamp   = DateTimeOffset.UtcNow
-            });
-
-            await _onboardingService.CreatePlanAsync(
-                employmentId, command.EmploymentStartDate, command.InitiatedBy);
-
-            return new HireResult(personId, employmentId, eventId);
         }
         catch
         {
             uow.Rollback();
             throw;
         }
+
+        // Post-commit: event publishing and onboarding plan creation are outside the
+        // rollback block — the transaction is already committed at this point.
+        await _eventPublisher.PublishAsync(new HireEventPayload
+        {
+            EmploymentId     = employmentId,
+            PersonId         = personId,
+            EventId          = eventId,
+            TenantId         = Guid.Empty,
+            EffectiveDate    = command.EmploymentStartDate,
+            LegalEntityId    = command.LegalEntityId,
+            FlsaStatus       = _lookupCache.GetCode(LookupTables.FlsaStatus, command.FlsaStatusId),
+            PayrollContextId = command.PayrollContextId,
+            EventTimestamp   = DateTimeOffset.UtcNow
+        });
+
+        await _onboardingService.CreatePlanAsync(
+            employmentId, command.EmploymentStartDate, command.InitiatedBy);
+
+        return new HireResult(personId, employmentId, eventId);
     }
 
     public async Task<HireResult> RehireEmployeeAsync(RehireEmployeeCommand command, Guid personId)
@@ -169,6 +176,10 @@ public sealed class EmploymentService : IEmploymentService
             .FirstOrDefault();
 
         using var uow = new UnitOfWork(_connectionFactory);
+
+        Guid employmentId;
+        Guid eventId;
+
         try
         {
             var now = DateTimeOffset.UtcNow;
@@ -202,7 +213,7 @@ public sealed class EmploymentService : IEmploymentService
                 LastUpdatedBy            = command.InitiatedBy.ToString()
             };
 
-            var employmentId = await _employmentRepository.InsertAsync(employment, uow);
+            employmentId = await _employmentRepository.InsertAsync(employment, uow);
 
             var assignment = new Assignment
             {
@@ -249,32 +260,32 @@ public sealed class EmploymentService : IEmploymentService
             await _compensationRepository.InsertAsync(compensation, uow);
 
             var rehireEvent = EmployeeEvent.CreateRehire(employmentId, command, _lookupCache);
-            var eventId     = await _eventRepository.InsertAsync(rehireEvent, uow);
+            eventId         = await _eventRepository.InsertAsync(rehireEvent, uow);
 
             uow.Commit();
-
-            await _eventPublisher.PublishAsync(new RehireEventPayload
-            {
-                EmploymentId      = employmentId,
-                PersonId          = personId,
-                EventId           = eventId,
-                TenantId          = Guid.Empty,
-                EffectiveDate     = command.EmploymentStartDate,
-                PriorEmploymentId = priorEmployment?.EmploymentId,
-                PayrollContextId  = command.PayrollContextId,
-                EventTimestamp    = DateTimeOffset.UtcNow
-            });
-
-            await _onboardingService.CreatePlanAsync(
-                employmentId, command.EmploymentStartDate, command.InitiatedBy);
-
-            return new HireResult(personId, employmentId, eventId);
         }
         catch
         {
             uow.Rollback();
             throw;
         }
+
+        await _eventPublisher.PublishAsync(new RehireEventPayload
+        {
+            EmploymentId      = employmentId,
+            PersonId          = personId,
+            EventId           = eventId,
+            TenantId          = Guid.Empty,
+            EffectiveDate     = command.EmploymentStartDate,
+            PriorEmploymentId = priorEmployment?.EmploymentId,
+            PayrollContextId  = command.PayrollContextId,
+            EventTimestamp    = DateTimeOffset.UtcNow
+        });
+
+        await _onboardingService.CreatePlanAsync(
+            employmentId, command.EmploymentStartDate, command.InitiatedBy);
+
+        return new HireResult(personId, employmentId, eventId);
     }
 
     public async Task TerminateEmployeeAsync(TerminateEmployeeCommand command)
@@ -287,33 +298,36 @@ public sealed class EmploymentService : IEmploymentService
             throw new DomainException("Employment is already terminated.");
 
         using var uow = new UnitOfWork(_connectionFactory);
+
+        Guid eventId;
+
         try
         {
             await _employmentRepository.UpdateStatusAsync(
                 command.EmploymentId, _terminatedStatusId, command.TerminationDate, uow);
 
             var terminationEvent = EmployeeEvent.CreateTermination(command.EmploymentId, command, _lookupCache);
-            var eventId = await _eventRepository.InsertAsync(terminationEvent, uow);
+            eventId = await _eventRepository.InsertAsync(terminationEvent, uow);
 
             uow.Commit();
-
-            await _eventPublisher.PublishAsync(new TerminationEventPayload
-            {
-                EmploymentId    = command.EmploymentId,
-                PersonId        = employment.PersonId,
-                EventId         = eventId,
-                TenantId        = Guid.Empty,
-                TerminationDate = command.TerminationDate,
-                EventType       = "TERMINATION",
-                ReasonCode      = command.ReasonCode,
-                EventTimestamp  = DateTimeOffset.UtcNow
-            });
         }
         catch
         {
             uow.Rollback();
             throw;
         }
+
+        await _eventPublisher.PublishAsync(new TerminationEventPayload
+        {
+            EmploymentId    = command.EmploymentId,
+            PersonId        = employment.PersonId,
+            EventId         = eventId,
+            TenantId        = Guid.Empty,
+            TerminationDate = command.TerminationDate,
+            EventType       = "TERMINATION",
+            ReasonCode      = command.ReasonCode,
+            EventTimestamp  = DateTimeOffset.UtcNow
+        });
     }
 
     public async Task<Employment?> GetByIdAsync(Guid employmentId)
@@ -336,11 +350,11 @@ public sealed class EmploymentService : IEmploymentService
     public async Task<PagedResult<EmploymentListItem>> GetPagedListAsync(EmployeeListQuery query)
         => await _employmentRepository.GetPagedListAsync(query);
 
-    public async Task<IReadOnlyList<EmploymentListItem>> GetAllActiveListAsync()
-        => await _employmentRepository.GetAllActiveListAsync();
+    public async Task<IReadOnlyList<EmploymentListItem>> GetAllActiveListAsync(Guid? legalEntityId = null)
+        => await _employmentRepository.GetAllActiveListAsync(legalEntityId);
 
-    public async Task<EmployeeStatCards> GetStatCardsAsync(DateOnly asOf)
-        => await _employmentRepository.GetStatCardsAsync(asOf);
+    public async Task<EmployeeStatCards> GetStatCardsAsync(DateOnly asOf, Guid? legalEntityId = null)
+        => await _employmentRepository.GetStatCardsAsync(asOf, legalEntityId);
 
     private static void ValidateHireCommand(HireEmployeeCommand command)
     {
@@ -563,13 +577,16 @@ public sealed class LifecycleEventService : ILifecycleEventService
 {
     private readonly IConnectionFactory       _connectionFactory;
     private readonly IEmployeeEventRepository _eventRepository;
+    private readonly ITemporalContext         _temporalContext;
 
     public LifecycleEventService(
         IConnectionFactory       connectionFactory,
-        IEmployeeEventRepository eventRepository)
+        IEmployeeEventRepository eventRepository,
+        ITemporalContext         temporalContext)
     {
         _connectionFactory = connectionFactory;
         _eventRepository   = eventRepository;
+        _temporalContext   = temporalContext;
     }
 
     public async Task<EmployeeEvent> InitiateEventAsync(Guid employmentId, int eventTypeId,
@@ -580,7 +597,7 @@ public sealed class LifecycleEventService : ILifecycleEventService
             EventId           = Guid.NewGuid(),
             EmploymentId      = employmentId,
             EventTypeId       = eventTypeId,
-            EffectiveDate     = DateOnly.FromDateTime(DateTime.UtcNow),
+            EffectiveDate     = DateOnly.FromDateTime(_temporalContext.GetOperativeDate()),
             EventReason       = reasonCode,
             InitiatedBy       = initiatedBy,
             CreationTimestamp = DateTimeOffset.UtcNow
@@ -622,9 +639,9 @@ public interface IOrgStructureService
 {
     Task<OrgUnit?>                     GetOrgUnitByIdAsync(Guid orgUnitId);
     Task<IEnumerable<OrgUnit>>         GetLegalEntitiesAsync();
-    Task<IEnumerable<OrgUnit>>         GetDivisionsAsync();
-    Task<IEnumerable<OrgUnit>>         GetDepartmentsAsync();
-    Task<IEnumerable<OrgUnit>>         GetLocationsAsync();
+    Task<IEnumerable<OrgUnit>>         GetDivisionsAsync(Guid? legalEntityId = null);
+    Task<IEnumerable<OrgUnit>>         GetDepartmentsAsync(Guid? legalEntityId = null);
+    Task<IEnumerable<OrgUnit>>         GetLocationsAsync(Guid? legalEntityId = null);
     Task<IEnumerable<OrgUnit>>         GetChildrenAsync(Guid parentOrgUnitId);
     Task<IEnumerable<OrgUnit>>         GetAllActiveAsync(Guid? legalEntityId = null);
     Task<IEnumerable<OrgUnitEmployee>> GetOrgUnitWorkforceAsync(Guid orgUnitId);
@@ -664,14 +681,28 @@ public sealed class OrgStructureService : IOrgStructureService
     public async Task<IEnumerable<OrgUnit>> GetLegalEntitiesAsync()
         => await _orgUnitRepository.GetByTypeAsync(_legalEntityTypeId);
 
-    public async Task<IEnumerable<OrgUnit>> GetDivisionsAsync()
-        => await _orgUnitRepository.GetByTypeAsync(_divisionTypeId);
+    public async Task<IEnumerable<OrgUnit>> GetDivisionsAsync(Guid? legalEntityId = null)
+        => await _orgUnitRepository.GetByTypeAsync(_divisionTypeId, legalEntityId);
 
-    public async Task<IEnumerable<OrgUnit>> GetDepartmentsAsync()
-        => await _orgUnitRepository.GetByTypeAsync(_departmentTypeId);
+    public async Task<IEnumerable<OrgUnit>> GetDepartmentsAsync(Guid? legalEntityId = null)
+    {
+        if (legalEntityId.HasValue)
+        {
+            var all = await _orgUnitRepository.GetAllActiveAsync(legalEntityId);
+            return all.Where(o => o.OrgUnitTypeId == _departmentTypeId);
+        }
+        return await _orgUnitRepository.GetByTypeAsync(_departmentTypeId);
+    }
 
-    public async Task<IEnumerable<OrgUnit>> GetLocationsAsync()
-        => await _orgUnitRepository.GetByTypeAsync(_locationTypeId);
+    public async Task<IEnumerable<OrgUnit>> GetLocationsAsync(Guid? legalEntityId = null)
+    {
+        if (legalEntityId.HasValue)
+        {
+            var all = await _orgUnitRepository.GetAllActiveAsync(legalEntityId);
+            return all.Where(o => o.OrgUnitTypeId == _locationTypeId);
+        }
+        return await _orgUnitRepository.GetByTypeAsync(_locationTypeId);
+    }
 
     public async Task<IEnumerable<OrgUnit>> GetChildrenAsync(Guid parentOrgUnitId)
         => await _orgUnitRepository.GetChildrenAsync(parentOrgUnitId);
@@ -705,6 +736,7 @@ public sealed class OrgStructureService : IOrgStructureService
             OrgUnitName         = command.OrgUnitName.Trim(),
             ParentOrgUnitId     = command.ParentOrgUnitId,
             LegalEntityId       = isLegalEntity ? newId : command.LegalEntityId,
+            LegalEntityTypeId   = command.LegalEntityTypeId,
             OrgStatusId         = _activeStatusId,
             EffectiveStartDate  = command.EffectiveStartDate,
             CreatedBy           = command.InitiatedBy,
@@ -735,6 +767,7 @@ public sealed class OrgStructureService : IOrgStructureService
 public interface IJobService
 {
     Task<IEnumerable<Job>> GetAllActiveAsync();
+    Task<IEnumerable<Job>> GetByLegalEntityAsync(Guid legalEntityId);
     Task<Guid>             CreateJobAsync(CreateJobCommand command);
 }
 
@@ -754,12 +787,16 @@ public sealed class JobService : IJobService
     public Task<IEnumerable<Job>> GetAllActiveAsync()
         => _jobRepository.GetAllActiveAsync();
 
+    public Task<IEnumerable<Job>> GetByLegalEntityAsync(Guid legalEntityId)
+        => _jobRepository.GetByLegalEntityAsync(legalEntityId);
+
     public async Task<Guid> CreateJobAsync(CreateJobCommand command)
     {
         var now = DateTimeOffset.UtcNow;
         var job = new Job
         {
             JobId                 = Guid.NewGuid(),
+            LegalEntityId         = command.LegalEntityId,
             JobCode               = command.JobCode.Trim().ToUpper(),
             JobTitle              = command.JobTitle.Trim(),
             JobFamily             = string.IsNullOrWhiteSpace(command.JobFamily) ? null : command.JobFamily.Trim(),
@@ -797,18 +834,28 @@ public interface IPositionService
 {
     Task<IEnumerable<Position>> GetByJobIdAsync(Guid jobId);
     Task<IEnumerable<Position>> GetAllActiveAsync();
+    Task<IEnumerable<Position>> GetByLegalEntityAsync(Guid legalEntityId);
     Task<Guid>                  CreatePositionAsync(CreatePositionCommand command);
 }
 
 public sealed class PositionService : IPositionService
 {
     private readonly IPositionRepository _positionRepository;
+    private readonly IJobRepository      _jobRepository;
+    private readonly IOrgUnitRepository  _orgUnitRepository;
     private readonly ILookupCache        _lookupCache;
     private readonly IConnectionFactory  _connectionFactory;
 
-    public PositionService(IPositionRepository positionRepository, ILookupCache lookupCache, IConnectionFactory connectionFactory)
+    public PositionService(
+        IPositionRepository positionRepository,
+        IJobRepository      jobRepository,
+        IOrgUnitRepository  orgUnitRepository,
+        ILookupCache        lookupCache,
+        IConnectionFactory  connectionFactory)
     {
         _positionRepository = positionRepository;
+        _jobRepository      = jobRepository;
+        _orgUnitRepository  = orgUnitRepository;
         _lookupCache        = lookupCache;
         _connectionFactory  = connectionFactory;
     }
@@ -819,8 +866,19 @@ public sealed class PositionService : IPositionService
     public Task<IEnumerable<Position>> GetAllActiveAsync()
         => _positionRepository.GetAllActiveAsync();
 
+    public Task<IEnumerable<Position>> GetByLegalEntityAsync(Guid legalEntityId)
+        => _positionRepository.GetByLegalEntityAsync(legalEntityId);
+
     public async Task<Guid> CreatePositionAsync(CreatePositionCommand command)
     {
+        var job     = await _jobRepository.GetByIdAsync(command.JobId)
+            ?? throw new DomainException($"Job {command.JobId} not found.");
+        var orgUnit = await _orgUnitRepository.GetByIdAsync(command.OrgUnitId)
+            ?? throw new DomainException($"Org unit {command.OrgUnitId} not found.");
+
+        if (orgUnit.LegalEntityId != job.LegalEntityId)
+            throw new DomainException("The selected department belongs to a different legal entity than the selected job.");
+
         var now = DateTimeOffset.UtcNow;
         var position = new Position
         {

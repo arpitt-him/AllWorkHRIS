@@ -4,8 +4,8 @@ namespace AllWorkHRIS.Module.Payroll.Repositories;
 
 public interface IAccumulatorRepository
 {
-    Task<AccumulatorDefinition?> GetDefinitionByCodeAsync(string accumulatorCode);
-    Task<IReadOnlyList<AccumulatorDefinition>> GetAllActiveDefinitionsAsync();
+    Task<AccumulatorDefinition?> GetDefinitionByCodeAsync(string accumulatorCode, DateOnly asOf);
+    Task<IReadOnlyList<AccumulatorDefinition>> GetAllActiveDefinitionsAsync(DateOnly asOf);
 
     Task<AccumulatorBalance?> GetBalanceAsync(Guid accumulatorDefinitionId, Guid? employmentId,
         Guid? legalEntityId, Guid periodId);

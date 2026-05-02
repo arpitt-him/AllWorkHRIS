@@ -1,4 +1,6 @@
+using System.Text.Json;
 using Dapper;
+using AllWorkHRIS.Core.Audit;
 using AllWorkHRIS.Core.Data;
 using AllWorkHRIS.Module.Payroll.Domain.Accumulators;
 using AllWorkHRIS.Module.Payroll.Domain.Calendar;
@@ -105,7 +107,7 @@ public sealed class PayrollRunRepository : IPayrollRunRepository
             UPDATE payroll_run
             SET run_status_id       = @StatusId,
                 last_updated_by     = @UpdatedBy,
-                last_update_timestamp = NOW()
+                last_update_timestamp = CURRENT_TIMESTAMP
             WHERE run_id = @RunId
             """;
         using var conn = _connectionFactory.CreateConnection();
@@ -120,7 +122,7 @@ public sealed class PayrollRunRepository : IPayrollRunRepository
             SET run_start_timestamp   = @Start,
                 run_end_timestamp     = @End,
                 last_updated_by       = @UpdatedBy,
-                last_update_timestamp = NOW()
+                last_update_timestamp = CURRENT_TIMESTAMP
             WHERE run_id = @RunId
             """;
         using var conn = _connectionFactory.CreateConnection();
@@ -131,6 +133,38 @@ public sealed class PayrollRunRepository : IPayrollRunRepository
             End       = endTimestamp,
             UpdatedBy = updatedBy
         });
+    }
+
+    public async Task InsertRunExceptionAsync(PayrollRunException exception)
+    {
+        const string sql = """
+            INSERT INTO payroll_run_exception
+                (run_exception_id, run_id, employment_id, exception_code, exception_message, created_timestamp)
+            VALUES
+                (@RunExceptionId, @RunId, @EmploymentId, @ExceptionCode, @ExceptionMessage, @CreatedTimestamp)
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        await conn.ExecuteAsync(sql, new
+        {
+            exception.RunExceptionId,
+            exception.RunId,
+            exception.EmploymentId,
+            exception.ExceptionCode,
+            exception.ExceptionMessage,
+            exception.CreatedTimestamp
+        });
+    }
+
+    public async Task<IReadOnlyList<PayrollRunException>> GetRunExceptionsAsync(Guid runId)
+    {
+        const string sql = """
+            SELECT run_exception_id, run_id, employment_id, exception_code, exception_message, created_timestamp
+            FROM payroll_run_exception
+            WHERE run_id = @RunId
+            ORDER BY created_timestamp
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        return (await conn.QueryAsync<PayrollRunException>(sql, new { RunId = runId })).ToList();
     }
 }
 
@@ -199,7 +233,7 @@ public sealed class PayrollRunResultSetRepository : IPayrollRunResultSetReposito
         const string sql = """
             UPDATE payroll_run_result_set
             SET result_set_status_id = @StatusId,
-                updated_timestamp    = NOW()
+                updated_timestamp    = CURRENT_TIMESTAMP
             WHERE payroll_run_result_set_id = @ResultSetId
             """;
         using var conn = _connectionFactory.CreateConnection();
@@ -213,7 +247,7 @@ public sealed class PayrollRunResultSetRepository : IPayrollRunResultSetReposito
             UPDATE payroll_run_result_set
             SET execution_start_timestamp = @Start,
                 execution_end_timestamp   = @End,
-                updated_timestamp         = NOW()
+                updated_timestamp         = CURRENT_TIMESTAMP
             WHERE payroll_run_result_set_id = @ResultSetId
             """;
         using var conn = _connectionFactory.CreateConnection();
@@ -325,7 +359,7 @@ public sealed class EmployeePayrollResultRepository : IEmployeePayrollResultRepo
         const string sql = """
             UPDATE employee_payroll_result
             SET result_status_id  = @StatusId,
-                updated_timestamp = NOW()
+                updated_timestamp = CURRENT_TIMESTAMP
             WHERE employee_payroll_result_id = @ResultId
             """;
         using var conn = _connectionFactory.CreateConnection();
@@ -342,7 +376,7 @@ public sealed class EmployeePayrollResultRepository : IEmployeePayrollResultRepo
                 total_employee_tax_amount          = @TotalEmployeeTax,
                 total_employer_contribution_amount = @TotalEmployerContribution,
                 net_pay_amount                     = @NetPay,
-                updated_timestamp                  = NOW()
+                updated_timestamp                  = CURRENT_TIMESTAMP
             WHERE employee_payroll_result_id = @ResultId
             """;
         using var conn = _connectionFactory.CreateConnection();
@@ -501,27 +535,28 @@ public sealed class AccumulatorRepository : IAccumulatorRepository
     public AccumulatorRepository(IConnectionFactory connectionFactory)
         => _connectionFactory = connectionFactory;
 
-    public async Task<AccumulatorDefinition?> GetDefinitionByCodeAsync(string accumulatorCode)
+    public async Task<AccumulatorDefinition?> GetDefinitionByCodeAsync(string accumulatorCode, DateOnly asOf)
     {
         const string sql = """
             SELECT * FROM accumulator_definition
             WHERE accumulator_code = @AccumulatorCode
-              AND (effective_end_date IS NULL OR effective_end_date >= CURRENT_DATE)
+              AND (effective_end_date IS NULL OR effective_end_date >= @AsOf)
             """;
         using var conn = _connectionFactory.CreateConnection();
         return await conn.QueryFirstOrDefaultAsync<AccumulatorDefinition>(sql,
-            new { AccumulatorCode = accumulatorCode });
+            new { AccumulatorCode = accumulatorCode, AsOf = asOf.ToDateTime(TimeOnly.MinValue) });
     }
 
-    public async Task<IReadOnlyList<AccumulatorDefinition>> GetAllActiveDefinitionsAsync()
+    public async Task<IReadOnlyList<AccumulatorDefinition>> GetAllActiveDefinitionsAsync(DateOnly asOf)
     {
         const string sql = """
             SELECT * FROM accumulator_definition
-            WHERE effective_end_date IS NULL OR effective_end_date >= CURRENT_DATE
+            WHERE effective_end_date IS NULL OR effective_end_date >= @AsOf
             ORDER BY accumulator_code
             """;
         using var conn = _connectionFactory.CreateConnection();
-        return (await conn.QueryAsync<AccumulatorDefinition>(sql)).ToList();
+        return (await conn.QueryAsync<AccumulatorDefinition>(sql,
+            new { AsOf = asOf.ToDateTime(TimeOnly.MinValue) })).ToList();
     }
 
     public async Task<AccumulatorBalance?> GetBalanceAsync(Guid accumulatorDefinitionId, Guid? employmentId,
@@ -673,9 +708,13 @@ public sealed class AccumulatorRepository : IAccumulatorRepository
 public sealed class PayrollContextRepository : IPayrollContextRepository
 {
     private readonly IConnectionFactory _connectionFactory;
+    private readonly IAuditService      _auditService;
 
-    public PayrollContextRepository(IConnectionFactory connectionFactory)
-        => _connectionFactory = connectionFactory;
+    public PayrollContextRepository(IConnectionFactory connectionFactory, IAuditService auditService)
+    {
+        _connectionFactory = connectionFactory;
+        _auditService      = auditService;
+    }
 
     public async Task<PayrollContext?> GetByIdAsync(Guid payrollContextId)
     {
@@ -718,17 +757,19 @@ public sealed class PayrollContextRepository : IPayrollContextRepository
         const string sql = """
             INSERT INTO payroll_context (
                 payroll_context_id, payroll_context_code, payroll_context_name,
-                legal_entity_id, pay_frequency_id, context_status,
+                legal_entity_id, pay_frequency_id, compensation_rate_type_id, context_status,
                 parent_payroll_context_id, root_payroll_context_id,
                 context_version_number, context_change_reason_code,
                 effective_start_date, effective_end_date,
+                pay_date_convention, pay_date_offset_days, cutoff_offset_days, extra_period_policy,
                 created_by, creation_timestamp, last_updated_by, last_update_timestamp
             ) VALUES (
                 @PayrollContextId, @PayrollContextCode, @PayrollContextName,
-                @LegalEntityId, @PayFrequencyId, @ContextStatus,
+                @LegalEntityId, @PayFrequencyId, @CompensationRateTypeId, @ContextStatus,
                 @ParentPayrollContextId, @RootPayrollContextId,
                 @ContextVersionNumber, @ContextChangeReasonCode,
                 @EffectiveStartDate, @EffectiveEndDate,
+                @PayDateConvention, @PayDateOffsetDays, @CutoffOffsetDays, @ExtraPeriodPolicy,
                 @CreatedBy, @CreationTimestamp, @LastUpdatedBy, @LastUpdateTimestamp
             )
             """;
@@ -740,6 +781,7 @@ public sealed class PayrollContextRepository : IPayrollContextRepository
             context.PayrollContextName,
             context.LegalEntityId,
             context.PayFrequencyId,
+            context.CompensationRateTypeId,
             context.ContextStatus,
             context.ParentPayrollContextId,
             context.RootPayrollContextId,
@@ -747,12 +789,72 @@ public sealed class PayrollContextRepository : IPayrollContextRepository
             context.ContextChangeReasonCode,
             EffectiveStartDate = context.EffectiveStartDate.ToDateTime(TimeOnly.MinValue),
             EffectiveEndDate   = context.EffectiveEndDate?.ToDateTime(TimeOnly.MinValue),
+            context.PayDateConvention,
+            context.PayDateOffsetDays,
+            context.CutoffOffsetDays,
+            context.ExtraPeriodPolicy,
             context.CreatedBy,
             context.CreationTimestamp,
             context.LastUpdatedBy,
             context.LastUpdateTimestamp
         });
+
+        await _auditService.LogAsync(new AuditEventRecord(
+            EventType:     "CREATE",
+            EntityType:    "PayrollContext",
+            EntityId:      context.PayrollContextId,
+            ModuleName:    "PAYROLL",
+            ChangeSummary: $"Created payroll context {context.PayrollContextCode}",
+            AfterJson:     JsonSerializer.Serialize(new
+            {
+                context.PayrollContextCode,
+                context.PayrollContextName,
+                context.ContextStatus
+            })
+        ));
+
         return context.PayrollContextId;
+    }
+
+    public async Task<string?> DeleteContextAsync(Guid payrollContextId)
+    {
+        using var conn = _connectionFactory.CreateConnection();
+
+        // Block if any run has ever been submitted against this context
+        const string checkRuns = """
+            SELECT COUNT(1) FROM payroll_run
+            WHERE payroll_context_id = @Id
+            """;
+        if (await conn.ExecuteScalarAsync<int>(checkRuns, new { Id = payrollContextId }) > 0)
+            return "This context has associated payroll runs and cannot be deleted.";
+
+        // Block if any period is in a closed or locked state
+        const string checkPeriods = """
+            SELECT COUNT(1) FROM payroll_period
+            WHERE payroll_context_id = @Id
+              AND calendar_status IN ('CLOSED', 'LOCKED')
+            """;
+        if (await conn.ExecuteScalarAsync<int>(checkPeriods, new { Id = payrollContextId }) > 0)
+            return "This context has closed or locked calendar periods and cannot be deleted.";
+
+        // Safe to delete — remove open periods then the context record
+        await conn.ExecuteAsync(
+            "DELETE FROM payroll_period WHERE payroll_context_id = @Id",
+            new { Id = payrollContextId });
+
+        await conn.ExecuteAsync(
+            "DELETE FROM payroll_context WHERE payroll_context_id = @Id",
+            new { Id = payrollContextId });
+
+        await _auditService.LogAsync(new AuditEventRecord(
+            EventType:     "DELETE",
+            EntityType:    "PayrollContext",
+            EntityId:      payrollContextId,
+            ModuleName:    "PAYROLL",
+            ChangeSummary: $"Deleted payroll context {payrollContextId}"
+        ));
+
+        return null;
     }
 
     public async Task UpdateContextStatusAsync(Guid payrollContextId, string status, Guid updatedBy)
@@ -761,11 +863,20 @@ public sealed class PayrollContextRepository : IPayrollContextRepository
             UPDATE payroll_context
             SET context_status        = @Status,
                 last_updated_by       = @UpdatedBy,
-                last_update_timestamp = NOW()
+                last_update_timestamp = CURRENT_TIMESTAMP
             WHERE payroll_context_id = @PayrollContextId
             """;
         using var conn = _connectionFactory.CreateConnection();
         await conn.ExecuteAsync(sql, new { PayrollContextId = payrollContextId, Status = status, UpdatedBy = updatedBy });
+
+        await _auditService.LogAsync(new AuditEventRecord(
+            EventType:     "STATUS_CHANGE",
+            EntityType:    "PayrollContext",
+            EntityId:      payrollContextId,
+            ModuleName:    "PAYROLL",
+            ChangeSummary: $"Payroll context status changed to {status}",
+            AfterJson:     JsonSerializer.Serialize(new { context_status = status })
+        ));
     }
 
     public async Task<PayrollPeriod?> GetPeriodByIdAsync(Guid periodId)
@@ -897,11 +1008,85 @@ public sealed class PayrollContextRepository : IPayrollContextRepository
             UPDATE payroll_period
             SET calendar_status       = @Status,
                 last_updated_by       = @UpdatedBy,
-                last_update_timestamp = NOW()
+                last_update_timestamp = CURRENT_TIMESTAMP
             WHERE period_id = @PeriodId
             """;
         using var conn = _connectionFactory.CreateConnection();
         await conn.ExecuteAsync(sql, new { PeriodId = periodId, Status = status, UpdatedBy = updatedBy });
+    }
+
+    public async Task UpdatePeriodRunDateAsync(Guid periodId, DateOnly? runDate, Guid updatedBy)
+    {
+        const string sql = """
+            UPDATE payroll_period
+            SET calculation_date      = @RunDate,
+                last_updated_by       = @UpdatedBy,
+                last_update_timestamp = CURRENT_TIMESTAMP
+            WHERE period_id = @PeriodId
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        await conn.ExecuteAsync(sql, new
+        {
+            PeriodId  = periodId,
+            RunDate   = runDate.HasValue ? runDate.Value.ToDateTime(TimeOnly.MinValue) : (DateTime?)null,
+            UpdatedBy = updatedBy
+        });
+
+        await _auditService.LogAsync(new AuditEventRecord(
+            EventType:       "UPDATE",
+            EntityType:      "PayrollPeriod",
+            EntityId:        periodId,
+            ModuleName:      "PAYROLL",
+            ChangeSummary:   $"Period run date updated to {runDate?.ToString("yyyy-MM-dd") ?? "null"}",
+            AfterJson:       JsonSerializer.Serialize(new { calculation_date = runDate?.ToString("yyyy-MM-dd") })
+        ));
+    }
+
+    public async Task<int> GetPeriodsPerYearAsync(Guid payrollContextId)
+    {
+        const string sql = """
+            SELECT f.periods_per_year
+            FROM payroll_context pc
+            JOIN lkp_pay_frequency f ON f.id = pc.pay_frequency_id
+            WHERE pc.payroll_context_id = @PayrollContextId
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        return await conn.ExecuteScalarAsync<int>(sql, new { PayrollContextId = payrollContextId });
+    }
+}
+
+// ============================================================
+// PAYROLL COMPENSATION SNAPSHOT
+// ============================================================
+
+public sealed class PayrollCompensationSnapshotRepository : IPayrollCompensationSnapshotRepository
+{
+    private readonly IConnectionFactory _connectionFactory;
+
+    public PayrollCompensationSnapshotRepository(IConnectionFactory connectionFactory)
+        => _connectionFactory = connectionFactory;
+
+    public async Task<decimal?> GetAnnualEquivalentAsync(Guid employmentId, DateOnly asOf)
+    {
+        const string sql = """
+            SELECT cr.annual_equivalent
+            FROM compensation_record cr
+            WHERE cr.employment_id = @EmploymentId
+              AND cr.primary_rate_flag = true
+              AND cr.compensation_status_id = (
+                  SELECT id FROM lkp_compensation_status WHERE code = 'ACTIVE'
+              )
+              AND cr.effective_start_date <= @AsOf
+              AND (cr.effective_end_date IS NULL OR cr.effective_end_date >= @AsOf)
+            ORDER BY cr.effective_start_date DESC
+            LIMIT 1
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        return await conn.ExecuteScalarAsync<decimal?>(sql, new
+        {
+            EmploymentId = employmentId,
+            AsOf         = asOf.ToDateTime(TimeOnly.MinValue)
+        });
     }
 }
 
@@ -912,9 +1097,13 @@ public sealed class PayrollContextRepository : IPayrollContextRepository
 public sealed class PayrollProfileRepository : IPayrollProfileRepository
 {
     private readonly IConnectionFactory _connectionFactory;
+    private readonly IAuditService      _auditService;
 
-    public PayrollProfileRepository(IConnectionFactory connectionFactory)
-        => _connectionFactory = connectionFactory;
+    public PayrollProfileRepository(IConnectionFactory connectionFactory, IAuditService auditService)
+    {
+        _connectionFactory = connectionFactory;
+        _auditService      = auditService;
+    }
 
     public async Task<Guid> InsertAsync(PayrollProfile profile)
     {
@@ -922,12 +1111,12 @@ public sealed class PayrollProfileRepository : IPayrollProfileRepository
             INSERT INTO payroll_profile (
                 payroll_profile_id, employment_id, person_id, payroll_context_id,
                 enrollment_status, effective_start_date, effective_end_date,
-                final_pay_flag, enrollment_source,
+                final_pay_flag, blocking_tasks_cleared, enrollment_source,
                 created_by, creation_timestamp, last_updated_by, last_update_timestamp
             ) VALUES (
                 @PayrollProfileId, @EmploymentId, @PersonId, @PayrollContextId,
                 @EnrollmentStatus, @EffectiveStartDate, @EffectiveEndDate,
-                @FinalPayFlag, @EnrollmentSource,
+                @FinalPayFlag, @BlockingTasksCleared, @EnrollmentSource,
                 @CreatedBy, @CreationTimestamp, @LastUpdatedBy, @LastUpdateTimestamp
             )
             """;
@@ -942,12 +1131,28 @@ public sealed class PayrollProfileRepository : IPayrollProfileRepository
             EffectiveStartDate = profile.EffectiveStartDate.ToDateTime(TimeOnly.MinValue),
             EffectiveEndDate   = profile.EffectiveEndDate?.ToDateTime(TimeOnly.MinValue),
             profile.FinalPayFlag,
+            profile.BlockingTasksCleared,
             profile.EnrollmentSource,
             profile.CreatedBy,
             profile.CreationTimestamp,
             profile.LastUpdatedBy,
             profile.LastUpdateTimestamp
         });
+
+        await _auditService.LogAsync(new AuditEventRecord(
+            EventType:     "ENROLL",
+            EntityType:    "PayrollProfile",
+            EntityId:      profile.PayrollProfileId,
+            ModuleName:    "PAYROLL",
+            ChangeSummary: $"Employment {profile.EmploymentId} enrolled in payroll context {profile.PayrollContextId}",
+            AfterJson:     JsonSerializer.Serialize(new
+            {
+                enrollment_status  = profile.EnrollmentStatus,
+                enrollment_source  = profile.EnrollmentSource,
+                effective_start_date = profile.EffectiveStartDate.ToString("yyyy-MM-dd")
+            })
+        ));
+
         return profile.PayrollProfileId;
     }
 
@@ -976,11 +1181,37 @@ public sealed class PayrollProfileRepository : IPayrollProfileRepository
     {
         const string sql = """
             SELECT employment_id FROM payroll_profile
-            WHERE payroll_context_id = @PayrollContextId
-              AND enrollment_status  = 'ACTIVE'
+            WHERE payroll_context_id    = @PayrollContextId
+              AND enrollment_status     = 'ACTIVE'
+              AND blocking_tasks_cleared = TRUE
             """;
         using var conn = _connectionFactory.CreateConnection();
         return (await conn.QueryAsync<Guid>(sql, new { PayrollContextId = payrollContextId })).ToList();
+    }
+
+    public async Task<IReadOnlyList<Guid>> GetActiveBlockedEmploymentIdsByContextAsync(Guid payrollContextId)
+    {
+        const string sql = """
+            SELECT employment_id FROM payroll_profile
+            WHERE payroll_context_id    = @PayrollContextId
+              AND enrollment_status     = 'ACTIVE'
+              AND blocking_tasks_cleared = FALSE
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        return (await conn.QueryAsync<Guid>(sql, new { PayrollContextId = payrollContextId })).ToList();
+    }
+
+    public async Task SetBlockingTasksClearedAsync(Guid employmentId, Guid updatedBy)
+    {
+        const string sql = """
+            UPDATE payroll_profile
+            SET blocking_tasks_cleared = TRUE,
+                last_updated_by        = @UpdatedBy,
+                last_update_timestamp  = CURRENT_TIMESTAMP
+            WHERE employment_id = @EmploymentId
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        await conn.ExecuteAsync(sql, new { EmploymentId = employmentId, UpdatedBy = updatedBy });
     }
 
     public async Task UpdateStatusAsync(Guid employmentId, string status, Guid updatedBy)
@@ -989,11 +1220,21 @@ public sealed class PayrollProfileRepository : IPayrollProfileRepository
             UPDATE payroll_profile
             SET enrollment_status     = @Status,
                 last_updated_by       = @UpdatedBy,
-                last_update_timestamp = NOW()
+                last_update_timestamp = CURRENT_TIMESTAMP
             WHERE employment_id = @EmploymentId
             """;
         using var conn = _connectionFactory.CreateConnection();
         await conn.ExecuteAsync(sql, new { EmploymentId = employmentId, Status = status, UpdatedBy = updatedBy });
+
+        var eventType = status is "TERMINATED" or "SUSPENDED" ? "DISENROLL" : "STATUS_CHANGE";
+        await _auditService.LogAsync(new AuditEventRecord(
+            EventType:     eventType,
+            EntityType:    "PayrollProfile",
+            EntityId:      employmentId,
+            ModuleName:    "PAYROLL",
+            ChangeSummary: $"Payroll profile status changed to {status} for employment {employmentId}",
+            AfterJson:     JsonSerializer.Serialize(new { enrollment_status = status })
+        ));
     }
 
     public async Task SetFinalPayFlagAsync(Guid employmentId, bool finalPayFlag, Guid updatedBy)
@@ -1003,7 +1244,7 @@ public sealed class PayrollProfileRepository : IPayrollProfileRepository
             SET final_pay_flag        = @FinalPayFlag,
                 enrollment_status     = CASE WHEN @FinalPayFlag THEN 'FINAL_PAY_PENDING' ELSE enrollment_status END,
                 last_updated_by       = @UpdatedBy,
-                last_update_timestamp = NOW()
+                last_update_timestamp = CURRENT_TIMESTAMP
             WHERE employment_id = @EmploymentId
             """;
         using var conn = _connectionFactory.CreateConnection();

@@ -1,4 +1,5 @@
 @page "/hris/workqueue"
+@layout HrisShell
 @rendermode InteractiveServer
 @attribute [Authorize(Roles = "HrisAdmin,Manager")]
 @using Microsoft.AspNetCore.Authorization
@@ -7,10 +8,14 @@
 @using AllWorkHRIS.Host.Hris.Domain
 @using AllWorkHRIS.Host.Hris.Services
 @using AllWorkHRIS.Core.Lookups
-@inject IWorkQueueService WorkQueueService
-@inject ILeaveService     LeaveService
-@inject IPersonService    PersonService
-@inject ILookupCache      LookupCache
+@using AllWorkHRIS.Core.Temporal
+@implements IDisposable
+@inject IWorkQueueService  WorkQueueService
+@inject ILeaveService      LeaveService
+@inject IPersonService     PersonService
+@inject IHrisSessionState  SessionState
+@inject ILookupCache       LookupCache
+@inject ITemporalContext   TemporalContext
 
 <PageTitle>Work Queue — AllWork HRIS</PageTitle>
 
@@ -269,7 +274,16 @@
     private bool    _actioning   = false;
     private string? _actionError;
 
-    protected override async Task OnInitializedAsync() => await LoadAsync();
+    protected override async Task OnInitializedAsync()
+    {
+        SessionState.OnChanged += HandleEntityChanged;
+        await LoadAsync();
+    }
+
+    private void HandleEntityChanged()
+        => InvokeAsync(async () => { await LoadAsync(); StateHasChanged(); });
+
+    public void Dispose() => SessionState.OnChanged -= HandleEntityChanged;
 
     private async Task LoadAsync()
     {
@@ -283,9 +297,11 @@
                 .Select(c => c.Value)
                 .ToHashSet();
 
+            var entityId = SessionState.SelectedLegalEntityId;
+
             var tasks = new List<Task<IEnumerable<WorkQueueItem>>>();
-            if (roles.Contains("HrisAdmin")) tasks.Add(WorkQueueService.GetOpenByRoleAsync("HrisAdmin"));
-            if (roles.Contains("Manager"))   tasks.Add(WorkQueueService.GetOpenByRoleAsync("Manager"));
+            if (roles.Contains("HrisAdmin")) tasks.Add(WorkQueueService.GetOpenByRoleAsync("HrisAdmin", entityId));
+            if (roles.Contains("Manager"))   tasks.Add(WorkQueueService.GetOpenByRoleAsync("Manager",   entityId));
 
             var results = await Task.WhenAll(tasks);
             _items = results.SelectMany(r => r)
@@ -393,10 +409,10 @@
         _                        => 0
     };
 
-    private static string DueClass(DateOnly? due)
+    private string DueClass(DateOnly? due)
     {
         if (due is null) return "";
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = DateOnly.FromDateTime(TemporalContext.GetOperativeDate());
         if (due <= today)            return "cell-overdue";
         if (due <= today.AddDays(7)) return "cell-expiring";
         return "";

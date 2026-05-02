@@ -1,15 +1,21 @@
 @page "/hris/documents/expiring"
+@layout HrisShell
 @rendermode InteractiveServer
 @attribute [Authorize(Roles = "HrisAdmin")]
+@implements IDisposable
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Components.Authorization
 @using AllWorkHRIS.Host.Hris.Domain
 @using AllWorkHRIS.Host.Hris.Repositories
 @using AllWorkHRIS.Host.Hris.Services
 @using AllWorkHRIS.Core.Lookups
+@using AllWorkHRIS.Core.Temporal
+@using AllWorkHRIS.Core.Security
 @inject IDocumentRepository DocumentRepository
 @inject IPersonService       PersonService
 @inject ILookupCache         LookupCache
+@inject ITemporalContext     TemporalContext
+@inject IHrisSessionState    SessionState
 
 <PageTitle>Document Expiration Report — AllWork HRIS</PageTitle>
 
@@ -144,7 +150,7 @@
     {
         get
         {
-            var today = DateOnly.FromDateTime(DateTime.UtcNow);
+            var today = DateOnly.FromDateTime(TemporalContext.GetOperativeDate());
             return _allDocs.Where(d =>
             {
                 if (!string.IsNullOrWhiteSpace(_nameFilter))
@@ -176,7 +182,16 @@
         }
     }
 
-    protected override async Task OnInitializedAsync() => await LoadAsync();
+    protected override async Task OnInitializedAsync()
+    {
+        SessionState.OnChanged += HandleEntityChanged;
+        await LoadAsync();
+    }
+
+    private void HandleEntityChanged()
+        => InvokeAsync(async () => { await LoadAsync(); StateHasChanged(); });
+
+    public void Dispose() => SessionState.OnChanged -= HandleEntityChanged;
 
     private async Task LoadAsync()
     {
@@ -186,9 +201,11 @@
             _docTypes      = LookupCache.GetAll(LookupTables.DocumentType);
             _docTypeLabels = _docTypes.ToDictionary(e => e.Id, e => e.Label);
 
-            var today = DateOnly.FromDateTime(DateTime.UtcNow);
-            var expiredTask   = DocumentRepository.GetExpiredAsOfAsync(today);
-            var expiring90Task = DocumentRepository.GetExpiringWithinAsync(90);
+            var today    = DateOnly.FromDateTime(TemporalContext.GetOperativeDate());
+            var entityId = SessionState.SelectedLegalEntityId;
+            var expiredTask    = DocumentRepository.GetExpiredAsOfAsync(today, entityId);
+            var expiring90Task = DocumentRepository.GetExpiringWithinAsync(90, today,
+                                     legalEntityId: entityId);
             await Task.WhenAll(expiredTask, expiring90Task);
 
             _allDocs = (await expiredTask)
@@ -233,54 +250,59 @@
     private string DocTypeLabel(int typeId)
         => _docTypeLabels.TryGetValue(typeId, out var l) ? l : typeId.ToString();
 
-    private static bool IsExpired(HrDocument d)
+    private bool IsExpired(HrDocument d)
     {
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = DateOnly.FromDateTime(TemporalContext.GetOperativeDate());
         return d.ExpirationDate.HasValue && d.ExpirationDate.Value <= today;
     }
 
-    private static bool IsExpiring30(HrDocument d)
+    private bool IsExpiring30(HrDocument d)
     {
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = DateOnly.FromDateTime(TemporalContext.GetOperativeDate());
         return d.ExpirationDate.HasValue
             && d.ExpirationDate.Value > today
             && d.ExpirationDate.Value <= today.AddDays(30);
     }
 
-    private static bool IsExpiring90(HrDocument d)
+    private bool IsExpiring90(HrDocument d)
     {
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = DateOnly.FromDateTime(TemporalContext.GetOperativeDate());
         return d.ExpirationDate.HasValue
             && d.ExpirationDate.Value > today.AddDays(30)
             && d.ExpirationDate.Value <= today.AddDays(90);
     }
 
-    private static string ExpirationClass(DateOnly? exp)
+    private string ExpirationClass(DateOnly? exp)
     {
         if (exp is null) return "";
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = DateOnly.FromDateTime(TemporalContext.GetOperativeDate());
         if (exp.Value <= today)              return "cell-expired";
         if (exp.Value <= today.AddDays(30))  return "cell-warn30";
         return "cell-warn90";
     }
 
-    private static string ExpirationBadgeClass(DateOnly? exp)
+    private string ExpirationBadgeClass(DateOnly? exp)
     {
         if (exp is null) return "badge-neutral";
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = DateOnly.FromDateTime(TemporalContext.GetOperativeDate());
         if (exp.Value <= today)              return "badge-expired";
         if (exp.Value <= today.AddDays(30))  return "badge-warn30";
         return "badge-warn90";
     }
 
-    private static string ExpirationLabel(DateOnly? exp)
+    private string ExpirationLabel(DateOnly? exp)
     {
         if (exp is null) return "No expiry";
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = DateOnly.FromDateTime(TemporalContext.GetOperativeDate());
         var days  = exp.Value.DayNumber - today.DayNumber;
-        if (days <= 0)  return $"Expired {-days}d ago";
-        if (days <= 30) return $"Expires in {days}d";
-        return $"Expires in {days}d";
+        if (days <= 0)
+        {
+            var expired = -days;
+            if (expired >= 365) return $"Expired > {expired / 365} {(expired / 365 == 1 ? "year" : "years")} ago";
+            if (expired > 90)   return $"Expired > {expired / 30} {(expired / 30 == 1 ? "month" : "months")} ago";
+            return $"Expired {expired} {(expired == 1 ? "day" : "days")} ago";
+        }
+        return $"Expires in {days} {(days == 1 ? "day" : "days")}";
     }
 }
 

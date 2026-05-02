@@ -1,0 +1,394 @@
+@page "/config/legal-entities"
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = "SystemAdmin")]
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using AllWorkHRIS.Core.Lookups
+@using AllWorkHRIS.Host.Hris.Commands
+@using AllWorkHRIS.Host.Hris.Domain
+@using AllWorkHRIS.Host.Hris.Services
+@using AllWorkHRIS.Core.Temporal
+@inject IOrgStructureService OrgStructureService
+@inject ITemporalContext     TemporalContext
+@inject ILookupCache         LookupCache
+
+<PageTitle>Legal Entities — Configuration</PageTitle>
+
+<div class="page-container">
+
+    <div class="page-header">
+        <div>
+            <h2 class="page-title">Legal Entities</h2>
+            <p class="page-subtitle">System-level configuration. Create and manage legal entities that operate within this platform.</p>
+        </div>
+        <button class="btn-primary" @onclick="OpenAddPanel">+ Add Legal Entity</button>
+    </div>
+
+    @if (_loading)
+    {
+        <p class="loading-text">Loading...</p>
+    }
+    else if (_entities.Count == 0)
+    {
+        <div class="empty-state">
+            <p>No legal entities have been created yet.</p>
+            <p>Click <strong>+ Add Legal Entity</strong> to create the first one.</p>
+        </div>
+    }
+    else
+    {
+        <div class="grid-container">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Code</th>
+                        <th>Type</th>
+                        <th>Tax ID</th>
+                        <th>State of Inc.</th>
+                        <th>Effective Start</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var e in _entities)
+                    {
+                        <tr>
+                            <td>@e.OrgUnitName</td>
+                            <td class="mono">@e.OrgUnitCode</td>
+                            <td>@EntityTypeLabel(e.LegalEntityTypeId)</td>
+                            <td class="mono">@(e.TaxRegistrationNumber ?? "—")</td>
+                            <td>@(e.StateOfIncorporation ?? "—")</td>
+                            <td>@e.EffectiveStartDate.ToString("yyyy-MM-dd")</td>
+                            <td>
+                                <span class="status-badge status-@StatusCode(e.OrgStatusId)">
+                                    @StatusLabel(e.OrgStatusId)
+                                </span>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+
+</div>
+
+@if (_showPanel)
+{
+    <div class="panel-overlay" @onclick="ClosePanel">
+        <div class="panel-content" @onclick:stopPropagation>
+            <h3 class="panel-title">Add Legal Entity</h3>
+
+            <div class="panel-form">
+                <div class="form-field">
+                    <label class="form-label">Name <span class="required">*</span></label>
+                    <input type="text" class="form-input" @bind="_name"
+                           placeholder="e.g. Acme Corp" maxlength="200" />
+                </div>
+                <div class="form-field">
+                    <label class="form-label">Code <span class="required">*</span></label>
+                    <input type="text" class="form-input" @bind="_code"
+                           placeholder="e.g. ACME" maxlength="20" style="text-transform:uppercase" />
+                </div>
+                <div class="form-field">
+                    <label class="form-label">Effective Start Date <span class="required">*</span></label>
+                    <input type="date" class="form-input" @bind="_effectiveDt" />
+                </div>
+                <div class="form-field">
+                    <label class="form-label">Legal Entity Type</label>
+                    <select class="form-input" @bind="_entityTypeId">
+                        <option value="">Select type…</option>
+                        @foreach (var t in LookupCache.GetAll(LookupTables.LegalEntityType))
+                        {
+                            <option value="@t.Id">@t.Label</option>
+                        }
+                    </select>
+                </div>
+                <div class="form-field">
+                    <label class="form-label">Tax Registration Number (EIN)</label>
+                    <input type="text" class="form-input" @bind="_taxId"
+                           placeholder="e.g. 12-3456789" maxlength="50" />
+                </div>
+                <div class="form-field">
+                    <label class="form-label">State of Incorporation</label>
+                    <input type="text" class="form-input" @bind="_stateOfInc"
+                           placeholder="e.g. DE" maxlength="10" />
+                </div>
+            </div>
+
+            @if (_error is not null)
+            {
+                <p class="form-error">@_error</p>
+            }
+
+            <div class="panel-actions">
+                <button class="btn-primary" @onclick="SaveAsync" disabled="@_saving">
+                    @(_saving ? "Saving…" : "Create")
+                </button>
+                <button class="btn-secondary" @onclick="ClosePanel">Cancel</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState> AuthStateTask { get; set; } = default!;
+
+    private bool          _loading = true;
+    private List<OrgUnit> _entities = [];
+
+    private bool     _showPanel    = false;
+    private string   _name         = "";
+    private string   _code         = "";
+    private DateTime _effectiveDt;
+    private string   _entityTypeId = "";
+    private string   _taxId        = "";
+    private string   _stateOfInc  = "";
+    private string?  _error;
+    private bool     _saving      = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            _entities = (await OrgStructureService.GetLegalEntitiesAsync())
+                .OrderBy(e => e.OrgUnitName)
+                .ToList();
+        }
+        finally { _loading = false; }
+    }
+
+    private void OpenAddPanel()
+    {
+        _name = _code = _entityTypeId = _taxId = _stateOfInc = "";
+        _effectiveDt = TemporalContext.GetOperativeDate();
+        _error = null;
+        _showPanel = true;
+    }
+
+    private void ClosePanel() => _showPanel = false;
+
+    private async Task SaveAsync()
+    {
+        _error = null;
+        if (string.IsNullOrWhiteSpace(_name)) { _error = "Name is required."; return; }
+        if (string.IsNullOrWhiteSpace(_code)) { _error = "Code is required."; return; }
+
+        _saving = true;
+        try
+        {
+            var state   = await AuthStateTask;
+            var sub     = state.User.FindFirst("sub")?.Value;
+            var actorId = Guid.TryParse(sub, out var g) ? g : Guid.Empty;
+
+            var command = new CreateOrgUnitCommand
+            {
+                OrgUnitTypeCode   = "LEGAL_ENTITY",
+                OrgUnitCode       = _code.Trim().ToUpper(),
+                OrgUnitName       = _name.Trim(),
+                LegalEntityTypeId = int.TryParse(_entityTypeId, out var tid) ? tid : null,
+                EffectiveStartDate = DateOnly.FromDateTime(_effectiveDt),
+                InitiatedBy        = actorId
+            };
+
+            await OrgStructureService.CreateOrgUnitAsync(command);
+            _showPanel = false;
+            await LoadAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _saving = false; }
+    }
+
+    private string EntityTypeLabel(int? typeId)
+    {
+        if (typeId is null) return "—";
+        return LookupCache.GetAll(LookupTables.LegalEntityType)
+            .FirstOrDefault(e => e.Id == typeId)?.Label ?? "—";
+    }
+
+    private string StatusLabel(int statusId)
+    {
+        var all = LookupCache.GetAll(LookupTables.OrgStatus);
+        return all.FirstOrDefault(e => e.Id == statusId)?.Label ?? "—";
+    }
+
+    private string StatusCode(int statusId)
+        => LookupCache.GetCode(LookupTables.OrgStatus, statusId).ToLower();
+}
+
+<style>
+    .page-container { padding: var(--space-6); max-width: 1200px; }
+
+    .page-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: var(--space-6);
+        gap: var(--space-4);
+    }
+
+    .page-title {
+        font-size: var(--font-size-lg);
+        font-weight: var(--font-weight-semibold);
+        color: var(--aw-navy);
+        margin: 0 0 var(--space-1) 0;
+    }
+
+    .page-subtitle {
+        font-size: var(--font-size-sm);
+        color: #6B7280;
+        margin: 0;
+    }
+
+    .grid-container {
+        background: white;
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-sm);
+        overflow: hidden;
+    }
+
+    .data-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: var(--font-size-sm);
+    }
+
+    .data-table th {
+        background: #F9FAFB;
+        padding: var(--space-3) var(--space-4);
+        text-align: left;
+        font-weight: var(--font-weight-medium);
+        color: #6B7280;
+        border-bottom: 1px solid #E5E7EB;
+        white-space: nowrap;
+    }
+
+    .data-table td {
+        padding: var(--space-3) var(--space-4);
+        border-bottom: 1px solid #F3F4F6;
+        color: var(--aw-navy);
+    }
+
+    .data-table tr:last-child td { border-bottom: none; }
+    .data-table tbody tr:hover td { background: #F9FAFB; }
+
+    .mono { font-family: monospace; font-size: var(--font-size-sm); }
+
+    .status-badge {
+        display: inline-block;
+        padding: 2px var(--space-2);
+        border-radius: var(--radius-sm);
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-medium);
+    }
+
+    .status-active   { background: #D1FAE5; color: #065F46; }
+    .status-inactive { background: #FEE2E2; color: #991B1B; }
+    .status-archived { background: #F3F4F6; color: #6B7280; }
+
+    .loading-text { padding: var(--space-6); color: #6B7280; text-align: center; }
+
+    .empty-state {
+        background: white;
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-sm);
+        padding: var(--space-12, 3rem) var(--space-8);
+        text-align: center;
+        color: #6B7280;
+    }
+
+    .panel-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,0.4);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+    }
+
+    .panel-content {
+        background: white;
+        border-radius: var(--radius-lg);
+        padding: var(--space-6);
+        width: 480px;
+        max-width: calc(100vw - var(--space-8));
+        box-shadow: var(--shadow-lg);
+    }
+
+    .panel-title {
+        font-size: var(--font-size-lg);
+        font-weight: var(--font-weight-semibold);
+        color: var(--aw-navy);
+        margin: 0 0 var(--space-5) 0;
+    }
+
+    .panel-form {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-3);
+        margin-bottom: var(--space-4);
+    }
+
+    .form-field { display: flex; flex-direction: column; gap: var(--space-1); }
+
+    .form-label {
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-medium);
+        color: #374151;
+    }
+
+    .required { color: #DC2626; }
+
+    .form-input {
+        padding: var(--space-2);
+        border: 1px solid #D1D5DB;
+        border-radius: var(--radius-md);
+        font-size: var(--font-size-sm);
+        color: var(--aw-navy);
+        background: white;
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    .form-input:focus { outline: none; border-color: var(--aw-teal); }
+
+    .form-error { color: #DC2626; font-size: var(--font-size-sm); margin: var(--space-2) 0; }
+
+    .panel-actions { display: flex; gap: var(--space-2); }
+
+    .btn-primary {
+        background: var(--aw-teal);
+        color: white;
+        border: none;
+        border-radius: var(--radius-md);
+        padding: var(--space-2) var(--space-4);
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-medium);
+        cursor: pointer;
+        white-space: nowrap;
+    }
+
+    .btn-primary:hover:not(:disabled) { opacity: 0.9; }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .btn-secondary {
+        background: white;
+        color: #374151;
+        border: 1px solid #D1D5DB;
+        border-radius: var(--radius-md);
+        padding: var(--space-2) var(--space-4);
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-medium);
+        cursor: pointer;
+    }
+
+    .btn-secondary:hover { background: #F9FAFB; }
+</style>

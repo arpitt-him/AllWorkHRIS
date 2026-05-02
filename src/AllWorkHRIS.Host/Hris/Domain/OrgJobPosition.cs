@@ -14,7 +14,7 @@ public sealed record OrgUnit
     public string? TaxRegistrationNumber { get; init; }
     public string? CountryCode { get; init; }
     public string? StateOfIncorporation { get; init; }
-    public string? LegalEntityType { get; init; }
+    public int? LegalEntityTypeId { get; init; }
     public string? AddressLine1 { get; init; }
     public string? AddressLine2 { get; init; }
     public string? City { get; init; }
@@ -31,6 +31,7 @@ public sealed record OrgUnit
 public sealed record Job
 {
     public Guid JobId { get; init; }
+    public Guid LegalEntityId { get; init; }
     public string JobCode { get; init; } = default!;
     public string JobTitle { get; init; } = default!;
     public string? JobFamily { get; init; }

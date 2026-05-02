@@ -1,0 +1,32 @@
+@rendermode InteractiveServer
+@inherits LayoutComponentBase
+@layout MainLayout
+@inject NavigationManager Nav
+
+<div class="payroll-shell">
+
+    <PayrollEntityHeader />
+
+    <div class="payroll-shell__tabs">
+        <a class="payroll-tab @ActiveClass("/payroll/runs")"         href="/payroll/runs">Payroll Runs</a>
+        <a class="payroll-tab @ActiveClass("/payroll/register")"     href="/payroll/register">Pay Register</a>
+        <a class="payroll-tab @ActiveClass("/payroll/accumulators")" href="/payroll/accumulators">Accumulators</a>
+        <a class="payroll-tab @ActiveClass("/payroll/calendar")"     href="/payroll/calendar">Pay Calendars</a>
+        <a class="payroll-tab @ActiveClass("/payroll/profiles")"     href="/payroll/profiles">Payroll Profiles</a>
+    </div>
+
+    <div class="payroll-shell__body">
+        @Body
+    </div>
+
+</div>
+
+@code {
+    private string ActiveClass(string segment)
+    {
+        var uri = Nav.ToBaseRelativePath(Nav.Uri);
+        return uri.StartsWith(segment.TrimStart('/'), StringComparison.OrdinalIgnoreCase)
+            ? "payroll-tab--active"
+            : "";
+    }
+}

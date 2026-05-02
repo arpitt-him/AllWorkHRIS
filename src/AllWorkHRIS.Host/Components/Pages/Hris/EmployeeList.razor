@@ -1,10 +1,15 @@
 @page "/hris/employees"
+@layout HrisShell
 @rendermode InteractiveServer
 @attribute [Authorize(Roles = "HrisViewer,HrisAdmin")]
+@implements IDisposable
 @using Microsoft.AspNetCore.Authorization
+@using AllWorkHRIS.Core.Temporal
 @using AllWorkHRIS.Host.Hris.Services
 @using AllWorkHRIS.Host.Hris.Queries
-@inject IEmploymentService EmploymentService
+@inject IEmploymentService  EmploymentService
+@inject ITemporalContext     TemporalContext
+@inject IHrisSessionState   SessionState
 
 <PageTitle>Employees — AllWork HRIS</PageTitle>
 
@@ -100,7 +105,8 @@
 
 @if (_showHirePanel)
 {
-    <HireEmployeePanel OnHireComplete="OnHireComplete" OnCancel="CloseHirePanel" />
+    <HireEmployeePanel OnHireComplete="OnHireComplete" OnCancel="CloseHirePanel"
+                       LegalEntityId="@(SessionState.SelectedLegalEntityId ?? Guid.Empty)" />
 }
 
 @code {
@@ -111,17 +117,27 @@
 
     protected override async Task OnInitializedAsync()
     {
+        SessionState.OnChanged += HandleEntityChanged;
         await LoadDataAsync();
     }
+
+    private void HandleEntityChanged()
+        => InvokeAsync(async () => { await LoadDataAsync(); StateHasChanged(); });
 
     private async Task LoadDataAsync()
     {
         _loading = true;
         try
         {
-            var result = await EmploymentService.GetPagedListAsync(new EmployeeListQuery());
+            var entityId = SessionState.SelectedLegalEntityId;
+            var result = await EmploymentService.GetPagedListAsync(new EmployeeListQuery
+            {
+                LegalEntityId = entityId
+            });
             _employees = result.Items.ToList();
-            _stats = await EmploymentService.GetStatCardsAsync(DateOnly.FromDateTime(DateTime.UtcNow));
+            _stats = await EmploymentService.GetStatCardsAsync(
+                DateOnly.FromDateTime(TemporalContext.GetOperativeDate()),
+                entityId);
         }
         finally
         {
@@ -130,20 +146,23 @@
     }
 
     private void OpenHirePanel()
-	{
-		_showHirePanel = true;
-		StateHasChanged();
-	}
+    {
+        _showHirePanel = true;
+        StateHasChanged();
+    }
     private void CloseHirePanel() => _showHirePanel = false;
-	
-	private async Task OnHireComplete()
-	{
-		_showHirePanel = false;
-		await LoadDataAsync();
-	}
+
+    private async Task OnHireComplete()
+    {
+        _showHirePanel = false;
+        await LoadDataAsync();
+    }
 
     private static string GetInitials(EmploymentListItem emp) =>
         $"{emp.LegalFirstName.FirstOrDefault()}{emp.LegalLastName.FirstOrDefault()}".ToUpper();
+
+    public void Dispose()
+        => SessionState.OnChanged -= HandleEntityChanged;
 }
 
 <style>

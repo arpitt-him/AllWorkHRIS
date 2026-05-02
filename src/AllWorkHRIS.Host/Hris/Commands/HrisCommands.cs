@@ -202,6 +202,7 @@ public sealed record CreateOrgUnitCommand
     public required string   OrgUnitName        { get; init; }
     public Guid?             ParentOrgUnitId    { get; init; }
     public Guid?             LegalEntityId      { get; init; }
+    public int?              LegalEntityTypeId  { get; init; }
     public required DateOnly EffectiveStartDate { get; init; }
     public required Guid     InitiatedBy        { get; init; }
 }
@@ -212,6 +213,7 @@ public sealed record CreateOrgUnitCommand
 
 public sealed record CreateJobCommand
 {
+    public required Guid     LegalEntityId        { get; init; }
     public required string   JobCode              { get; init; }
     public required string   JobTitle             { get; init; }
     public string?           JobFamily            { get; init; }

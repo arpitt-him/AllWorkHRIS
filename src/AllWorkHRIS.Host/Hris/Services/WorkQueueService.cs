@@ -10,7 +10,7 @@ public interface IWorkQueueService
     Task       CreateOnboardingTaskItemAsync(Guid taskId, Guid planId, Guid employmentId,
                    string taskType, DateOnly dueDate);
     Task       ResolveByReferenceAsync(Guid referenceId, Guid resolvedBy);
-    Task<IEnumerable<WorkQueueItem>> GetOpenByRoleAsync(string role, Guid? employmentId = null);
+    Task<IEnumerable<WorkQueueItem>> GetOpenByRoleAsync(string role, Guid? legalEntityId = null, Guid? employmentId = null);
 }
 
 public sealed class WorkQueueService : IWorkQueueService
@@ -64,12 +64,17 @@ public sealed class WorkQueueService : IWorkQueueService
             priority = WorkQueuePriority.Normal;
         }
 
-        var existing = await _repository.GetOpenByReferenceAsync(doc.DocumentId, itemType);
+        var existing = await _repository.GetAnyOpenByReferenceAsync(doc.DocumentId);
         if (existing is not null)
         {
-            if (existing.Priority != priority)
-                await _repository.UpdatePriorityAsync(existing.WorkQueueItemId, priority);
-            return;
+            if (existing.ItemType == itemType)
+            {
+                if (existing.Priority != priority)
+                    await _repository.UpdatePriorityAsync(existing.WorkQueueItemId, priority);
+                return;
+            }
+            // Escalated to a new alert stage — close the superseded item
+            await _repository.ResolveAsync(existing.WorkQueueItemId, Guid.Empty);
         }
 
         var item = new WorkQueueItem
@@ -113,6 +118,6 @@ public sealed class WorkQueueService : IWorkQueueService
     public Task ResolveByReferenceAsync(Guid referenceId, Guid resolvedBy)
         => _repository.ResolveByReferenceAsync(referenceId, resolvedBy);
 
-    public Task<IEnumerable<WorkQueueItem>> GetOpenByRoleAsync(string role, Guid? employmentId = null)
-        => _repository.GetOpenByRoleAsync(role, employmentId);
+    public Task<IEnumerable<WorkQueueItem>> GetOpenByRoleAsync(string role, Guid? legalEntityId = null, Guid? employmentId = null)
+        => _repository.GetOpenByRoleAsync(role, legalEntityId, employmentId);
 }

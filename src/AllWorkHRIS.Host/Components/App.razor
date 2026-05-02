@@ -14,7 +14,7 @@
 </head>
 
 <body>
-    <Routes />
+    <Routes @rendermode="InteractiveServer" />
 
     <div id="components-reconnect-modal">
         <div class="reconnect-card">
@@ -97,9 +97,33 @@
                             return waitSecs * 1000;
                         }
                     }
+                },
+                configureSignalR: function (builder) {
+                    builder.withServerTimeout(300000);    // 5 minutes (default is 30s)
+                    builder.withKeepAliveInterval(15000); // 15 seconds
                 }
             });
         })();
+
+        // Read a file input's content client-side and return it as a base64 string.
+        // Used instead of IBrowserFile.OpenReadStream(), which times out in Blazor Web App.
+        // Uint8Array cannot cross the JS interop JSON boundary; base64 string can.
+        window.allworkFiles = {
+            readBase64: function (inputId) {
+                return new Promise(function (resolve, reject) {
+                    var input = document.getElementById(inputId);
+                    if (!input || !input.files || !input.files.length) { resolve(null); return; }
+                    var reader = new FileReader();
+                    reader.onload  = function () {
+                        // result is "data:<mime>;base64,<data>" — strip the prefix
+                        var b64 = reader.result.split(',')[1];
+                        resolve(b64);
+                    };
+                    reader.onerror = function () { reject(reader.error); };
+                    reader.readAsDataURL(input.files[0]);
+                });
+            }
+        };
     </script>
 </body>
 

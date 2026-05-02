@@ -143,7 +143,7 @@ public sealed class PersonRepository : IPersonRepository
 
 public interface IPersonAddressRepository
 {
-    Task<PersonAddress?> GetPrimaryAsync(Guid personId);
+    Task<PersonAddress?> GetPrimaryAsync(Guid personId, DateOnly asOf);
     Task<Guid>           InsertAsync(PersonAddress address, IUnitOfWork uow);
 }
 
@@ -154,18 +154,19 @@ public sealed class PersonAddressRepository : IPersonAddressRepository
     public PersonAddressRepository(IConnectionFactory connectionFactory)
         => _connectionFactory = connectionFactory;
 
-    public async Task<PersonAddress?> GetPrimaryAsync(Guid personId)
+    public async Task<PersonAddress?> GetPrimaryAsync(Guid personId, DateOnly asOf)
     {
         const string sql = """
             SELECT * FROM person_address
             WHERE person_id    = @PersonId
               AND address_type = 'PRIMARY'
-              AND (effective_end_date IS NULL OR effective_end_date >= CURRENT_DATE)
+              AND (effective_end_date IS NULL OR effective_end_date >= @AsOf)
             ORDER BY effective_start_date DESC
             LIMIT 1
             """;
         using var conn = _connectionFactory.CreateConnection();
-        return await conn.QueryFirstOrDefaultAsync<PersonAddress>(sql, new { PersonId = personId });
+        return await conn.QueryFirstOrDefaultAsync<PersonAddress>(sql,
+            new { PersonId = personId, AsOf = asOf.ToDateTime(TimeOnly.MinValue) });
     }
 
     public async Task<Guid> InsertAsync(PersonAddress address, IUnitOfWork uow)
@@ -202,8 +203,8 @@ public interface IEmploymentRepository
     Task                                      UpdateStatusAsync(Guid employmentId, int statusId,
                                                   DateOnly effectiveDate, IUnitOfWork uow);
     Task<PagedResult<EmploymentListItem>>     GetPagedListAsync(EmployeeListQuery query);
-    Task<IReadOnlyList<EmploymentListItem>>   GetAllActiveListAsync();
-    Task<EmployeeStatCards>                   GetStatCardsAsync(DateOnly asOf);
+    Task<IReadOnlyList<EmploymentListItem>>   GetAllActiveListAsync(Guid? legalEntityId = null);
+    Task<EmployeeStatCards>                   GetStatCardsAsync(DateOnly asOf, Guid? legalEntityId = null);
 }
 
 public sealed class EmploymentRepository : IEmploymentRepository
@@ -307,6 +308,12 @@ public sealed class EmploymentRepository : IEmploymentRepository
         };
         var p = new DynamicParameters();
 
+        if (query.LegalEntityId.HasValue)
+        {
+            where.Add("e.legal_entity_id = @LegalEntityId");
+            p.Add("LegalEntityId", query.LegalEntityId.Value);
+        }
+
         if (!string.IsNullOrWhiteSpace(query.SearchTerm))
         {
             where.Add("(p.legal_last_name ILIKE @Search OR p.legal_first_name ILIKE @Search OR e.employee_number ILIKE @Search)");
@@ -388,9 +395,10 @@ public sealed class EmploymentRepository : IEmploymentRepository
         };
     }
 
-    public async Task<IReadOnlyList<EmploymentListItem>> GetAllActiveListAsync()
+    public async Task<IReadOnlyList<EmploymentListItem>> GetAllActiveListAsync(Guid? legalEntityId = null)
     {
-        const string sql = """
+        var entityFilter = legalEntityId.HasValue ? "AND e.legal_entity_id = @LegalEntityId" : "";
+        var sql = $"""
             SELECT DISTINCT ON (e.employment_id)
                 e.employment_id, e.person_id, p.legal_first_name, p.legal_last_name,
                 p.preferred_name, e.employee_number,
@@ -399,7 +407,9 @@ public sealed class EmploymentRepository : IEmploymentRepository
                 e.employment_start_date, j.job_title,
                 div.org_unit_name AS division_name,  div.org_unit_id AS division_id,
                 d.org_unit_name   AS department_name, d.org_unit_id   AS department_id,
-                l.org_unit_name   AS location_name,   l.org_unit_id   AS location_id
+                l.org_unit_name   AS location_name,   l.org_unit_id   AS location_id,
+                cr.rate_type_id,    rt.code AS rate_type_code,
+                cr.pay_frequency_id, pf.code AS pay_frequency_code
             FROM employment e
             INNER JOIN person p ON p.person_id = e.person_id
             LEFT JOIN lkp_employment_status les  ON les.id  = e.employment_status_id
@@ -412,32 +422,45 @@ public sealed class EmploymentRepository : IEmploymentRepository
             LEFT JOIN org_unit l ON l.org_unit_id      = a.location_id
             LEFT JOIN org_unit div ON div.org_unit_id  = d.parent_org_unit_id
                 AND div.org_unit_type_id = (SELECT id FROM lkp_org_unit_type WHERE code = 'DIVISION')
+            LEFT JOIN compensation_record cr ON cr.employment_id = e.employment_id
+                AND cr.primary_rate_flag = true
+                AND cr.compensation_status_id = (SELECT id FROM lkp_compensation_status WHERE code = 'ACTIVE')
+            LEFT JOIN lkp_compensation_rate_type rt ON rt.id = cr.rate_type_id
+            LEFT JOIN lkp_pay_frequency pf ON pf.id = cr.pay_frequency_id
             WHERE e.employment_status_id NOT IN (
                 SELECT id FROM lkp_employment_status WHERE code IN ('TERMINATED', 'CLOSED')
             )
+            {entityFilter}
             ORDER BY e.employment_id, p.legal_last_name, p.legal_first_name
             """;
         using var conn = _connectionFactory.CreateConnection();
-        return (await conn.QueryAsync<EmploymentListItem>(sql)).ToList();
+        return (await conn.QueryAsync<EmploymentListItem>(sql, new { LegalEntityId = legalEntityId })).ToList();
     }
 
-    public async Task<EmployeeStatCards> GetStatCardsAsync(DateOnly asOf)
+    public async Task<EmployeeStatCards> GetStatCardsAsync(DateOnly asOf, Guid? legalEntityId = null)
     {
-        const string sql = """
+        var entityFilter = legalEntityId.HasValue ? "AND legal_entity_id = @LegalEntityId" : "";
+        var deptFilter   = legalEntityId.HasValue
+            ? "AND e2.legal_entity_id = @LegalEntityId"
+            : "";
+        var sql = $"""
             SELECT
                 COUNT(*) FILTER (WHERE employment_status_id = (SELECT id FROM lkp_employment_status WHERE code = 'ACTIVE'))    AS active,
                 COUNT(*) FILTER (WHERE employment_status_id = (SELECT id FROM lkp_employment_status WHERE code = 'ON_LEAVE'))  AS on_leave,
                 COUNT(*) FILTER (WHERE employment_type_id   = (SELECT id FROM lkp_employment_type   WHERE code = 'CONTRACTOR')) AS contractors,
                 (SELECT COUNT(DISTINCT a.department_id)
                  FROM assignment a
-                 WHERE a.assignment_status_id = (SELECT id FROM lkp_assignment_status WHERE code = 'ACTIVE')) AS departments
+                 JOIN employment e2 ON e2.employment_id = a.employment_id
+                 WHERE a.assignment_status_id = (SELECT id FROM lkp_assignment_status WHERE code = 'ACTIVE')
+                   {deptFilter}) AS departments
             FROM employment
             WHERE employment_start_date <= @AsOf
               AND employment_status_id != (SELECT id FROM lkp_employment_status WHERE code = 'CLOSED')
+              {entityFilter}
             """;
         using var conn = _connectionFactory.CreateConnection();
         return await conn.QueryFirstAsync<EmployeeStatCards>(sql,
-            new { AsOf = asOf.ToDateTime(TimeOnly.MinValue) });
+            new { AsOf = asOf.ToDateTime(TimeOnly.MinValue), LegalEntityId = legalEntityId });
     }
 }
 
@@ -619,7 +642,7 @@ public sealed class CompensationRepository : ICompensationRepository
 public interface IOrgUnitRepository
 {
     Task<OrgUnit?>                  GetByIdAsync(Guid orgUnitId);
-    Task<IEnumerable<OrgUnit>>      GetByTypeAsync(int orgUnitTypeId);
+    Task<IEnumerable<OrgUnit>>      GetByTypeAsync(int orgUnitTypeId, Guid? legalEntityId = null);
     Task<IEnumerable<OrgUnit>>      GetChildrenAsync(Guid parentOrgUnitId);
     Task<IEnumerable<OrgUnit>>      GetAllActiveAsync(Guid? legalEntityId = null);
     Task<IEnumerable<OrgUnitEmployee>> GetWorkforceByOrgUnitAsync(Guid orgUnitId);
@@ -640,16 +663,18 @@ public sealed class OrgUnitRepository : IOrgUnitRepository
         return await conn.QueryFirstOrDefaultAsync<OrgUnit>(sql, new { OrgUnitId = orgUnitId });
     }
 
-    public async Task<IEnumerable<OrgUnit>> GetByTypeAsync(int orgUnitTypeId)
+    public async Task<IEnumerable<OrgUnit>> GetByTypeAsync(int orgUnitTypeId, Guid? legalEntityId = null)
     {
-        const string sql = """
+        var entityFilter = legalEntityId.HasValue ? "AND legal_entity_id = @LegalEntityId" : "";
+        var sql = $"""
             SELECT * FROM org_unit
             WHERE org_unit_type_id = @OrgUnitTypeId
               AND org_status_id    = (SELECT id FROM lkp_org_status WHERE code = 'ACTIVE')
+              {entityFilter}
             ORDER BY org_unit_name
             """;
         using var conn = _connectionFactory.CreateConnection();
-        return await conn.QueryAsync<OrgUnit>(sql, new { OrgUnitTypeId = orgUnitTypeId });
+        return await conn.QueryAsync<OrgUnit>(sql, new { OrgUnitTypeId = orgUnitTypeId, LegalEntityId = legalEntityId });
     }
 
     public async Task<IEnumerable<OrgUnit>> GetChildrenAsync(Guid parentOrgUnitId)
@@ -741,14 +766,14 @@ public sealed class OrgUnitRepository : IOrgUnitRepository
             INSERT INTO org_unit (
                 org_unit_id, org_unit_type_id, org_unit_code, org_unit_name, parent_org_unit_id,
                 legal_entity_id, org_status_id, effective_start_date, effective_end_date,
-                tax_registration_number, country_code, state_of_incorporation, legal_entity_type,
+                tax_registration_number, country_code, state_of_incorporation, legal_entity_type_id,
                 address_line_1, address_line_2, city, state_code, postal_code, locality_code,
                 work_location_type_id,
                 created_by, creation_timestamp, last_updated_by, last_update_timestamp
             ) VALUES (
                 @OrgUnitId, @OrgUnitTypeId, @OrgUnitCode, @OrgUnitName, @ParentOrgUnitId,
                 @LegalEntityId, @OrgStatusId, @EffectiveStartDate, @EffectiveEndDate,
-                @TaxRegistrationNumber, @CountryCode, @StateOfIncorporation, @LegalEntityType,
+                @TaxRegistrationNumber, @CountryCode, @StateOfIncorporation, @LegalEntityTypeId,
                 @AddressLine1, @AddressLine2, @City, @StateCode, @PostalCode, @LocalityCode,
                 @WorkLocationTypeId,
                 @CreatedBy, @CreationTimestamp, @LastUpdatedBy, @LastUpdateTimestamp
@@ -767,6 +792,7 @@ public interface IJobRepository
 {
     Task<Job?>             GetByIdAsync(Guid jobId);
     Task<IEnumerable<Job>> GetAllActiveAsync();
+    Task<IEnumerable<Job>> GetByLegalEntityAsync(Guid legalEntityId);
     Task<Guid>             InsertAsync(Job job, IUnitOfWork uow);
 }
 
@@ -795,16 +821,28 @@ public sealed class JobRepository : IJobRepository
         return await conn.QueryAsync<Job>(sql);
     }
 
+    public async Task<IEnumerable<Job>> GetByLegalEntityAsync(Guid legalEntityId)
+    {
+        const string sql = """
+            SELECT * FROM job
+            WHERE legal_entity_id = @LegalEntityId
+              AND job_status_id = (SELECT id FROM lkp_job_status WHERE code = 'ACTIVE')
+            ORDER BY job_title
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        return await conn.QueryAsync<Job>(sql, new { LegalEntityId = legalEntityId });
+    }
+
     public async Task<Guid> InsertAsync(Job job, IUnitOfWork uow)
     {
         const string sql = """
             INSERT INTO job (
-                job_id, job_code, job_title, job_family, job_level,
+                job_id, legal_entity_id, job_code, job_title, job_family, job_level,
                 flsa_classification_id, eeo_category_id, job_status_id,
                 effective_start_date, effective_end_date,
                 created_by, creation_timestamp, last_updated_by, last_update_timestamp
             ) VALUES (
-                @JobId, @JobCode, @JobTitle, @JobFamily, @JobLevel,
+                @JobId, @LegalEntityId, @JobCode, @JobTitle, @JobFamily, @JobLevel,
                 @FlsaClassificationId, @EeoCategoryId, @JobStatusId,
                 @EffectiveStartDate, @EffectiveEndDate,
                 @CreatedBy, @CreationTimestamp, @LastUpdatedBy, @LastUpdateTimestamp
@@ -824,6 +862,7 @@ public interface IPositionRepository
     Task<Position?>             GetByIdAsync(Guid positionId);
     Task<IEnumerable<Position>> GetByJobIdAsync(Guid jobId);
     Task<IEnumerable<Position>> GetAllActiveAsync();
+    Task<IEnumerable<Position>> GetByLegalEntityAsync(Guid legalEntityId);
     Task<Guid>                  InsertAsync(Position position, IUnitOfWork uow);
 }
 
@@ -866,6 +905,21 @@ public sealed class PositionRepository : IPositionRepository
             """;
         using var conn = _connectionFactory.CreateConnection();
         return await conn.QueryAsync<Position>(sql);
+    }
+
+    public async Task<IEnumerable<Position>> GetByLegalEntityAsync(Guid legalEntityId)
+    {
+        const string sql = """
+            SELECT p.* FROM position p
+            INNER JOIN org_unit ou ON ou.org_unit_id = p.org_unit_id
+            WHERE ou.legal_entity_id = @LegalEntityId
+              AND p.position_status_id NOT IN (
+                  SELECT id FROM lkp_position_status WHERE code = 'ABOLISHED'
+              )
+            ORDER BY p.effective_start_date DESC
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        return await conn.QueryAsync<Position>(sql, new { LegalEntityId = legalEntityId });
     }
 
     public async Task<Guid> InsertAsync(Position position, IUnitOfWork uow)

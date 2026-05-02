@@ -47,7 +47,7 @@ public sealed class DocumentExpirationCheckJob : BackgroundService
         var operativeDate = DateOnly.FromDateTime(temporalContext.GetOperativeDate());
 
         // Raise / escalate expiration alerts for documents expiring within 90 days
-        var expiring = await documentService.GetExpiringDocumentsAsync(withinDays: 90);
+        var expiring = await documentService.GetExpiringDocumentsAsync(withinDays: 90, operativeDate);
         foreach (var doc in expiring)
         {
             try
@@ -63,13 +63,14 @@ public sealed class DocumentExpirationCheckJob : BackgroundService
             }
         }
 
-        // Transition overdue active documents to EXPIRED
+        // Transition overdue active documents to EXPIRED and close their work queue alerts
         var expired = await documentRepo.GetExpiredAsOfAsync(operativeDate);
         foreach (var doc in expired)
         {
             try
             {
                 await documentService.ExpireDocumentAsync(doc.DocumentId);
+                await workQueueService.ResolveByReferenceAsync(doc.DocumentId, Guid.Empty);
             }
             catch (Exception ex)
             {

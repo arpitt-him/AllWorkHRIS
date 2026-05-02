@@ -1,4 +1,6 @@
+using System.Text.Json;
 using System.Threading.Channels;
+using AllWorkHRIS.Core.Audit;
 using AllWorkHRIS.Module.Payroll.Commands;
 using AllWorkHRIS.Module.Payroll.Domain.Run;
 using AllWorkHRIS.Module.Payroll.Repositories;
@@ -12,17 +14,20 @@ public sealed class PayrollRunService : IPayrollRunService
     private readonly IPayrollContextRepository  _contextRepo;
     private readonly Channel<Guid>              _queue;
     private readonly ILogger<PayrollRunService> _logger;
+    private readonly IAuditService              _auditService;
 
     public PayrollRunService(
         IPayrollRunRepository      runRepo,
         IPayrollContextRepository  contextRepo,
         Channel<Guid>              queue,
-        ILogger<PayrollRunService> logger)
+        ILogger<PayrollRunService> logger,
+        IAuditService              auditService)
     {
-        _runRepo     = runRepo;
-        _contextRepo = contextRepo;
-        _queue       = queue;
-        _logger      = logger;
+        _runRepo      = runRepo;
+        _contextRepo  = contextRepo;
+        _queue        = queue;
+        _logger       = logger;
+        _auditService = auditService;
     }
 
     public async Task<Guid> InitiateRunAsync(InitiatePayrollRunCommand command)
@@ -66,6 +71,17 @@ public sealed class PayrollRunService : IPayrollRunService
             "Payroll run {RunId} initiated for context {ContextId} period {PeriodId}",
             run.RunId, run.PayrollContextId, run.PeriodId);
 
+        await _auditService.LogAsync(new AuditEventRecord(
+            EventType:       "CREATE",
+            EntityType:      "PayrollRun",
+            EntityId:        run.RunId,
+            ModuleName:      "PAYROLL",
+            ChangeSummary:   $"Payroll run initiated for context {run.PayrollContextId} period {run.PeriodId}",
+            ParentEntityType: "PayrollContext",
+            ParentEntityId:  run.PayrollContextId,
+            AfterJson:       JsonSerializer.Serialize(new { run_status = "DRAFT", run.PeriodId })
+        ));
+
         return run.RunId;
     }
 
@@ -75,6 +91,17 @@ public sealed class PayrollRunService : IPayrollRunService
         RequireStatus(run, PayrollRunStatus.Calculated, "approve");
         await _runRepo.UpdateStatusAsync(command.RunId, (int)PayrollRunStatus.Approved, command.ApprovedBy);
         _logger.LogInformation("Run {RunId} approved by {UserId}", command.RunId, command.ApprovedBy);
+
+        await _auditService.LogAsync(new AuditEventRecord(
+            EventType:       "STATUS_CHANGE",
+            EntityType:      "PayrollRun",
+            EntityId:        command.RunId,
+            ModuleName:      "PAYROLL",
+            ChangeSummary:   $"Payroll run approved",
+            ParentEntityType: "PayrollContext",
+            ParentEntityId:  run.PayrollContextId,
+            AfterJson:       JsonSerializer.Serialize(new { run_status = "APPROVED" })
+        ));
     }
 
     public async Task ReleaseRunAsync(ReleasePayrollRunCommand command)
@@ -98,6 +125,17 @@ public sealed class PayrollRunService : IPayrollRunService
         await _runRepo.UpdateStatusAsync(command.RunId, (int)PayrollRunStatus.Cancelled, command.CancelledBy);
         _logger.LogInformation("Run {RunId} cancelled by {UserId}: {Reason}",
             command.RunId, command.CancelledBy, command.Reason);
+
+        await _auditService.LogAsync(new AuditEventRecord(
+            EventType:       "STATUS_CHANGE",
+            EntityType:      "PayrollRun",
+            EntityId:        command.RunId,
+            ModuleName:      "PAYROLL",
+            ChangeSummary:   $"Payroll run cancelled: {command.Reason}",
+            ParentEntityType: "PayrollContext",
+            ParentEntityId:  run.PayrollContextId,
+            AfterJson:       JsonSerializer.Serialize(new { run_status = "CANCELLED", reason = command.Reason })
+        ));
     }
 
     public Task<PayrollRun?> GetRunByIdAsync(Guid runId)

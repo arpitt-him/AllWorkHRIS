@@ -8,7 +8,8 @@ public interface IWorkQueueRepository
 {
     Task<WorkQueueItem?>              GetByIdAsync(Guid itemId);
     Task<WorkQueueItem?>              GetOpenByReferenceAsync(Guid referenceId, string itemType);
-    Task<IEnumerable<WorkQueueItem>>  GetOpenByRoleAsync(string role, Guid? employmentId = null);
+    Task<WorkQueueItem?>              GetAnyOpenByReferenceAsync(Guid referenceId);
+    Task<IEnumerable<WorkQueueItem>>  GetOpenByRoleAsync(string role, Guid? legalEntityId = null, Guid? employmentId = null);
     Task<Guid>                        InsertAsync(WorkQueueItem item);
     Task                              UpdatePriorityAsync(Guid itemId, string priority);
     Task                              ResolveAsync(Guid itemId, Guid resolvedBy);
@@ -40,18 +41,30 @@ public sealed class WorkQueueRepository : IWorkQueueRepository
             new { RefId = referenceId, Type = itemType });
     }
 
+    public async Task<WorkQueueItem?> GetAnyOpenByReferenceAsync(Guid referenceId)
+    {
+        using var conn = _connectionFactory.CreateConnection();
+        return await conn.QueryFirstOrDefaultAsync<WorkQueueItem>(
+            @"SELECT * FROM work_queue_item
+              WHERE reference_id = @RefId AND status = 'OPEN'
+              LIMIT 1",
+            new { RefId = referenceId });
+    }
+
     public async Task<IEnumerable<WorkQueueItem>> GetOpenByRoleAsync(string role,
-        Guid? employmentId = null)
+        Guid? legalEntityId = null, Guid? employmentId = null)
     {
         using var conn = _connectionFactory.CreateConnection();
         return await conn.QueryAsync<WorkQueueItem>(
-            @"SELECT * FROM work_queue_item
-              WHERE assigned_role = @Role AND status = 'OPEN'
-                AND (@EmploymentId IS NULL OR employment_id = @EmploymentId)
+            @"SELECT wqi.* FROM work_queue_item wqi
+              LEFT JOIN employment e ON e.employment_id = wqi.employment_id
+              WHERE wqi.assigned_role = @Role AND wqi.status = 'OPEN'
+                AND (@LegalEntityId IS NULL OR e.legal_entity_id = @LegalEntityId)
+                AND (@EmploymentId  IS NULL OR wqi.employment_id  = @EmploymentId)
               ORDER BY
-                CASE priority WHEN 'HOLD' THEN 1 WHEN 'HIGH' THEN 2 ELSE 3 END,
-                created_at",
-            new { Role = role, EmploymentId = employmentId });
+                CASE wqi.priority WHEN 'HOLD' THEN 1 WHEN 'HIGH' THEN 2 ELSE 3 END,
+                wqi.created_at",
+            new { Role = role, LegalEntityId = legalEntityId, EmploymentId = employmentId });
     }
 
     public async Task<Guid> InsertAsync(WorkQueueItem item)
@@ -99,7 +112,7 @@ public sealed class WorkQueueRepository : IWorkQueueRepository
         using var conn = _connectionFactory.CreateConnection();
         await conn.ExecuteAsync(
             @"UPDATE work_queue_item
-              SET status = 'RESOLVED', resolved_at = now(), resolved_by = @ResolvedBy
+              SET status = 'RESOLVED', resolved_at = CURRENT_TIMESTAMP, resolved_by = @ResolvedBy
               WHERE work_queue_item_id = @Id",
             new { Id = itemId, ResolvedBy = resolvedBy });
     }
@@ -109,7 +122,7 @@ public sealed class WorkQueueRepository : IWorkQueueRepository
         using var conn = _connectionFactory.CreateConnection();
         await conn.ExecuteAsync(
             @"UPDATE work_queue_item
-              SET status = 'RESOLVED', resolved_at = now(), resolved_by = @ResolvedBy
+              SET status = 'RESOLVED', resolved_at = CURRENT_TIMESTAMP, resolved_by = @ResolvedBy
               WHERE reference_id = @RefId AND status = 'OPEN'",
             new { RefId = referenceId, ResolvedBy = resolvedBy });
     }

@@ -124,7 +124,7 @@ public sealed class OnboardingRepository : IOnboardingRepository
     {
         await uow.Connection.ExecuteAsync(
             @"UPDATE onboarding_plan SET plan_status_id = @StatusId,
-              last_update_timestamp = now() WHERE onboarding_plan_id = @Id",
+              last_update_timestamp = CURRENT_TIMESTAMP WHERE onboarding_plan_id = @Id",
             new { Id = planId, StatusId = statusId },
             uow.Transaction);
     }
@@ -134,7 +134,7 @@ public sealed class OnboardingRepository : IOnboardingRepository
     {
         await uow.Connection.ExecuteAsync(
             @"UPDATE onboarding_plan
-              SET completion_date = @CompletionDate, last_update_timestamp = now()
+              SET completion_date = @CompletionDate, last_update_timestamp = CURRENT_TIMESTAMP
               WHERE onboarding_plan_id = @Id",
             new { Id = planId, CompletionDate = completionDate.ToDateTime(TimeOnly.MinValue) },
             uow.Transaction);

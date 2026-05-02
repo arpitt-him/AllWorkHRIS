@@ -47,6 +47,9 @@ public sealed class PayrollModule : IPlatformModule
         builder.RegisterType<PayrollContextRepository>()
                .As<IPayrollContextRepository>()
                .InstancePerLifetimeScope();
+        builder.RegisterType<PayrollCompensationSnapshotRepository>()
+               .As<IPayrollCompensationSnapshotRepository>()
+               .InstancePerLifetimeScope();
 
         // Services
         builder.RegisterType<PayrollRunService>().As<IPayrollRunService>().InstancePerLifetimeScope();
@@ -64,6 +67,8 @@ public sealed class PayrollModule : IPlatformModule
         builder.RegisterType<TerminationEventHandler>().SingleInstance();
         builder.RegisterType<CompensationChangeHandler>().SingleInstance();
         builder.RegisterType<LeaveApprovedHandler>().SingleInstance();
+        builder.RegisterType<OnboardingBlockingTasksGateHandler>().SingleInstance();
+        builder.RegisterType<OnboardingPlanGateHandler>().SingleInstance();
 
         // HRIS event subscriptions — register and wire handlers after container build
         // This is called after the bus is resolved by the host; see Phase 4.3 notes

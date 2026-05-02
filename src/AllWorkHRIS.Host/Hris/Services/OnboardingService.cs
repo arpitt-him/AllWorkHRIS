@@ -1,6 +1,7 @@
 using AllWorkHRIS.Core.Data;
 using AllWorkHRIS.Core.Events;
 using AllWorkHRIS.Core.Lookups;
+using AllWorkHRIS.Core.Temporal;
 using AllWorkHRIS.Host.Hris.Domain;
 using AllWorkHRIS.Host.Hris.Repositories;
 
@@ -24,6 +25,7 @@ public sealed class OnboardingService : IOnboardingService
     private readonly IWorkQueueService       _workQueueService;
     private readonly IEventPublisher         _eventPublisher;
     private readonly ILookupCache            _lookupCache;
+    private readonly ITemporalContext        _temporalContext;
 
     private readonly int _planCreatedStatusId;
     private readonly int _planInProgressStatusId;
@@ -38,13 +40,15 @@ public sealed class OnboardingService : IOnboardingService
         IOnboardingRepository onboardingRepository,
         IWorkQueueService     workQueueService,
         IEventPublisher       eventPublisher,
-        ILookupCache          lookupCache)
+        ILookupCache          lookupCache,
+        ITemporalContext      temporalContext)
     {
         _connectionFactory    = connectionFactory;
         _onboardingRepository = onboardingRepository;
         _workQueueService     = workQueueService;
         _eventPublisher       = eventPublisher;
         _lookupCache          = lookupCache;
+        _temporalContext      = temporalContext;
 
         _planCreatedStatusId          = lookupCache.GetId(LookupTables.OnboardingPlanStatus, "NOT_STARTED");
         _planInProgressStatusId       = lookupCache.GetId(LookupTables.OnboardingPlanStatus, "IN_PROGRESS");
@@ -115,7 +119,8 @@ public sealed class OnboardingService : IOnboardingService
                 EmploymentId     = employmentId,
                 TenantId         = Guid.Empty,
                 TargetStartDate  = startDate,
-                EventTimestamp   = now
+                EventTimestamp   = now,
+                HasBlockingTasks = taskDefs.Any(t => t.IsBlocking)
             });
 
             return planId;
@@ -157,6 +162,7 @@ public sealed class OnboardingService : IOnboardingService
             throw;
         }
 
+        await _workQueueService.ResolveByReferenceAsync(taskId, completedBy);
         await CheckAndAdvancePlanStatusAsync(plan, completedBy);
     }
 
@@ -190,6 +196,7 @@ public sealed class OnboardingService : IOnboardingService
             throw;
         }
 
+        await _workQueueService.ResolveByReferenceAsync(taskId, waivedBy);
         await CheckAndAdvancePlanStatusAsync(plan, waivedBy);
     }
 
@@ -222,7 +229,7 @@ public sealed class OnboardingService : IOnboardingService
         {
             if (allDone)
             {
-                var today = DateOnly.FromDateTime(DateTime.UtcNow);
+                var today = DateOnly.FromDateTime(_temporalContext.GetOperativeDate());
                 await _onboardingRepository.UpdatePlanStatusAsync(
                     plan.OnboardingPlanId, _planCompleteStatusId, uow);
                 await _onboardingRepository.SetPlanCompletionDateAsync(

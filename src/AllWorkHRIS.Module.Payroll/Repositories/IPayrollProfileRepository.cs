@@ -10,4 +10,6 @@ public interface IPayrollProfileRepository
     Task<IReadOnlyList<Guid>>           GetActiveEmploymentIdsByContextAsync(Guid payrollContextId);
     Task                        UpdateStatusAsync(Guid employmentId, string status, Guid updatedBy);
     Task                        SetFinalPayFlagAsync(Guid employmentId, bool finalPayFlag, Guid updatedBy);
+    Task                        SetBlockingTasksClearedAsync(Guid employmentId, Guid updatedBy);
+    Task<IReadOnlyList<Guid>>   GetActiveBlockedEmploymentIdsByContextAsync(Guid payrollContextId);
 }

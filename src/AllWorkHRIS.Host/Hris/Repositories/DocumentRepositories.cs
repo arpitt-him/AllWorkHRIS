@@ -11,9 +11,10 @@ public interface IDocumentRepository
     Task<IEnumerable<HrDocument>>  GetByEmploymentIdAsync(Guid employmentId);
     Task<HrDocument?>              GetActiveByTypeAsync(Guid personId,
                                        int documentTypeId, Guid? employmentId = null);
-    Task<IEnumerable<HrDocument>>  GetExpiringWithinAsync(int days,
-                                       int? documentTypeId = null);
-    Task<IEnumerable<HrDocument>>  GetExpiredAsOfAsync(DateOnly asOf);
+    Task<IEnumerable<HrDocument>>  GetExpiringWithinAsync(int days, DateOnly asOf,
+                                       int? documentTypeId = null, Guid? legalEntityId = null);
+    Task<IEnumerable<HrDocument>>  GetExpiredAsOfAsync(DateOnly asOf,
+                                       Guid? legalEntityId = null);
     Task<Guid>                     InsertAsync(HrDocument document, IUnitOfWork uow);
     Task                           UpdateStatusAsync(Guid documentId, int statusId, IUnitOfWork uow);
     Task                           SetSupersededByAsync(Guid documentId,
@@ -72,33 +73,41 @@ public sealed class DocumentRepository : IDocumentRepository
             new { PersonId = personId, TypeId = documentTypeId, EmploymentId = employmentId });
     }
 
-    public async Task<IEnumerable<HrDocument>> GetExpiringWithinAsync(int days,
-        int? documentTypeId = null)
+    public async Task<IEnumerable<HrDocument>> GetExpiringWithinAsync(int days, DateOnly asOf,
+        int? documentTypeId = null, Guid? legalEntityId = null)
     {
         using var conn = _connectionFactory.CreateConnection();
         const string sql =
             @"SELECT d.* FROM document d
               JOIN lkp_document_status ds ON d.document_status_id = ds.id
+              LEFT JOIN employment e ON e.employment_id = d.employment_id
               WHERE ds.code = 'ACTIVE'
                 AND d.expiration_date IS NOT NULL
-                AND d.expiration_date <= (CURRENT_DATE + @Days * INTERVAL '1 day')
-                AND d.expiration_date > CURRENT_DATE
-                AND (@TypeId IS NULL OR d.document_type_id = @TypeId)";
+                AND d.expiration_date <= @UpperBound
+                AND d.expiration_date > @AsOf
+                AND (@TypeId IS NULL OR d.document_type_id = @TypeId)
+                AND (@LegalEntityId IS NULL OR e.legal_entity_id = @LegalEntityId)";
         return await conn.QueryAsync<HrDocument>(sql,
-            new { Days = days, TypeId = documentTypeId });
+            new { AsOf       = asOf.ToDateTime(TimeOnly.MinValue),
+                  UpperBound = asOf.AddDays(days).ToDateTime(TimeOnly.MinValue),
+                  TypeId     = documentTypeId,
+                  LegalEntityId = legalEntityId });
     }
 
-    public async Task<IEnumerable<HrDocument>> GetExpiredAsOfAsync(DateOnly asOf)
+    public async Task<IEnumerable<HrDocument>> GetExpiredAsOfAsync(DateOnly asOf,
+        Guid? legalEntityId = null)
     {
         using var conn = _connectionFactory.CreateConnection();
         const string sql =
             @"SELECT d.* FROM document d
               JOIN lkp_document_status ds ON d.document_status_id = ds.id
-              WHERE ds.code = 'ACTIVE'
+              LEFT JOIN employment e ON e.employment_id = d.employment_id
+              WHERE ds.code IN ('ACTIVE', 'EXPIRED')
                 AND d.expiration_date IS NOT NULL
-                AND d.expiration_date <= @AsOf";
+                AND d.expiration_date <= @AsOf
+                AND (@LegalEntityId IS NULL OR e.legal_entity_id = @LegalEntityId)";
         return await conn.QueryAsync<HrDocument>(sql,
-            new { AsOf = asOf.ToDateTime(TimeOnly.MinValue) });
+            new { AsOf = asOf.ToDateTime(TimeOnly.MinValue), LegalEntityId = legalEntityId });
     }
 
     public async Task<Guid> InsertAsync(HrDocument document, IUnitOfWork uow)

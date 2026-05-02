@@ -1,18 +1,32 @@
 @* AllWorkHRIS.Host/Components/Layout/MainLayout.razor *@
 @inherits LayoutComponentBase
 @inject IReadOnlyList<MenuContribution> MenuItems
+@using Microsoft.AspNetCore.Components.Authorization
 
 <div class="shell-container">
     <nav class="shell-sidebar">
         <div class="shell-brand">
             <span class="shell-brand-name">@AppDisplayName</span>
         </div>
-        <NavMenu Items="MenuItems" />
+        <div class="shell-nav-main">
+            <NavMenu Items="MenuItems" />
+        </div>
+        <div class="shell-nav-bottom">
+            <AuthorizeView Roles="SystemAdmin">
+                <div class="nav-group">
+                    <div class="nav-item nav-parent">
+                        <span class="nav-label">Configuration</span>
+                    </div>
+                    <NavLink class="nav-item nav-child" href="/config/legal-entities" Match="NavLinkMatch.Prefix">
+                        <span class="nav-label">Legal Entities</span>
+                    </NavLink>
+                </div>
+            </AuthorizeView>
+        </div>
     </nav>
 
     <div class="shell-main">
         <TopBar />
-        <TemporalOverrideBar />
         <div class="shell-content">
             <ErrorBoundary>
                 <ChildContent>

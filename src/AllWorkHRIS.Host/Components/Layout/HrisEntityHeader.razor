@@ -1,0 +1,52 @@
+@implements IDisposable
+@using AllWorkHRIS.Host.Hris.Domain
+@using AllWorkHRIS.Host.Hris.Services
+@inject IOrgStructureService OrgService
+@inject IHrisSessionState    SessionState
+
+@if (_entities.Count > 1)
+{
+    <div class="hris-shell__header">
+        <span class="hris-shell__entity-label">Legal Entity</span>
+        @if (SessionState.IsLocked)
+        {
+            <span class="hris-shell__entity-locked">@SessionState.SelectedLegalEntityName</span>
+        }
+        else
+        {
+            @foreach (var e in _entities)
+            {
+                var entity = e;
+                <button @key="entity.OrgUnitId"
+                        class="hris-shell__entity-pill @(SessionState.SelectedLegalEntityId == entity.OrgUnitId ? "hris-shell__entity-pill--active" : "")"
+                        @onclick="() => SelectEntity(entity)">
+                    @entity.OrgUnitName
+                </button>
+            }
+        }
+    </div>
+}
+
+@code {
+    private List<OrgUnit> _entities = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        SessionState.OnChanged += OnSessionChanged;
+
+        var all = await OrgService.GetLegalEntitiesAsync();
+        _entities = all.OrderBy(e => e.OrgUnitName).ToList();
+
+        if (_entities.Count > 0 && !SessionState.HasEntity)
+            SelectEntity(_entities[0]);
+    }
+
+    private void SelectEntity(OrgUnit entity)
+        => SessionState.SetEntity(entity.OrgUnitId, entity.OrgUnitName);
+
+    private void OnSessionChanged()
+        => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+        => SessionState.OnChanged -= OnSessionChanged;
+}

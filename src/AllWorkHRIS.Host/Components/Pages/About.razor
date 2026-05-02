@@ -1,6 +1,9 @@
 @page "/about"
+@rendermode InteractiveServer
 @using AllWorkHRIS.Core.Composition
+@using AllWorkHRIS.Core.Temporal
 @inject IReadOnlyList<IPlatformModule> Modules
+@inject ITemporalOverrideService TemporalOverride
 
 <PageTitle>About — AllWork HRIS</PageTitle>
 
@@ -61,6 +64,14 @@
         </table>
     }
 </div>
+
+@if (TemporalOverride.IsEnabled)
+{
+    <div class="about-section">
+        <h2 class="section-title">Developer Tools</h2>
+        <TemporalOverrideBar />
+    </div>
+}
 
 <style>
     .about-section {

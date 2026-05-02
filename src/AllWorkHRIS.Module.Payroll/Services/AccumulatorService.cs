@@ -1,3 +1,4 @@
+using AllWorkHRIS.Core.Temporal;
 using AllWorkHRIS.Module.Payroll.Domain.Accumulators;
 using AllWorkHRIS.Module.Payroll.Domain.Results;
 using AllWorkHRIS.Module.Payroll.Repositories;
@@ -8,16 +9,20 @@ public sealed class AccumulatorService : IAccumulatorService
 {
     private readonly IAccumulatorRepository _accumulatorRepo;
     private readonly IResultLineRepository  _resultLineRepo;
+    private readonly ITemporalContext       _temporalContext;
 
-    public AccumulatorService(IAccumulatorRepository accumulatorRepo, IResultLineRepository resultLineRepo)
+    public AccumulatorService(IAccumulatorRepository accumulatorRepo, IResultLineRepository resultLineRepo,
+        ITemporalContext temporalContext)
     {
         _accumulatorRepo = accumulatorRepo;
         _resultLineRepo  = resultLineRepo;
+        _temporalContext = temporalContext;
     }
 
     public async Task ApplyAsync(EmployeePayrollResult result, Guid runId, CancellationToken ct = default)
     {
-        var now = DateTimeOffset.UtcNow;
+        var now  = DateTimeOffset.UtcNow;
+        var asOf = DateOnly.FromDateTime(_temporalContext.GetOperativeDate());
 
         var earningsLines     = await _resultLineRepo.GetEarningsByResultIdAsync(result.EmployeePayrollResultId);
         var deductionLines    = await _resultLineRepo.GetDeductionsByResultIdAsync(result.EmployeePayrollResultId);
@@ -26,7 +31,7 @@ public sealed class AccumulatorService : IAccumulatorService
 
         foreach (var line in earningsLines.Where(l => l.AccumulatorImpactFlag))
         {
-            var def = await _accumulatorRepo.GetDefinitionByCodeAsync(line.EarningsCode);
+            var def = await _accumulatorRepo.GetDefinitionByCodeAsync(line.EarningsCode, asOf);
             if (def is null) continue;
             await ApplyChainAsync(def, line.CalculatedAmount, line.EarningsResultLineId, result, runId, now);
             ct.ThrowIfCancellationRequested();
@@ -34,7 +39,7 @@ public sealed class AccumulatorService : IAccumulatorService
 
         foreach (var line in deductionLines.Where(l => l.AccumulatorImpactFlag))
         {
-            var def = await _accumulatorRepo.GetDefinitionByCodeAsync(line.DeductionCode);
+            var def = await _accumulatorRepo.GetDefinitionByCodeAsync(line.DeductionCode, asOf);
             if (def is null) continue;
             await ApplyChainAsync(def, line.CalculatedAmount, line.DeductionResultLineId, result, runId, now);
             ct.ThrowIfCancellationRequested();
@@ -42,7 +47,7 @@ public sealed class AccumulatorService : IAccumulatorService
 
         foreach (var line in taxLines.Where(l => l.AccumulatorImpactFlag))
         {
-            var def = await _accumulatorRepo.GetDefinitionByCodeAsync(line.TaxCode);
+            var def = await _accumulatorRepo.GetDefinitionByCodeAsync(line.TaxCode, asOf);
             if (def is null) continue;
             await ApplyChainAsync(def, line.CalculatedAmount, line.TaxResultLineId, result, runId, now);
             ct.ThrowIfCancellationRequested();
@@ -50,7 +55,7 @@ public sealed class AccumulatorService : IAccumulatorService
 
         foreach (var line in contributionLines.Where(l => l.AccumulatorImpactFlag))
         {
-            var def = await _accumulatorRepo.GetDefinitionByCodeAsync(line.ContributionCode);
+            var def = await _accumulatorRepo.GetDefinitionByCodeAsync(line.ContributionCode, asOf);
             if (def is null) continue;
             await ApplyChainAsync(def, line.CalculatedAmount, line.EmployerContributionResultLineId, result, runId, now);
             ct.ThrowIfCancellationRequested();

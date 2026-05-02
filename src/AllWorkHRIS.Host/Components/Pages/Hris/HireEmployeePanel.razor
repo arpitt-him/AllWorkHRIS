@@ -4,11 +4,10 @@
 @using AllWorkHRIS.Core.Lookups
 @using AllWorkHRIS.Host.Hris.Commands
 @using AllWorkHRIS.Host.Hris.Domain
-@using AllWorkHRIS.Host.Hris.Repositories
 @using AllWorkHRIS.Host.Hris.Services
 @inject IEmploymentService    EmploymentService
 @inject IOrgStructureService  OrgStructureService
-@inject IJobRepository        JobRepository
+@inject IJobService           JobService
 @inject ILookupCache          LookupCache
 @inject AuthenticationStateProvider AuthStateProvider
 @inject IPayrollContextLookup PayrollContextLookup
@@ -133,16 +132,6 @@
             {
                 <h4 class="step-title">Step 3 — Employment</h4>
                 <div class="form-grid">
-                    <div class="form-field">
-                        <label>Legal Entity <span class="required">*</span></label>
-                        <select @bind="_legalEntityId">
-                            <option value="">— Select —</option>
-                            @foreach (var le in _legalEntities)
-                            {
-                                <option value="@le.OrgUnitId">@le.OrgUnitName</option>
-                            }
-                        </select>
-                    </div>
                     <div class="form-field">
                         <label>Employee Number <span class="required">*</span></label>
                         <input @bind="_cmd.EmployeeNumber" placeholder="e.g. EMP-001" />
@@ -369,7 +358,7 @@
                 }
                 @if (_currentStep < _totalSteps)
                 {
-                    <button class="btn-primary" @onclick="NextStep">Next →</button>
+                    <button class="btn-primary" @onclick="async () => await NextStep()">Next →</button>
                 }
                 else
                 {
@@ -385,7 +374,8 @@
 
 @code {
     [Parameter] public EventCallback OnHireComplete { get; set; }
-    [Parameter] public EventCallback OnCancel { get; set; }
+    [Parameter] public EventCallback OnCancel       { get; set; }
+    [Parameter] public Guid          LegalEntityId  { get; set; }
 
     private int  _currentStep = 1;
     private int  _totalSteps  = 6;
@@ -402,7 +392,6 @@
     private string     _locationId    = string.Empty;
 
     // Reference data — org/job loaded from DB
-    private List<OrgUnit> _legalEntities    = [];
     private List<OrgUnit> _departments      = [];
     private List<OrgUnit> _locations        = [];
     private List<Job>     _jobs             = [];
@@ -418,25 +407,38 @@
 
     protected override async Task OnInitializedAsync()
     {
-        _legalEntities = (await OrgStructureService.GetLegalEntitiesAsync()).ToList();
-        _departments   = (await OrgStructureService.GetDepartmentsAsync()).ToList();
-        _locations     = (await OrgStructureService.GetLocationsAsync()).ToList();
-        _jobs          = (await JobRepository.GetAllActiveAsync()).ToList();
+        _legalEntityId = LegalEntityId.ToString();
 
-        _employmentTypes     = LookupCache.GetAll(LookupTables.EmploymentType);
-        _flsaStatuses        = LookupCache.GetAll(LookupTables.FlsaStatus);
+        _employmentTypes      = LookupCache.GetAll(LookupTables.EmploymentType);
+        _flsaStatuses         = LookupCache.GetAll(LookupTables.FlsaStatus);
         _fullPartTimeStatuses = LookupCache.GetAll(LookupTables.FullPartTimeStatus);
-        _rateTypes           = LookupCache.GetAll(LookupTables.CompensationRateType);
-        _payFrequencies      = LookupCache.GetAll(LookupTables.PayFrequency);
+        _rateTypes            = LookupCache.GetAll(LookupTables.CompensationRateType);
+        _payFrequencies       = LookupCache.GetAll(LookupTables.PayFrequency);
 
-        _payrollContexts = (await PayrollContextLookup.GetActiveContextsAsync()).ToList();
+        await LoadEntityScopedDataAsync();
     }
 
-    private void NextStep()
+    private async Task LoadEntityScopedDataAsync()
+    {
+        if (!Guid.TryParse(_legalEntityId, out var entityId)) return;
+        var jobsTask     = JobService.GetByLegalEntityAsync(entityId);
+        var deptTask     = OrgStructureService.GetDepartmentsAsync(entityId);
+        var locTask      = OrgStructureService.GetLocationsAsync(entityId);
+        var contextsTask = PayrollContextLookup.GetActiveContextsByLegalEntityAsync(entityId);
+        await Task.WhenAll(jobsTask, deptTask, locTask, contextsTask);
+        _jobs            = (await jobsTask).ToList();
+        _departments     = (await deptTask).ToList();
+        _locations       = (await locTask).ToList();
+        _payrollContexts = (await contextsTask).ToList();
+        _payrollContextIdStr = _payrollContexts.Count == 1 ? _payrollContexts[0].Id.ToString() : "";
+    }
+
+    private async Task NextStep()
     {
         _errorMessage = string.Empty;
-        if (ValidateCurrentStep())
-            _currentStep++;
+        if (!ValidateCurrentStep()) return;
+
+        _currentStep++;
     }
 
     private void PreviousStep()
@@ -464,7 +466,6 @@
                 if (string.IsNullOrWhiteSpace(_cmd.PostalCode))    { _errorMessage = "Postal code is required."; return false; }
                 break;
             case 3:
-                if (string.IsNullOrWhiteSpace(_legalEntityId))     { _errorMessage = "Legal entity is required."; return false; }
                 if (string.IsNullOrWhiteSpace(_cmd.EmployeeNumber)) { _errorMessage = "Employee number is required."; return false; }
                 if (_cmd.EmploymentTypeId == 0)                    { _errorMessage = "Employment type is required."; return false; }
                 if (_employmentStartDate is null)                  { _errorMessage = "Start date is required."; return false; }

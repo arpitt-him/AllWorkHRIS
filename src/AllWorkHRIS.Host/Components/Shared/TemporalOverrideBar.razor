@@ -3,44 +3,102 @@
 
 @if (TemporalOverride.IsEnabled)
 {
-    <div class="temporal-bar @(TemporalOverride.IsOverrideActive ? "temporal-bar--active" : "")">
-        <span class="temporal-bar__label">
+    <div class="temporal-panel @(TemporalOverride.IsOverrideActive ? "temporal-panel--active" : "")">
+        <div class="temporal-panel__header">
+            <span class="temporal-panel__title">Temporal Date Override</span>
             @if (TemporalOverride.IsOverrideActive)
             {
-                <span>&#9200; Temporal Override Active</span>
+                <span class="temporal-panel__badge temporal-panel__badge--active">&#9200; Override Active — @TemporalOverride.OverrideDate!.Value.ToString("yyyy-MM-dd")</span>
             }
             else
             {
-                <span>&#128336; Dev — System Date</span>
+                <span class="temporal-panel__badge">&#128336; System Date — @DateOnly.FromDateTime(DateTime.UtcNow).ToString("yyyy-MM-dd")</span>
             }
-        </span>
-        <span class="temporal-bar__current">
-            @(TemporalOverride.IsOverrideActive
-                ? TemporalOverride.OverrideDate!.Value.ToString("yyyy-MM-dd")
-                : DateOnly.FromDateTime(DateTime.UtcNow).ToString("yyyy-MM-dd"))
-        </span>
-        <input type="date" class="temporal-bar__input" @bind="_inputDate" />
-        <button class="temporal-bar__btn" @onclick="SetOverride">Set</button>
-        @if (TemporalOverride.IsOverrideActive)
+        </div>
+
+        <div class="temporal-panel__warning">
+            <strong>Warning:</strong> Activating a date override changes the operative date used across the
+            <em>entire application for all active sessions</em>. This affects effective-date queries, leave
+            processing, document expiration checks, and payroll calculations. Use only for testing in
+            non-production environments. Each change requires explicit confirmation before taking effect.
+        </div>
+
+        @if (_pendingConfirm)
         {
-            <button class="temporal-bar__btn temporal-bar__btn--clear" @onclick="ClearOverride">Clear</button>
+            <div class="temporal-panel__confirm">
+                <span class="temporal-panel__confirm-msg">
+                    @if (_pendingClear)
+                    {
+                        <span>Clear the override and return to system date (<strong>@DateOnly.FromDateTime(DateTime.UtcNow).ToString("yyyy-MM-dd")</strong>)?</span>
+                    }
+                    else
+                    {
+                        <span>Set operative date to <strong>@_inputDate.ToString("yyyy-MM-dd")</strong> for all users and sessions?</span>
+                    }
+                </span>
+                <button class="temporal-panel__btn temporal-panel__btn--confirm" @onclick="ConfirmChange">Confirm</button>
+                <button class="temporal-panel__btn temporal-panel__btn--cancel" @onclick="CancelChange">Cancel</button>
+            </div>
+        }
+        else
+        {
+            <div class="temporal-panel__controls">
+                <label class="temporal-panel__label">Override date:</label>
+                <input type="date" class="temporal-panel__input" @bind="_inputDate" />
+                <button class="temporal-panel__btn temporal-panel__btn--set" @onclick="RequestSet">Set Override</button>
+                @if (TemporalOverride.IsOverrideActive)
+                {
+                    <button class="temporal-panel__btn temporal-panel__btn--clear" @onclick="RequestClear">Clear Override</button>
+                }
+            </div>
         }
     </div>
 }
 
 @code {
-    private DateOnly _inputDate = DateOnly.FromDateTime(DateTime.Today);
+    private DateOnly _inputDate;
+    private bool _pendingConfirm;
+    private bool _pendingClear;
 
-    private void SetOverride()
+    protected override void OnInitialized()
     {
-        TemporalOverride.SetOverride(_inputDate);
+        _inputDate = TemporalOverride.IsOverrideActive
+            ? TemporalOverride.OverrideDate!.Value
+            : DateOnly.FromDateTime(DateTime.Today);
+    }
+
+    private void RequestSet()
+    {
+        _pendingClear = false;
+        _pendingConfirm = true;
+    }
+
+    private void RequestClear()
+    {
+        _pendingClear = true;
+        _pendingConfirm = true;
+    }
+
+    private void ConfirmChange()
+    {
+        if (_pendingClear)
+        {
+            TemporalOverride.ClearOverride();
+            _inputDate = DateOnly.FromDateTime(DateTime.Today);
+        }
+        else
+        {
+            TemporalOverride.SetOverride(_inputDate);
+        }
+        _pendingConfirm = false;
+        _pendingClear = false;
         StateHasChanged();
     }
 
-    private void ClearOverride()
+    private void CancelChange()
     {
-        TemporalOverride.ClearOverride();
-        _inputDate = DateOnly.FromDateTime(DateTime.Today);
+        _pendingConfirm = false;
+        _pendingClear = false;
         StateHasChanged();
     }
 }

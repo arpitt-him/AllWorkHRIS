@@ -1,6 +1,8 @@
 @page "/hris/org"
+@layout HrisShell
 @rendermode InteractiveServer
 @attribute [Authorize(Roles = "HrisViewer,HrisAdmin")]
+@implements IDisposable
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Components.Authorization
 @using AllWorkHRIS.Core.Lookups
@@ -8,8 +10,11 @@
 @using AllWorkHRIS.Host.Hris.Services
 @using AllWorkHRIS.Host.Hris.Domain
 @using AllWorkHRIS.Host.Hris.Queries
+@using AllWorkHRIS.Core.Temporal
 @inject IOrgStructureService OrgStructureService
-@inject ILookupCache LookupCache
+@inject ILookupCache         LookupCache
+@inject ITemporalContext     TemporalContext
+@inject IHrisSessionState    SessionState
 
 <PageTitle>Organisation — AllWork HRIS</PageTitle>
 
@@ -22,46 +27,6 @@
                 <button class="btn-primary" @onclick="OpenAddOrgUnitPanel">+ Add Org Unit</button>
             </Authorized>
         </AuthorizeView>
-    </div>
-
-    @* Legal entity context selector *@
-    <div class="entity-selector-bar">
-        <label class="entity-selector-label">Legal Entity</label>
-        <div class="entity-tabs">
-            @if (!_legalEntities.Any())
-            {
-                <span class="entity-none">No legal entities found. Add one using + Add Org Unit.</span>
-            }
-            else if (_legalEntities.Count <= 8)
-            {
-                @foreach (var le in _legalEntities)
-                {
-                    <button class="entity-tab @(_selectedLegalEntityId == le.OrgUnitId ? "active" : "")"
-                            @onclick="async () => await SelectLegalEntityAsync(le.OrgUnitId)">
-                        @le.OrgUnitName
-                    </button>
-                }
-            }
-            else
-            {
-                <div class="entity-search-wrap">
-                    <input type="text" class="entity-search-input" placeholder="Search legal entities…"
-                           @bind="_entitySearchTerm" @bind:event="oninput" />
-                    <div class="entity-search-list">
-                        @foreach (var le in _legalEntities
-                            .Where(e => string.IsNullOrWhiteSpace(_entitySearchTerm) ||
-                                        e.OrgUnitName.Contains(_entitySearchTerm, StringComparison.OrdinalIgnoreCase))
-                            .OrderBy(e => e.OrgUnitName))
-                        {
-                            <button class="entity-search-item @(_selectedLegalEntityId == le.OrgUnitId ? "active" : "")"
-                                    @onclick="async () => await SelectLegalEntityAsync(le.OrgUnitId)">
-                                @le.OrgUnitName
-                            </button>
-                        }
-                    </div>
-                </div>
-            }
-        </div>
     </div>
 
     @if (_selectError is not null)
@@ -88,7 +53,7 @@
     else if (_selectedLegalEntityId is null)
     {
         <div class="empty-state">
-            <p>Select a legal entity above to view its organisation structure.</p>
+            <p>Select a legal entity to view its organisation structure.</p>
         </div>
     }
     else if (_activeView == "hierarchy")
@@ -286,7 +251,7 @@
                             value="@_newUnitType"
                             @onchange="e => _newUnitType = e.Value?.ToString() ?? string.Empty">
                         <option value="" selected="@(_newUnitType == "")">Select type…</option>
-                        @foreach (var t in LookupCache.GetAll(LookupTables.OrgUnitType))
+                        @foreach (var t in LookupCache.GetAll(LookupTables.OrgUnitType).Where(t => t.Code != "LEGAL_ENTITY"))
                         {
                             <option value="@t.Code" selected="@(_newUnitType == t.Code)">@t.Label</option>
                         }
@@ -301,37 +266,24 @@
                     <input type="text" class="form-input" @bind="_newUnitCode"
                            placeholder="e.g. ENG" maxlength="20" style="text-transform:uppercase" />
                 </div>
-                @if (_newUnitType != "LEGAL_ENTITY")
-                {
-                    <div class="form-field">
-                        <label class="form-label">Legal Entity</label>
-                        <select class="form-select"
-                                value="@_newLegalEntityIdStr"
-                                @onchange="e => _newLegalEntityIdStr = e.Value?.ToString() ?? string.Empty">
-                            <option value="" selected="@(_newLegalEntityIdStr == "")">— Select legal entity —</option>
-                            @foreach (var le in _legalEntities)
-                            {
-                                <option value="@le.OrgUnitId" selected="@(_newLegalEntityIdStr == le.OrgUnitId.ToString())">
-                                    @le.OrgUnitName
-                                </option>
-                            }
-                        </select>
-                    </div>
-                    <div class="form-field">
-                        <label class="form-label">Parent Org Unit (optional)</label>
-                        <select class="form-select"
-                                value="@_newParentIdStr"
-                                @onchange="e => _newParentIdStr = e.Value?.ToString() ?? string.Empty">
-                            <option value="" selected="@(_newParentIdStr == "")">— None (top level) —</option>
-                            @foreach (var u in _orgUnits.OrderBy(u => u.OrgUnitName))
-                            {
-                                <option value="@u.OrgUnitId" selected="@(_newParentIdStr == u.OrgUnitId.ToString())">
-                                    @u.OrgUnitName (@LookupCode(LookupTables.OrgUnitType, u.OrgUnitTypeId).ToUpper())
-                                </option>
-                            }
-                        </select>
-                    </div>
-                }
+                <div class="form-field">
+                    <label class="form-label">Legal Entity</label>
+                    <div class="form-readonly">@(SessionState.SelectedLegalEntityName ?? "—")</div>
+                </div>
+                <div class="form-field">
+                    <label class="form-label">Parent Org Unit (optional)</label>
+                    <select class="form-select"
+                            value="@_newParentIdStr"
+                            @onchange="e => _newParentIdStr = e.Value?.ToString() ?? string.Empty">
+                        <option value="" selected="@(_newParentIdStr == "")">— None (top level) —</option>
+                        @foreach (var u in _orgUnits.OrderBy(u => u.OrgUnitName))
+                        {
+                            <option value="@u.OrgUnitId" selected="@(_newParentIdStr == u.OrgUnitId.ToString())">
+                                @u.OrgUnitName (@LookupCode(LookupTables.OrgUnitType, u.OrgUnitTypeId).ToUpper())
+                            </option>
+                        }
+                    </select>
+                </div>
                 <div class="form-field">
                     <label class="form-label">Effective Start Date</label>
                     <input type="date" class="form-input" @bind="_newEffectiveDt" />
@@ -359,7 +311,6 @@
     private bool          _loading      = true;
     private string        _activeView   = "hierarchy";
     private bool          _showAddPanel = false;
-    private List<OrgUnit> _legalEntities = [];
     private List<OrgUnit> _orgUnits      = [];
 
     private int LocationTypeId => LookupCache.GetId(LookupTables.OrgUnitType, "LOCATION");
@@ -368,35 +319,43 @@
     private Guid?         _selectedLegalEntityId;
     private HashSet<Guid> _expanded      = [];
     private string?       _selectError;
-    private string        _entitySearchTerm  = "";
     private Guid?         _selectedNodeId;
     private string        _selectedNodeName  = "";
     private List<OrgUnitEmployee> _workforce = [];
     private bool          _workforceLoading  = false;
 
     // Add panel state
-    private string   _newUnitType       = "";
-    private string   _newUnitName       = "";
-    private string   _newUnitCode       = "";
-    private string   _newLegalEntityIdStr = "";
-    private string   _newParentIdStr    = "";
-    private DateTime _newEffectiveDt    = DateTime.Today;
+    private string   _newUnitType    = "";
+    private string   _newUnitName    = "";
+    private string   _newUnitCode    = "";
+    private string   _newParentIdStr = "";
+    private DateTime _newEffectiveDt;
     private string?  _addError;
-    private bool     _saving            = false;
+    private bool     _saving         = false;
 
     protected override async Task OnInitializedAsync()
     {
+        SessionState.OnChanged += HandleEntityChanged;
+
         _loading = true;
         try
         {
-            var entities = await OrgStructureService.GetLegalEntitiesAsync();
-            _legalEntities = entities.ToList();
-
-            if (_legalEntities.Count == 1)
-                await SelectLegalEntityAsync(_legalEntities[0].OrgUnitId);
+            if (SessionState.HasEntity)
+                await SelectLegalEntityAsync(SessionState.SelectedLegalEntityId!.Value);
         }
         finally { _loading = false; }
     }
+
+    private void HandleEntityChanged()
+        => InvokeAsync(async () =>
+        {
+            if (SessionState.HasEntity)
+                await SelectLegalEntityAsync(SessionState.SelectedLegalEntityId!.Value);
+            StateHasChanged();
+        });
+
+    public void Dispose()
+        => SessionState.OnChanged -= HandleEntityChanged;
 
     private async Task SelectNodeAsync(Guid nodeId, string nodeName)
     {
@@ -479,8 +438,7 @@
     private void OpenAddOrgUnitPanel()
     {
         _newUnitType = _newUnitName = _newUnitCode = _newParentIdStr = "";
-        _newLegalEntityIdStr = _selectedLegalEntityId?.ToString() ?? "";
-        _newEffectiveDt = DateTime.Today;
+        _newEffectiveDt = TemporalContext.GetOperativeDate();
         _addError = null;
         _showAddPanel = true;
     }
@@ -493,13 +451,9 @@
         if (string.IsNullOrWhiteSpace(_newUnitType)) { _addError = "Type is required."; return; }
         if (string.IsNullOrWhiteSpace(_newUnitName)) { _addError = "Name is required."; return; }
         if (string.IsNullOrWhiteSpace(_newUnitCode)) { _addError = "Code is required."; return; }
-        if (_newUnitType != "LEGAL_ENTITY" && string.IsNullOrWhiteSpace(_newLegalEntityIdStr))
-        {
-            _addError = "Legal entity is required."; return;
-        }
+        if (!SessionState.HasEntity)                 { _addError = "No legal entity context."; return; }
 
-        var parentId      = Guid.TryParse(_newParentIdStr,      out var pid) ? pid : (Guid?)null;
-        var legalEntityId = Guid.TryParse(_newLegalEntityIdStr, out var lid) ? lid : (Guid?)null;
+        var parentId = Guid.TryParse(_newParentIdStr, out var pid) ? pid : (Guid?)null;
 
         _saving = true;
         try
@@ -514,25 +468,14 @@
                 OrgUnitCode        = _newUnitCode.Trim().ToUpper(),
                 OrgUnitName        = _newUnitName.Trim(),
                 ParentOrgUnitId    = parentId,
-                LegalEntityId      = legalEntityId,
+                LegalEntityId      = SessionState.SelectedLegalEntityId,
                 EffectiveStartDate = DateOnly.FromDateTime(_newEffectiveDt),
                 InitiatedBy        = actorId
             };
 
-            var newId = await OrgStructureService.CreateOrgUnitAsync(command);
+            await OrgStructureService.CreateOrgUnitAsync(command);
             _showAddPanel = false;
-
-            // If a new legal entity was created, refresh the selector list
-            if (_newUnitType == "LEGAL_ENTITY")
-            {
-                var entities = await OrgStructureService.GetLegalEntitiesAsync();
-                _legalEntities = entities.ToList();
-                await SelectLegalEntityAsync(newId);
-            }
-            else if (_selectedLegalEntityId.HasValue)
-            {
-                await SelectLegalEntityAsync(_selectedLegalEntityId.Value);
-            }
+            await SelectLegalEntityAsync(SessionState.SelectedLegalEntityId!.Value);
         }
         catch (Exception ex) { _addError = ex.Message; }
         finally { _saving = false; }
@@ -561,102 +504,6 @@
         color: var(--aw-navy);
         margin: 0;
     }
-
-    .entity-selector-bar {
-        display: flex;
-        align-items: center;
-        gap: var(--space-3);
-        margin-bottom: var(--space-4);
-        padding: var(--space-3) var(--space-4);
-        background: white;
-        border-radius: var(--radius-lg);
-        box-shadow: var(--shadow-sm);
-    }
-
-    .entity-selector-label {
-        font-size: var(--font-size-sm);
-        font-weight: var(--font-weight-medium);
-        color: #6B7280;
-        white-space: nowrap;
-    }
-
-    .entity-tabs {
-        display: flex;
-        gap: var(--space-2);
-        flex-wrap: wrap;
-    }
-
-    .entity-tab {
-        padding: var(--space-1) var(--space-3);
-        border: 1px solid #E5E7EB;
-        border-radius: var(--radius-md);
-        background: white;
-        font-size: var(--font-size-sm);
-        font-weight: var(--font-weight-medium);
-        color: #374151;
-        cursor: pointer;
-        transition: all 0.15s;
-    }
-
-    .entity-tab:hover { border-color: var(--aw-teal); color: var(--aw-teal); }
-
-    .entity-tab.active {
-        background: var(--aw-teal);
-        border-color: var(--aw-teal);
-        color: white;
-    }
-
-    .entity-none {
-        font-size: var(--font-size-sm);
-        color: #9CA3AF;
-        font-style: italic;
-    }
-
-    .entity-search-wrap {
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-2);
-        width: 280px;
-    }
-
-    .entity-search-input {
-        padding: var(--space-2) var(--space-3);
-        border: 1px solid #D1D5DB;
-        border-radius: var(--radius-md);
-        font-size: var(--font-size-sm);
-        width: 100%;
-        box-sizing: border-box;
-    }
-
-    .entity-search-input:focus {
-        outline: none;
-        border-color: var(--aw-teal);
-    }
-
-    .entity-search-list {
-        max-height: 200px;
-        overflow-y: auto;
-        border: 1px solid #E5E7EB;
-        border-radius: var(--radius-md);
-        background: white;
-    }
-
-    .entity-search-item {
-        display: block;
-        width: 100%;
-        padding: var(--space-2) var(--space-3);
-        border: none;
-        background: transparent;
-        text-align: left;
-        font-size: var(--font-size-sm);
-        color: #374151;
-        cursor: pointer;
-        border-bottom: 1px solid #F3F4F6;
-    }
-
-    .entity-search-item:last-child { border-bottom: none; }
-    .entity-search-item:hover { background: #F9FAFB; }
-    .entity-search-item.active { background: #EFF6FF; color: var(--aw-teal); font-weight: var(--font-weight-medium); }
 
     .view-toggle {
         display: flex;
@@ -897,6 +744,16 @@
     .form-input:focus, .form-select:focus {
         outline: none;
         border-color: var(--aw-teal);
+    }
+
+    .form-readonly {
+        padding: var(--space-2);
+        font-size: var(--font-size-sm);
+        color: var(--aw-navy);
+        font-weight: var(--font-weight-medium);
+        background: #F9FAFB;
+        border: 1px solid #E5E7EB;
+        border-radius: var(--radius-md);
     }
 
     .form-error { color: #DC2626; font-size: var(--font-size-sm); margin: var(--space-2) 0; }

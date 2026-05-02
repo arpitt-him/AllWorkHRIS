@@ -10,6 +10,11 @@ public interface IPayrollContextRepository
     Task<IReadOnlyList<PayrollContext>> GetByLegalEntityAsync(Guid legalEntityId);
     Task<Guid> InsertContextAsync(PayrollContext context);
     Task UpdateContextStatusAsync(Guid payrollContextId, string status, Guid updatedBy);
+    /// <summary>
+    /// Deletes the context and all its OPEN periods if no payroll runs or
+    /// CLOSED/LOCKED periods exist. Returns null on success, or a reason string if blocked.
+    /// </summary>
+    Task<string?> DeleteContextAsync(Guid payrollContextId);
 
     Task<PayrollPeriod?> GetPeriodByIdAsync(Guid periodId);
     Task<PayrollPeriod?> GetCurrentOpenPeriodAsync(Guid payrollContextId);
@@ -22,4 +27,14 @@ public interface IPayrollContextRepository
     /// </summary>
     Task<(int Deleted, int Skipped)> DeletePeriodsForYearAsync(Guid contextId, int year);
     Task UpdatePeriodStatusAsync(Guid periodId, string status, Guid updatedBy);
+    /// <summary>
+    /// Updates the calculation (run) date for a single period. Pass null to clear.
+    /// </summary>
+    Task UpdatePeriodRunDateAsync(Guid periodId, DateOnly? runDate, Guid updatedBy);
+
+    /// <summary>
+    /// Returns the number of pay periods per year for the given payroll context,
+    /// derived from the context's pay frequency.
+    /// </summary>
+    Task<int> GetPeriodsPerYearAsync(Guid payrollContextId);
 }

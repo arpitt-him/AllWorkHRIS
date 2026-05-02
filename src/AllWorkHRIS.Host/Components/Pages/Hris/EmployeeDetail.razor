@@ -1,10 +1,13 @@
 @page "/hris/employees/{EmploymentId:guid}"
-@rendermode InteractiveServer
+@layout HrisShell
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@implements IDisposable
 @attribute [Authorize(Roles = "HrisViewer,HrisAdmin")]
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Components.Authorization
 @using Microsoft.AspNetCore.Components.Forms
 @using AllWorkHRIS.Core.Lookups
+@using AllWorkHRIS.Core.Temporal
 @using AllWorkHRIS.Host.Hris.Commands
 @using AllWorkHRIS.Host.Hris.Services
 @using AllWorkHRIS.Host.Hris.Repositories
@@ -18,8 +21,11 @@
 @inject ILeaveService         LeaveService
 @inject IDocumentService      DocumentService
 @inject IOnboardingService    OnboardingService
+@inject IHrisSessionState     SessionState
 @inject ILookupCache          LookupCache
+@inject ITemporalContext      TemporalContext
 @inject NavigationManager     Navigation
+@inject IJSRuntime            JSRuntime
 
 <PageTitle>@_pageTitle — AllWork HRIS</PageTitle>
 
@@ -290,7 +296,7 @@ else
                             <AuthorizeView Roles="HrisAdmin">
                                 <Authorized>
                                     <button class="btn-secondary btn-sm"
-                                            @onclick="() => _showLeaveForm = !_showLeaveForm">
+                                            @onclick="ToggleLeaveForm">
                                         @(_showLeaveForm ? "Cancel" : "+ Request Leave")
                                     </button>
                                 </Authorized>
@@ -401,7 +407,7 @@ else
                                 <div class="section-header-row">
                                     <h3 class="section-title">Documents</h3>
                                     <button class="btn-secondary btn-sm"
-                                            @onclick="() => _showUploadForm = !_showUploadForm">
+                                            @onclick="ToggleUploadForm">
                                         @(_showUploadForm ? "Cancel" : "+ Upload Document")
                                     </button>
                                 </div>
@@ -435,7 +441,7 @@ else
                                             </div>
                                             <div class="form-field form-field-full">
                                                 <label class="form-label">File</label>
-                                                <InputFile OnChange="OnFileSelected" />
+                                                <InputFile id="doc-file-input" OnChange="OnFileSelected" />
                                                 @if (_uploadFile is not null)
                                                 {
                                                     <span class="file-info">
@@ -481,10 +487,10 @@ else
                                                     <tr>
                                                         <td>@LookupLabel(LookupTables.DocumentType, doc.DocumentTypeId)</td>
                                                         <td>@doc.DocumentName</td>
-                                                        <td>v@doc.DocumentVersion</td>
+                                                        <td>v@(doc.DocumentVersion)</td>
                                                         <td>
-                                                            <span class="status-badge status-@LookupCode(LookupTables.DocumentStatus, doc.DocumentStatusId)">
-                                                                @LookupLabel(LookupTables.DocumentStatus, doc.DocumentStatusId)
+                                                            <span class="status-badge @DocStatusClass(doc)">
+                                                                @DocStatusLabel(doc)
                                                             </span>
                                                         </td>
                                                         <td>@doc.EffectiveDate.ToString("yyyy-MM-dd")</td>
@@ -493,8 +499,11 @@ else
                                                         </td>
                                                         <td>@(doc.VerifiedBy.HasValue ? "✓" : "—")</td>
                                                         <td>
-                                                            <a href="/api/documents/@doc.DocumentId/content"
-                                                               class="btn-link" target="_blank">Download</a>
+                                                            @if (!string.IsNullOrEmpty(doc.StorageReference))
+                                                            {
+                                                                <a href="/api/documents/@doc.DocumentId/content"
+                                                                   class="btn-link" target="_blank">Download</a>
+                                                            }
                                                         </td>
                                                     </tr>
                                                 }
@@ -573,7 +582,7 @@ else
                                             @foreach (var task in _onboardingTasks.OrderBy(t => t.DueDate))
                                             {
                                                 var isPending = task.TaskStatusId == _taskPendingStatusId;
-                                                var isOverdue = task.DueDate < DateOnly.FromDateTime(DateTime.UtcNow) && isPending;
+                                                var isOverdue = task.DueDate < DateOnly.FromDateTime(TemporalContext.GetOperativeDate()) && isPending;
                                                 <tr>
                                                     <td>@task.TaskName</td>
                                                     <td>@LookupLabel(LookupTables.OnboardingTaskType, task.TaskTypeId)</td>
@@ -709,8 +718,8 @@ else
     private bool     _showLeaveForm   = false;
     private string   _newLeaveType    = "";
     private string   _newLeaveReason  = "";
-    private DateTime _newLeaveStartDt = DateTime.Today;
-    private DateTime _newLeaveEndDt   = DateTime.Today;
+    private DateTime _newLeaveStartDt;
+    private DateTime _newLeaveEndDt;
     private string?  _newLeaveNotes;
     private string?  _leaveError;
     private bool     _leaveSubmitting = false;
@@ -722,7 +731,7 @@ else
     private bool      _showUploadForm    = false;
     private string    _uploadDocType     = "";
     private string    _uploadDocName     = "";
-    private DateTime  _uploadEffectiveDt = DateTime.Today;
+    private DateTime  _uploadEffectiveDt;
     private DateTime? _uploadExpirationDt;
     private IBrowserFile? _uploadFile;
     private string?   _uploadError;
@@ -735,7 +744,7 @@ else
     private IEnumerable<OnboardingTask>? _onboardingTasks;
     private Guid?    _completingTaskId;
     private Guid?    _waivingTaskId;
-    private DateTime _completionDt  = DateTime.Today;
+    private DateTime _completionDt;
     private string   _waiveReason   = "";
     private string?  _onboardingError;
 
@@ -757,17 +766,24 @@ else
             {
                 _person       = await PersonService.GetByEmploymentIdAsync(EmploymentId);
                 _compensation = await CompensationService.GetCurrentRateAsync(
-                    EmploymentId, DateOnly.FromDateTime(DateTime.UtcNow));
+                    EmploymentId, DateOnly.FromDateTime(TemporalContext.GetOperativeDate()));
 
                 if (_person is not null)
                 {
                     _pageTitle = $"{_person.LegalFirstName} {_person.LegalLastName}";
                     _initials  = $"{_person.LegalFirstName.FirstOrDefault()}{_person.LegalLastName.FirstOrDefault()}".ToUpper();
                 }
+
+                var entityUnit = await OrgStructureService.GetOrgUnitByIdAsync(_employment.LegalEntityId);
+                if (entityUnit is not null)
+                    SessionState.SetEntity(entityUnit.OrgUnitId, entityUnit.OrgUnitName);
+                SessionState.Lock();
             }
         }
         finally { _loading = false; }
     }
+
+    public void Dispose() => SessionState.Unlock();
 
     private async Task SwitchTabAsync(string tab)
     {
@@ -844,6 +860,18 @@ else
 
     // Leave form
 
+    private void ToggleLeaveForm()
+    {
+        _showLeaveForm = !_showLeaveForm;
+        if (_showLeaveForm)
+        {
+            var today = TemporalContext.GetOperativeDate();
+            _newLeaveStartDt = today;
+            _newLeaveEndDt   = today;
+            _leaveError      = null;
+        }
+    }
+
     private async Task SubmitLeaveAsync()
     {
         _leaveError = null;
@@ -876,6 +904,16 @@ else
 
     // Document upload
 
+    private void ToggleUploadForm()
+    {
+        _showUploadForm = !_showUploadForm;
+        if (_showUploadForm)
+        {
+            _uploadEffectiveDt = TemporalContext.GetOperativeDate();
+            _uploadError       = null;
+        }
+    }
+
     private void OnFileSelected(InputFileChangeEventArgs e) => _uploadFile = e.File;
 
     private async Task UploadDocumentAsync()
@@ -895,14 +933,25 @@ else
         _uploading = true;
         try
         {
-            await using var stream = _uploadFile.OpenReadStream(maxAllowedSize: maxBytes);
+            // Read the file entirely in the browser via JS interop, bypassing
+            // IBrowserFile.OpenReadStream() which times out in Blazor Web App
+            // because the server-side pipe never receives data from the client.
+            var base64 = await JSRuntime.InvokeAsync<string?>(
+                "allworkFiles.readBase64", "doc-file-input");
+            if (string.IsNullOrEmpty(base64))
+            {
+                _uploadError = "Could not read the selected file.";
+                return;
+            }
+            using var ms = new MemoryStream(Convert.FromBase64String(base64));
+
             var command = new UploadDocumentCommand
             {
                 PersonId       = _person.PersonId,
                 EmploymentId   = EmploymentId,
                 DocumentType   = _uploadDocType,
                 DocumentName   = _uploadDocName,
-                FileContent    = stream,
+                FileContent    = ms,
                 FileFormat     = ext.ToUpper(),
                 EffectiveDate  = DateOnly.FromDateTime(_uploadEffectiveDt),
                 ExpirationDate = _uploadExpirationDt.HasValue
@@ -928,7 +977,7 @@ else
     {
         _completingTaskId = taskId;
         _waivingTaskId    = null;
-        _completionDt     = DateTime.Today;
+        _completionDt     = TemporalContext.GetOperativeDate();
         _onboardingError  = null;
     }
 
@@ -996,10 +1045,32 @@ else
     private string ExpirationClass(DateOnly? expiration)
     {
         if (expiration is null) return "";
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = DateOnly.FromDateTime(TemporalContext.GetOperativeDate());
         if (expiration <= today)               return "cell-overdue";
         if (expiration <= today.AddDays(90))   return "cell-expiring";
         return "";
+    }
+
+    private string DocStatusLabel(HrDocument doc)
+    {
+        var code = LookupCache.GetCode(LookupTables.DocumentStatus, doc.DocumentStatusId).ToUpper();
+        if (code is "ACTIVE" or "EXPIRED" && doc.ExpirationDate.HasValue)
+        {
+            var today = DateOnly.FromDateTime(TemporalContext.GetOperativeDate());
+            return doc.ExpirationDate.Value <= today ? "Expired" : "Active";
+        }
+        return LookupLabel(LookupTables.DocumentStatus, doc.DocumentStatusId);
+    }
+
+    private string DocStatusClass(HrDocument doc)
+    {
+        var code = LookupCache.GetCode(LookupTables.DocumentStatus, doc.DocumentStatusId).ToUpper();
+        if (code is "ACTIVE" or "EXPIRED" && doc.ExpirationDate.HasValue)
+        {
+            var today = DateOnly.FromDateTime(TemporalContext.GetOperativeDate());
+            return doc.ExpirationDate.Value <= today ? "status-badge status-expired" : "status-badge status-active";
+        }
+        return $"status-badge status-{LookupCode(LookupTables.DocumentStatus, doc.DocumentStatusId)}";
     }
 }
 

@@ -1,18 +1,21 @@
 @page "/payroll/calendar"
+@layout PayrollShell
 @rendermode InteractiveServer
 @attribute [Authorize(Roles = "PayrollAdmin")]
+@implements IDisposable
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Components.Authorization
 @using AllWorkHRIS.Core.Lookups
 @using AllWorkHRIS.Module.Payroll.Domain.Calendar
 @using AllWorkHRIS.Module.Payroll.Repositories
-@using AllWorkHRIS.Host.Hris.Domain
-@using AllWorkHRIS.Host.Hris.Services
+@using AllWorkHRIS.Host.Payroll.Services
+@using AllWorkHRIS.Core.Temporal
 @inject IPayrollContextRepository   ContextRepo
-@inject IOrgStructureService        OrgService
+@inject IPayrollSessionState        SessionState
 @inject ILookupCache                LookupCache
 @inject AuthenticationStateProvider AuthState
 @inject NavigationManager           Nav
+@inject ITemporalContext            TemporalContext
 
 <PageTitle>Pay Calendars — AllWork HRIS</PageTitle>
 
@@ -21,11 +24,6 @@
     <div class="page-header">
         <h2 class="page-title">Pay Calendars</h2>
         <button class="btn-primary" @onclick="ToggleNewContextForm">+ New Context</button>
-    </div>
-
-    <div class="filter-row" style="margin-bottom:var(--space-4)">
-        <label class="filter-label">Legal Entity</label>
-        <LegalEntitySelector OnChanged="OnLegalEntityChanged" />
     </div>
 
     <div class="stat-cards">
@@ -64,12 +62,12 @@
                            placeholder="e.g. Corporate Biweekly" />
                 </div>
                 <div class="form-field">
-                    <label class="form-label">Legal Entity <span style="color:var(--color-danger)">*</span></label>
-                    <select class="form-control" @bind="_newCtx.LegalEntityId">
-                        <option value="">— select —</option>
-                        @foreach (var le in _legalEntities)
+                    <label class="form-label">Rate Type <span style="color:var(--color-danger)">*</span></label>
+                    <select class="form-control" @bind="_newCtx.RateTypeId">
+                        <option value="0">— select —</option>
+                        @foreach (var rt in _rateTypes)
                         {
-                            <option value="@le.OrgUnitId">@le.OrgUnitName</option>
+                            <option value="@rt.Id">@rt.Label</option>
                         }
                     </select>
                 </div>
@@ -88,6 +86,73 @@
                     <input type="date" class="form-control" @bind="_newCtx.EffectiveStartDate" />
                 </div>
             </div>
+
+            @* ── Convention / Offset (driven by selected frequency) ── *@
+            @{
+                var newFreqCode = _frequencies.FirstOrDefault(f => f.Id == _newCtx.PayFrequencyId)?.Code ?? "";
+            }
+            @if (newFreqCode == "MONTHLY")
+            {
+                <p class="form-section-label">Pay Date Convention</p>
+                <div style="display:flex;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-4)">
+                    @foreach (var (convCode, label, hint) in _monthlyConventions)
+                    {
+                        var cc = convCode;
+                        <label style="display:flex;align-items:baseline;gap:var(--space-2);cursor:pointer;font-size:var(--font-size-sm)">
+                            <input type="radio" name="new-monthly-convention" value="@cc"
+                                   checked="@(_newCtx.PayDateConvention == cc)"
+                                   @onchange="() => _newCtx.PayDateConvention = cc" />
+                            <span><strong>@label</strong></span>
+                            <span style="color:#6B7280">— @hint</span>
+                        </label>
+                    }
+                </div>
+            }
+            @if (newFreqCode == "SEMI_MONTHLY")
+            {
+                <p class="form-section-label">Pay Date Convention</p>
+                <div style="display:flex;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-4)">
+                    @foreach (var (convCode, label, hint) in _semiMonthlyConventions)
+                    {
+                        var cc = convCode;
+                        <label style="display:flex;align-items:baseline;gap:var(--space-2);cursor:pointer;font-size:var(--font-size-sm)">
+                            <input type="radio" name="new-sm-convention" value="@cc"
+                                   checked="@(_newCtx.PayDateConvention == cc)"
+                                   @onchange="() => _newCtx.PayDateConvention = cc" />
+                            <span><strong>@label</strong></span>
+                            <span style="color:#6B7280">— @hint</span>
+                        </label>
+                    }
+                </div>
+            }
+            @if (_newCtx.PayFrequencyId > 0)
+            {
+                <div class="form-grid form-grid-3" style="margin-bottom:var(--space-4)">
+                    @if (newFreqCode is "WEEKLY" or "BIWEEKLY" or "QUARTERLY" or "ANNUAL")
+                    {
+                        <div class="form-field">
+                            <label class="form-label">Pay Date Offset (days after period end)</label>
+                            <input type="number" class="form-control" @bind="_newCtx.PayDateOffsetDays" min="1" max="30" />
+                        </div>
+                    }
+                    <div class="form-field">
+                        <label class="form-label">Input Cutoff (days before pay date)</label>
+                        <input type="number" class="form-control" @bind="_newCtx.CutoffOffsetDays" min="1" max="30" />
+                    </div>
+                    @if (newFreqCode is "WEEKLY" or "BIWEEKLY")
+                    {
+                        <div class="form-field">
+                            <label class="form-label">53rd/27th Period Policy</label>
+                            <select class="form-control" @bind="_newCtx.ExtraPeriodPolicy">
+                                <option value="EXTRA_SPECIAL">Treat as special case (recommended)</option>
+                                <option value="ADJUST_ALL">Adjust all checks (÷ 27)</option>
+                                <option value="PER_EMPLOYEE">HR decides per employee</option>
+                            </select>
+                        </div>
+                    }
+                </div>
+            }
+
             @if (_contextError is not null)
             {
                 <div class="alert-error" style="margin-bottom:var(--space-3)">@_contextError</div>
@@ -179,11 +244,10 @@
 </div>
 
 @code {
-    private List<PayrollContext> _all                    = [];
-    private List<PayrollContext> _filtered               = [];
-    private Guid                 _selectedLegalEntityId;
-    private List<OrgUnit>        _legalEntities          = [];
-    private List<LookupEntry>    _frequencies            = [];
+    private List<PayrollContext> _all         = [];
+    private List<PayrollContext> _filtered    = [];
+    private List<LookupEntry>    _frequencies = [];
+    private List<LookupEntry>    _rateTypes   = [];
 
     private bool    _loading           = true;
     private bool    _submitting;
@@ -199,21 +263,34 @@
         var auth = await AuthState.GetAuthenticationStateAsync();
         _currentUserId = Guid.TryParse(auth.User.FindFirst("sub")?.Value, out var g) ? g : Guid.Empty;
 
-        var les = await OrgService.GetLegalEntitiesAsync();
-        _legalEntities = les.ToList();
+        SessionState.OnChanged += HandleEntityChanged;
 
         try { _frequencies = LookupCache.GetAll(LookupTables.PayFrequency).OrderBy(f => f.Id).ToList(); }
         catch { _frequencies = DefaultFrequencies(); }
 
+        try { _rateTypes = LookupCache.GetAll(LookupTables.CompensationRateType).OrderBy(r => r.Id).ToList(); }
+        catch { _rateTypes = []; }
+
         _all     = (await ContextRepo.GetAllAsync()).ToList();
         _loading = false;
+
+        FilterForEntity();
     }
 
-    private void OnLegalEntityChanged(Guid entityId)
+    private void HandleEntityChanged()
     {
-        _selectedLegalEntityId = entityId;
-        _filtered = _all.Where(c => c.LegalEntityId == entityId).ToList();
+        FilterForEntity();
+        InvokeAsync(StateHasChanged);
     }
+
+    private void FilterForEntity()
+    {
+        if (SessionState.HasEntity)
+            _filtered = _all.Where(c => c.LegalEntityId == SessionState.SelectedLegalEntityId).ToList();
+    }
+
+    public void Dispose()
+        => SessionState.OnChanged -= HandleEntityChanged;
 
     private void ToggleNewContextForm()
     {
@@ -222,8 +299,8 @@
         if (_showNewContextForm)
             _newCtx = new NewContextForm
             {
-                EffectiveStartDate = DateOnly.FromDateTime(DateTime.Today),
-                LegalEntityId      = _selectedLegalEntityId
+                EffectiveStartDate = DateOnly.FromDateTime(TemporalContext.GetOperativeDate()),
+                LegalEntityId      = SessionState.SelectedLegalEntityId ?? Guid.Empty
             };
     }
 
@@ -232,9 +309,17 @@
         if (string.IsNullOrWhiteSpace(_newCtx.Code) ||
             string.IsNullOrWhiteSpace(_newCtx.Name) ||
             _newCtx.LegalEntityId == Guid.Empty ||
-            _newCtx.PayFrequencyId == 0)
+            _newCtx.PayFrequencyId == 0 ||
+            _newCtx.RateTypeId == 0)
         {
-            _contextError = "Code, name, legal entity, and pay frequency are required.";
+            _contextError = "Code, name, rate type, and pay frequency are required.";
+            return;
+        }
+
+        var normalizedCode = _newCtx.Code.Trim().ToUpper();
+        if (_all.Any(c => c.PayrollContextCode.Equals(normalizedCode, StringComparison.OrdinalIgnoreCase)))
+        {
+            _contextError = $"A payroll context with code '{normalizedCode}' already exists.";
             return;
         }
 
@@ -250,6 +335,7 @@
                 PayrollContextName      = _newCtx.Name.Trim(),
                 LegalEntityId           = _newCtx.LegalEntityId,
                 PayFrequencyId          = _newCtx.PayFrequencyId,
+                CompensationRateTypeId  = _newCtx.RateTypeId == 0 ? null : (int?)_newCtx.RateTypeId,
                 ContextStatus           = "ACTIVE",
                 ParentPayrollContextId  = null,
                 RootPayrollContextId    = null,
@@ -257,6 +343,10 @@
                 ContextChangeReasonCode = null,
                 EffectiveStartDate      = _newCtx.EffectiveStartDate,
                 EffectiveEndDate        = null,
+                PayDateConvention       = string.IsNullOrEmpty(_newCtx.PayDateConvention) ? null : _newCtx.PayDateConvention,
+                PayDateOffsetDays       = _newCtx.PayDateOffsetDays,
+                CutoffOffsetDays        = _newCtx.CutoffOffsetDays,
+                ExtraPeriodPolicy       = _newCtx.ExtraPeriodPolicy,
                 CreatedBy               = _currentUserId,
                 CreationTimestamp       = now,
                 LastUpdatedBy           = _currentUserId,
@@ -264,7 +354,7 @@
             };
             await ContextRepo.InsertContextAsync(ctx);
             _all                = (await ContextRepo.GetAllAsync()).ToList();
-            _filtered           = _all.Where(c => c.LegalEntityId == _selectedLegalEntityId).ToList();
+            FilterForEntity();
             _showNewContextForm = false;
             Nav.NavigateTo($"/payroll/calendar/{ctx.PayrollContextId}");
         }
@@ -293,12 +383,32 @@
         new LookupEntry { Id = 6, Code = "ANNUAL",       Label = "Annual"       },
     ];
 
+    private static readonly (string Code, string Label, string Hint)[] _monthlyConventions =
+    [
+        ("MONTH_END",       "Last day of the month",       "Most common — aligns with accounting close, employees paid for full month"),
+        ("FIRST_FOLLOWING", "1st of the following month",  "Gives payroll team the full month to process; pay is slightly delayed"),
+        ("MID_MONTH",       "15th of the month",           "Mid-month — simple and predictable"),
+        ("FIXED_25",        "25th of the month",           "Gives employees money before month-end bills; payroll has most of month to process"),
+    ];
+
+    private static readonly (string Code, string Label, string Hint)[] _semiMonthlyConventions =
+    [
+        ("SM_15_AND_END", "15th and last day of month", "Most common semi-monthly"),
+        ("SM_1_AND_15",   "1st and 15th of month",      "Government, education"),
+        ("SM_10_AND_25",  "10th and 25th of month",     "Less common"),
+    ];
+
     private sealed class NewContextForm
     {
-        public string   Code               { get; set; } = "";
-        public string   Name               { get; set; } = "";
-        public Guid     LegalEntityId      { get; set; }
-        public int      PayFrequencyId     { get; set; }
-        public DateOnly EffectiveStartDate { get; set; } = DateOnly.FromDateTime(DateTime.Today);
+        public string   Code                { get; set; } = "";
+        public string   Name                { get; set; } = "";
+        public Guid     LegalEntityId       { get; set; }
+        public int      RateTypeId          { get; set; }
+        public int      PayFrequencyId      { get; set; }
+        public DateOnly EffectiveStartDate  { get; set; } = DateOnly.MinValue;
+        public string?  PayDateConvention   { get; set; }
+        public int      PayDateOffsetDays   { get; set; } = 5;
+        public int      CutoffOffsetDays    { get; set; } = 3;
+        public string   ExtraPeriodPolicy   { get; set; } = "EXTRA_SPECIAL";
     }
 }

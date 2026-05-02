@@ -11,6 +11,10 @@ public sealed record CalculationInput
     public required Guid     PersonId                { get; init; }
     public required Guid     PeriodId                { get; init; }
     public required DateOnly PayDate                 { get; init; }
+
+    // Compensation snapshot — populated by PayrollRunJob before engine is called
+    public decimal? AnnualEquivalent { get; init; }
+    public int      PeriodsPerYear   { get; init; }
 }
 
 public sealed record CalculationOutput

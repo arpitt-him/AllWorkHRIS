@@ -1,17 +1,22 @@
 @page "/payroll/runs"
+@layout PayrollShell
 @rendermode InteractiveServer
 @attribute [Authorize(Roles = "PayrollOperator,PayrollAdmin")]
 @implements IDisposable
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Components.Authorization
 @using AllWorkHRIS.Core.Events
+@using AllWorkHRIS.Host.Payroll.Services
 @using AllWorkHRIS.Module.Payroll.Commands
 @using AllWorkHRIS.Module.Payroll.Domain.Calendar
 @using AllWorkHRIS.Module.Payroll.Domain.Run
 @using AllWorkHRIS.Module.Payroll.Repositories
+@using AllWorkHRIS.Core.Temporal
 @using AllWorkHRIS.Module.Payroll.Services
 @inject IPayrollRunService          RunService
 @inject IPayrollContextRepository   ContextRepo
+@inject IPayrollSessionState        SessionState
+@inject ITemporalContext            TemporalContext
 @inject IRunProgressNotifier        ProgressNotifier
 @inject NavigationManager           Nav
 @inject AuthenticationStateProvider AuthState
@@ -27,11 +32,6 @@
                 <button class="btn-primary" @onclick="ToggleNewRunForm">+ New Run</button>
             </Authorized>
         </AuthorizeView>
-    </div>
-
-    <div class="filter-row" style="margin-bottom:var(--space-4)">
-        <label class="filter-label">Legal Entity</label>
-        <LegalEntitySelector OnChanged="OnLegalEntityChangedAsync" />
     </div>
 
     @* Stat Cards *@
@@ -54,7 +54,7 @@
         </div>
     </div>
 
-    @* Context selector — shown when more than one context is available *@
+    @* Context selector — shown when more than one context exists for this entity *@
     @if (_contexts.Count > 1)
     {
         <div class="filter-row">
@@ -119,12 +119,31 @@
             {
                 <div class="alert-error">@_newRunError</div>
             }
-            <div class="form-actions">
-                <button class="btn-primary" @onclick="InitiateRunAsync" disabled="@_submitting">
-                    @(_submitting ? "Initiating…" : "Initiate Run")
-                </button>
-                <button class="btn-secondary" @onclick="ToggleNewRunForm">Cancel</button>
-            </div>
+            @if (_confirmEarlyRun)
+            {
+                <div class="early-run-confirm">
+                    <p class="early-run-confirm__msg">
+                        The pay date for this period is <strong>@_selectedPeriod!.PayDate.ToString("yyyy-MM-dd")</strong>,
+                        which has not yet been reached. Payroll runs are sometimes initiated early to allow
+                        time for ACH processing, but please confirm this is intentional before proceeding.
+                    </p>
+                    <div class="early-run-confirm__actions">
+                        <button class="btn-primary" @onclick="ConfirmEarlyRunAsync" disabled="@_submitting">
+                            @(_submitting ? "Initiating…" : "Yes, initiate early")
+                        </button>
+                        <button class="btn-secondary" @onclick="CancelEarlyRun">Go back</button>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <div class="form-actions">
+                    <button class="btn-primary" @onclick="InitiateRunAsync" disabled="@_submitting">
+                        @(_submitting ? "Initiating…" : "Initiate Run")
+                    </button>
+                    <button class="btn-secondary" @onclick="ToggleNewRunForm">Cancel</button>
+                </div>
+            }
         </div>
     }
 
@@ -210,48 +229,51 @@
 </div>
 
 @code {
-    private List<PayrollContext> _allContexts         = [];
-    private List<PayrollContext> _contexts            = [];
-    private Guid                 _selectedLegalEntityId;
-    private Guid                 _selectedContextId;
-    private List<PayrollRun>     _runs               = [];
-    private Dictionary<Guid, PayrollPeriod> _periods = new();
-    private List<PayrollPeriod>  _openPeriods        = [];
-    private bool                 _loading            = true;
-    private bool                 _showNewRunForm;
-    private bool                 _submitting;
-    private string?              _newRunError;
-    private string?              _errorMessage;
+    private List<PayrollContext>             _allContexts   = [];
+    private List<PayrollContext>             _contexts      = [];
+    private Guid                             _selectedContextId;
+    private List<PayrollRun>                 _runs          = [];
+    private Dictionary<Guid, PayrollPeriod>  _periods       = new();
+    private List<PayrollPeriod>              _openPeriods   = [];
+    private bool                             _loading       = true;
+    private bool                             _showNewRunForm;
+    private bool                             _confirmEarlyRun;
+    private PayrollPeriod?                   _selectedPeriod;
+    private bool                             _submitting;
+    private string?                          _newRunError;
+    private string?                          _errorMessage;
+    private NewRunFormModel                  _newRun        = new();
+    private PeriodicTimer?                   _pollTimer;
+    private CancellationTokenSource?         _pollCts;
+    private Guid                             _currentUserId;
 
-    private NewRunFormModel      _newRun             = new();
-
-    private PeriodicTimer?            _pollTimer;
-    private CancellationTokenSource?  _pollCts;
-    private Guid                      _currentUserId;
-
-    private int       _openRunCount        => _runs.Count(r => r.RunStatusId is >= 1 and <= 7);
+    private int       _openRunCount         => _runs.Count(r => r.RunStatusId is >= 1 and <= 7);
     private int       _pendingApprovalCount => _runs.Count(r => r.RunStatusId == 4);
-    private DateOnly? _lastReleasedDate    => _runs.Where(r => r.RunStatusId == 8)
-                                                   .Select(r => (DateOnly?)r.PayDate)
-                                                   .DefaultIfEmpty(null).Max();
-    private DateOnly? _nextPayDate         => _openPeriods.Select(p => (DateOnly?)p.PayDate)
-                                                          .Where(d => d >= DateOnly.FromDateTime(DateTime.Today))
-                                                          .DefaultIfEmpty(null).Min();
+    private DateOnly? _lastReleasedDate     => _runs.Where(r => r.RunStatusId == 8)
+                                                    .Select(r => (DateOnly?)r.PayDate)
+                                                    .DefaultIfEmpty(null).Max();
+    private DateOnly? _nextPayDate          => _openPeriods.Select(p => (DateOnly?)p.PayDate)
+                                                           .Where(d => d >= DateOnly.FromDateTime(TemporalContext.GetOperativeDate()))
+                                                           .DefaultIfEmpty(null).Min();
 
     protected override async Task OnInitializedAsync()
     {
         var auth = await AuthState.GetAuthenticationStateAsync();
-        var sub  = auth.User.FindFirst("sub")?.Value;
-        _currentUserId = Guid.TryParse(sub, out var g) ? g : Guid.Empty;
+        _currentUserId = Guid.TryParse(auth.User.FindFirst("sub")?.Value, out var g) ? g : Guid.Empty;
 
+        SessionState.OnChanged += HandleEntityChanged;
         _allContexts = (await ContextRepo.GetAllActiveAsync()).ToList();
-        // Data load is driven by OnLegalEntityChangedAsync once LegalEntitySelector fires
+        await LoadForEntityAsync();
     }
 
-    private async Task OnLegalEntityChangedAsync(Guid entityId)
+    private void HandleEntityChanged()
+        => InvokeAsync(async () => { await LoadForEntityAsync(); StateHasChanged(); });
+
+    private async Task LoadForEntityAsync()
     {
-        _selectedLegalEntityId = entityId;
-        _contexts = _allContexts.Where(c => c.LegalEntityId == entityId).ToList();
+        if (!SessionState.HasEntity) return;
+
+        _contexts          = _allContexts.Where(c => c.LegalEntityId == SessionState.SelectedLegalEntityId).ToList();
         _selectedContextId = _contexts.FirstOrDefault()?.PayrollContextId ?? Guid.Empty;
 
         await LoadRunsAsync();
@@ -261,6 +283,8 @@
 
         if (_runs.Any(r => r.RunStatusId == 3))
             StartPolling();
+
+        await InvokeAsync(StateHasChanged);
     }
 
     private async Task LoadRunsAsync()
@@ -271,8 +295,9 @@
         var runs = await RunService.GetRunsByContextAsync(_selectedContextId);
         _runs = [.. runs];
 
-        var yearPeriods     = await ContextRepo.GetPeriodsByContextAsync(_selectedContextId, DateTime.Today.Year);
-        var prevYearPeriods = await ContextRepo.GetPeriodsByContextAsync(_selectedContextId, DateTime.Today.Year - 1);
+        var operativeYear    = TemporalContext.GetOperativeDate().Year;
+        var yearPeriods      = await ContextRepo.GetPeriodsByContextAsync(_selectedContextId, operativeYear);
+        var prevYearPeriods  = await ContextRepo.GetPeriodsByContextAsync(_selectedContextId, operativeYear - 1);
         _periods = yearPeriods.Concat(prevYearPeriods).ToDictionary(p => p.PeriodId);
 
         _loading = false;
@@ -300,8 +325,10 @@
 
     private void ToggleNewRunForm()
     {
-        _showNewRunForm = !_showNewRunForm;
-        _newRunError    = null;
+        _showNewRunForm  = !_showNewRunForm;
+        _newRunError     = null;
+        _confirmEarlyRun = false;
+        _selectedPeriod  = null;
         if (_showNewRunForm)
             _newRun = new NewRunFormModel { ContextId = _selectedContextId, RunTypeId = 1 };
     }
@@ -314,6 +341,31 @@
             return;
         }
 
+        _selectedPeriod = _openPeriods.FirstOrDefault(p => p.PeriodId == _newRun.PeriodId);
+        if (_selectedPeriod is not null && _selectedPeriod.PayDate > DateOnly.FromDateTime(TemporalContext.GetOperativeDate()))
+        {
+            _confirmEarlyRun = true;
+            _newRunError     = null;
+            return;
+        }
+
+        await SubmitRunAsync();
+    }
+
+    private async Task ConfirmEarlyRunAsync()
+    {
+        _confirmEarlyRun = false;
+        await SubmitRunAsync();
+    }
+
+    private void CancelEarlyRun()
+    {
+        _confirmEarlyRun = false;
+        _selectedPeriod  = null;
+    }
+
+    private async Task SubmitRunAsync()
+    {
         _submitting  = true;
         _newRunError = null;
         try
@@ -383,11 +435,12 @@
             }
         }
         catch (OperationCanceledException) { }
-        finally { _pollTimer.Dispose(); _pollTimer = null; }
+        finally { _pollTimer?.Dispose(); _pollTimer = null; }
     }
 
     public void Dispose()
     {
+        SessionState.OnChanged -= HandleEntityChanged;
         _pollCts?.Cancel();
         _pollTimer?.Dispose();
     }

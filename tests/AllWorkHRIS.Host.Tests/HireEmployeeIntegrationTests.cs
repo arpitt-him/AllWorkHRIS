@@ -57,7 +57,7 @@ public class HireEmployeeIntegrationTests : IDisposable
         var onboardingRepo    = new OnboardingRepository(_connectionFactory);
         var onboardingService = new OnboardingService(
             _connectionFactory, onboardingRepo, workQueueService,
-            eventPublisher, _lookupCache);
+            eventPublisher, _lookupCache, temporalContext);
 
         _employmentService = new EmploymentService(
             _connectionFactory,

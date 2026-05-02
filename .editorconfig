@@ -1,0 +1,5 @@
+root = true
+
+[*.cs]
+# Enforce structured logging message templates at build time
+dotnet_diagnostic.CA2254.severity = error

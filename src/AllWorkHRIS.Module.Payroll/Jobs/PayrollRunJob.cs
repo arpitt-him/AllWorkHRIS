@@ -63,6 +63,8 @@ public sealed class PayrollRunJob : BackgroundService
         var resultSetRepo = scope.Resolve<IPayrollRunResultSetRepository>();
         var resultRepo    = scope.Resolve<IEmployeePayrollResultRepository>();
         var profileRepo   = scope.Resolve<IPayrollProfileRepository>();
+        var contextRepo   = scope.Resolve<IPayrollContextRepository>();
+        var compSnapshot  = scope.Resolve<IPayrollCompensationSnapshotRepository>();
         var engine        = scope.Resolve<ICalculationEngine>();
         var accumulator   = scope.Resolve<IAccumulatorService>();
 
@@ -77,7 +79,8 @@ public sealed class PayrollRunJob : BackgroundService
         if (run.RunStatusId == (int)PayrollRunStatus.Releasing)
         {
             await runRepo.UpdateStatusAsync(runId, (int)PayrollRunStatus.Released, run.InitiatedBy);
-            _logger.LogInformation("Run {RunId} released", runId);
+            await contextRepo.UpdatePeriodStatusAsync(run.PeriodId, "CLOSED", run.InitiatedBy);
+            _logger.LogInformation("Run {RunId} released; period {PeriodId} closed", runId, run.PeriodId);
             return;
         }
 
@@ -114,9 +117,38 @@ public sealed class PayrollRunJob : BackgroundService
             };
             await resultSetRepo.InsertAsync(resultSet);
 
+            // Resolve pay frequency and period dates (same for all employees in the run)
+            var periodsPerYear = await contextRepo.GetPeriodsPerYearAsync(run.PayrollContextId);
+            var period         = await contextRepo.GetPeriodByIdAsync(run.PeriodId)
+                                 ?? throw new InvalidOperationException($"Period {run.PeriodId} not found for run {runId}");
+
             // Resolve the employee population for this run via payroll_profile
             var population = await ResolvePopulationAsync(run, profileRepo, ct);
             var total      = population.Count;
+
+            // Record employees blocked by incomplete onboarding tasks
+            var blocked = await profileRepo.GetActiveBlockedEmploymentIdsByContextAsync(run.PayrollContextId);
+            if (blocked.Count > 0)
+            {
+                var exceptionTime = DateTimeOffset.UtcNow;
+                foreach (var blockedId in blocked)
+                {
+                    await runRepo.InsertRunExceptionAsync(new PayrollRunException
+                    {
+                        RunExceptionId   = Guid.NewGuid(),
+                        RunId            = runId,
+                        EmploymentId     = blockedId,
+                        ExceptionCode    = "BLOCKING_TASKS_INCOMPLETE",
+                        ExceptionMessage = "Employee excluded: onboarding blocking tasks not yet complete.",
+                        CreatedTimestamp = exceptionTime
+                    });
+                    _logger.LogWarning(
+                        "Run {RunId}: employment {EmploymentId} excluded — BLOCKING_TASKS_INCOMPLETE",
+                        runId, blockedId);
+                }
+                _logger.LogWarning("Run {RunId}: {Blocked} employee(s) excluded — BLOCKING_TASKS_INCOMPLETE",
+                    runId, blocked.Count);
+            }
 
             _logger.LogInformation("Run {RunId}: calculating {Total} employees", runId, total);
 
@@ -154,8 +186,8 @@ public sealed class PayrollRunJob : BackgroundService
                     ResultLineageSequence             = 1,
                     CorrectionReferenceId             = null,
                     ResultStatusId                    = 1,   // CALCULATING
-                    PayPeriodStartDate                = run.PayDate, // TODO: from period
-                    PayPeriodEndDate                  = run.PayDate, // TODO: from period
+                    PayPeriodStartDate                = period.PeriodStartDate,
+                    PayPeriodEndDate                  = period.PeriodEndDate,
                     PayDate                           = run.PayDate,
                     GrossPayAmount                    = 0m,
                     TotalDeductionsAmount             = 0m,
@@ -167,6 +199,8 @@ public sealed class PayrollRunJob : BackgroundService
                 };
                 await resultRepo.InsertAsync(employeeResult);
 
+                var annualEquivalent = await compSnapshot.GetAnnualEquivalentAsync(employmentId, run.PayDate);
+
                 var input = new CalculationInput
                 {
                     EmployeePayrollResultId = resultId,
@@ -175,7 +209,9 @@ public sealed class PayrollRunJob : BackgroundService
                     EmploymentId            = employmentId,
                     PersonId                = Guid.Empty,
                     PeriodId                = run.PeriodId,
-                    PayDate                 = run.PayDate
+                    PayDate                 = run.PayDate,
+                    AnnualEquivalent        = annualEquivalent,
+                    PeriodsPerYear          = periodsPerYear
                 };
 
                 var output = await engine.CalculateAsync(input, ct);
@@ -189,6 +225,7 @@ public sealed class PayrollRunJob : BackgroundService
                         output.TotalEmployeeTaxAmount,
                         output.TotalEmployerContribAmount,
                         output.NetPay);
+                    await resultRepo.UpdateStatusAsync(resultId, 2); // CALCULATED
 
                     await accumulator.ApplyAsync(
                         employeeResult with
@@ -237,17 +274,18 @@ public sealed class PayrollRunJob : BackgroundService
             await runRepo.SetRunTimestampsAsync(runId, startTime, DateTimeOffset.UtcNow, run.InitiatedBy);
             await resultSetRepo.UpdateStatusAsync(resultSet.PayrollRunResultSetId, (int)ResultSetStatus.Calculated);
 
+            var blockedMsg = blocked.Count > 0 ? $", {blocked.Count} blocked (onboarding)" : "";
             await _progress.UpdateAsync(new RunProgress
             {
                 RunId = runId, PercentComplete = 100, Processed = processed,
                 Total = total, Failed = failed,
-                StatusMessage = $"Complete — {processed} calculated, {failed} failed",
+                StatusMessage = $"Complete — {processed} calculated, {failed} failed{blockedMsg}",
                 RunStatus = failed == total && total > 0 ? "FAILED" : "CALCULATED",
                 UpdatedAt = DateTimeOffset.UtcNow
             });
             _logger.LogInformation(
-                "Run {RunId}: complete — {Processed} calculated, {Failed} failed",
-                runId, processed, failed);
+                "Run {RunId}: complete — {Processed} calculated, {Failed} failed, {Blocked} blocked (onboarding)",
+                runId, processed, failed, blocked.Count);
         }
         catch (OperationCanceledException)
         {

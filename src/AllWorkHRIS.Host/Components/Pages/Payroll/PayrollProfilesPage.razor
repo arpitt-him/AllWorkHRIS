@@ -1,5 +1,7 @@
 @page "/payroll/profiles"
+@layout PayrollShell
 @rendermode InteractiveServer
+@implements IDisposable
 @attribute [Authorize(Roles = "PayrollAdmin")]
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Components.Authorization
@@ -8,12 +10,18 @@
 @using AllWorkHRIS.Module.Payroll.Repositories
 @using AllWorkHRIS.Host.Hris.Domain
 @using AllWorkHRIS.Host.Hris.Queries
+@using AllWorkHRIS.Core.Lookups
+@using AllWorkHRIS.Core.Temporal
 @using AllWorkHRIS.Host.Hris.Services
+@using AllWorkHRIS.Host.Payroll.Services
 @inject IPayrollContextRepository   ContextRepo
 @inject IPayrollProfileRepository   ProfileRepo
 @inject IPersonService              PersonService
 @inject IEmploymentService          EmploymentService
 @inject IOrgStructureService        OrgService
+@inject IPayrollSessionState        SessionState
+@inject ILookupCache                LookupCache
+@inject ITemporalContext            TemporalContext
 @inject AuthenticationStateProvider AuthState
 
 <PageTitle>Payroll Profiles — AllWork HRIS</PageTitle>
@@ -23,11 +31,6 @@
     <div class="page-header">
         <h2 class="page-title">Payroll Profiles</h2>
         <button class="btn-primary" @onclick="ToggleEnrollFormAsync">+ Enroll Employee</button>
-    </div>
-
-    <div class="filter-row" style="margin-bottom:var(--space-4)">
-        <label class="filter-label">Legal Entity</label>
-        <LegalEntitySelector OnChanged="OnLegalEntityChangedAsync" />
     </div>
 
     @* Stat cards *@
@@ -78,7 +81,7 @@
 
             @* Employee filter + selection *@
             <p class="form-section-label">Filter Employees</p>
-            <div class="form-grid form-grid-3" style="margin-bottom:24px">
+            <div class="form-grid form-grid-3" style="margin-bottom:var(--space-3)">
                 <div class="form-field">
                     <label class="form-label">Division</label>
                     <select class="form-control" value="@_filterDivId"
@@ -113,6 +116,30 @@
                     </select>
                 </div>
             </div>
+            <div class="form-grid form-grid-2" style="margin-bottom:24px">
+                <div class="form-field">
+                    <label class="form-label">Rate Type</label>
+                    <select class="form-control" value="@_filterRateTypeCode"
+                            @onchange="OnRateTypeFilterChanged">
+                        <option value="">All Rate Types</option>
+                        @foreach (var rt in _rateTypes)
+                        {
+                            <option value="@rt.Code">@rt.Label</option>
+                        }
+                    </select>
+                </div>
+                <div class="form-field">
+                    <label class="form-label">Pay Frequency</label>
+                    <select class="form-control" value="@_filterPayFreqCode"
+                            @onchange="OnPayFreqFilterChanged">
+                        <option value="">All Frequencies</option>
+                        @foreach (var pf in _payFreqs)
+                        {
+                            <option value="@pf.Code">@pf.Label</option>
+                        }
+                    </select>
+                </div>
+            </div>
 
             @* Employee selection table *@
             @if (_enrollContextId == Guid.Empty)
@@ -142,6 +169,8 @@
                                 <th>Division</th>
                                 <th>Department</th>
                                 <th>Location</th>
+                                <th>Rate Type</th>
+                                <th>Pay Frequency</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -158,6 +187,8 @@
                                     <td>@(emp.DivisionName ?? "—")</td>
                                     <td>@(emp.DepartmentName ?? "—")</td>
                                     <td>@(emp.LocationName ?? "—")</td>
+                                    <td>@(emp.RateTypeCode ?? "—")</td>
+                                    <td>@(emp.PayFrequencyCode ?? "—")</td>
                                 </tr>
                             }
                         </tbody>
@@ -241,9 +272,7 @@
 
 @code {
     // ── Profile list state ────────────────────────────────────────
-    private List<PayrollContext>      _allContexts       = [];
     private List<PayrollContext>      _contexts          = [];
-    private Guid                      _selectedLegalEntityId;
     private List<PayrollProfile>      _profiles          = [];
     private Dictionary<Guid, string>  _names             = new();
     private Guid                      _selectedContextId;
@@ -254,7 +283,7 @@
     private bool                      _showEnrollForm;
     private bool                      _submitting;
     private Guid                      _enrollContextId;
-    private DateOnly                  _enrollStartDate   = DateOnly.FromDateTime(DateTime.Today);
+    private DateOnly                  _enrollStartDate;
     private string?                   _enrollError;
     private string?                   _enrollSuccess;
 
@@ -268,23 +297,52 @@
     private Guid                      _filterDivId;
     private Guid                      _filterDeptId;
     private Guid                      _filterLocId;
+    private string                    _filterRateTypeCode  = "";
+    private string                    _filterPayFreqCode   = "";
+    private List<LookupEntry>         _rateTypes           = [];
+    private List<LookupEntry>         _payFreqs            = [];
 
     protected override async Task OnInitializedAsync()
     {
         var auth = await AuthState.GetAuthenticationStateAsync();
         _currentUserId = Guid.TryParse(auth.User.FindFirst("sub")?.Value, out var g) ? g : Guid.Empty;
 
-        _allContexts = (await ContextRepo.GetAllActiveAsync()).ToList();
-        // Data load is driven by OnLegalEntityChangedAsync once LegalEntitySelector fires
+        SessionState.OnChanged += HandleEntityChanged;
+
+        _enrollStartDate = DateOnly.FromDateTime(TemporalContext.GetOperativeDate());
+        _rateTypes       = LookupCache.GetAll(LookupTables.CompensationRateType).OrderBy(e => e.Label).ToList();
+        _payFreqs        = LookupCache.GetAll(LookupTables.PayFrequency).OrderBy(e => e.Label).ToList();
+
+        await LoadForEntityAsync();
     }
 
-    private async Task OnLegalEntityChangedAsync(Guid entityId)
+    private void HandleEntityChanged()
+        => InvokeAsync(async () => { await LoadForEntityAsync(); StateHasChanged(); });
+
+    private async Task LoadForEntityAsync()
     {
-        _selectedLegalEntityId = entityId;
-        _contexts = _allContexts.Where(c => c.LegalEntityId == entityId).ToList();
+        if (!SessionState.HasEntity) return;
+        _contexts          = (await ContextRepo.GetByLegalEntityAsync(SessionState.SelectedLegalEntityId!.Value))
+                                 .Where(c => c.ContextStatus == "ACTIVE").ToList();
         _selectedContextId = _contexts.FirstOrDefault()?.PayrollContextId ?? Guid.Empty;
+
+        if (_showEnrollForm)
+        {
+            _enrollContextId    = _selectedContextId;
+            _filterDivId        = Guid.Empty;
+            _filterDeptId       = Guid.Empty;
+            _filterLocId        = Guid.Empty;
+            _filterRateTypeCode = "";
+            _filterPayFreqCode  = "";
+            _selectedIds        = [];
+            await LoadUnenrolledAsync(_enrollContextId);
+        }
+
         await LoadProfilesAsync();
     }
+
+    public void Dispose()
+        => SessionState.OnChanged -= HandleEntityChanged;
 
     // ── Enroll form open/close ────────────────────────────────────
 
@@ -296,16 +354,19 @@
 
         if (_showEnrollForm)
         {
-            _enrollContextId = _selectedContextId;
-            _enrollStartDate = DateOnly.FromDateTime(DateTime.Today);
-            _filterDivId     = Guid.Empty;
-            _filterDeptId    = Guid.Empty;
-            _filterLocId     = Guid.Empty;
-            _selectedIds     = [];
+            _enrollContextId     = _selectedContextId;
+            _enrollStartDate     = DateOnly.FromDateTime(TemporalContext.GetOperativeDate());
+            _filterDivId         = Guid.Empty;
+            _filterDeptId        = Guid.Empty;
+            _filterLocId         = Guid.Empty;
+            _filterRateTypeCode  = "";
+            _filterPayFreqCode   = "";
+            _selectedIds         = [];
 
-            var divs  = await OrgService.GetDivisionsAsync();
-            var depts = await OrgService.GetDepartmentsAsync();
-            var locs  = await OrgService.GetLocationsAsync();
+            var entityId = SessionState.SelectedLegalEntityId;
+            var divs  = await OrgService.GetDivisionsAsync(entityId);
+            var depts = await OrgService.GetDepartmentsAsync(entityId);
+            var locs  = await OrgService.GetLocationsAsync(entityId);
             _divisions   = divs.OrderBy(d => d.OrgUnitName).ToList();
             _departments = depts.OrderBy(d => d.OrgUnitName).ToList();
             _locations   = locs.OrderBy(l => l.OrgUnitName).ToList();
@@ -326,7 +387,7 @@
     {
         if (contextId == Guid.Empty) { _unenrolledEmployees = []; _filteredEmployees = []; return; }
 
-        var all      = await EmploymentService.GetAllActiveListAsync();
+        var all      = await EmploymentService.GetAllActiveListAsync(SessionState.SelectedLegalEntityId);
         var enrolled = (await ProfileRepo.GetActiveEmploymentIdsByContextAsync(contextId)).ToHashSet();
         _unenrolledEmployees = all.Where(e => !enrolled.Contains(e.EmploymentId))
                                   .OrderBy(e => e.LegalLastName).ThenBy(e => e.LegalFirstName)
@@ -352,12 +413,26 @@
         ApplyFilters();
     }
 
+    private void OnRateTypeFilterChanged(ChangeEventArgs e)
+    {
+        _filterRateTypeCode = e.Value?.ToString() ?? "";
+        ApplyFilters();
+    }
+
+    private void OnPayFreqFilterChanged(ChangeEventArgs e)
+    {
+        _filterPayFreqCode = e.Value?.ToString() ?? "";
+        ApplyFilters();
+    }
+
     private void ApplyFilters()
     {
         _filteredEmployees = _unenrolledEmployees
-            .Where(e => _filterDivId  == Guid.Empty || e.DivisionId   == _filterDivId)
-            .Where(e => _filterDeptId == Guid.Empty || e.DepartmentId == _filterDeptId)
-            .Where(e => _filterLocId  == Guid.Empty || e.LocationId   == _filterLocId)
+            .Where(e => _filterDivId         == Guid.Empty || e.DivisionId      == _filterDivId)
+            .Where(e => _filterDeptId        == Guid.Empty || e.DepartmentId    == _filterDeptId)
+            .Where(e => _filterLocId         == Guid.Empty || e.LocationId      == _filterLocId)
+            .Where(e => _filterRateTypeCode  == ""         || e.RateTypeCode    == _filterRateTypeCode)
+            .Where(e => _filterPayFreqCode   == ""         || e.PayFrequencyCode == _filterPayFreqCode)
             .ToList();
 
         // Drop any selections no longer in view
@@ -415,6 +490,7 @@
                     EffectiveStartDate  = _enrollStartDate,
                     EffectiveEndDate    = null,
                     FinalPayFlag        = false,
+                    BlockingTasksCleared = true,   // manual enrollment bypasses the onboarding gate
                     EnrollmentSource    = "MANUAL",
                     CreatedBy           = _currentUserId,
                     CreationTimestamp   = now,
@@ -443,7 +519,7 @@
 
     private async Task LoadProfilesAsync()
     {
-        if (_selectedContextId == Guid.Empty) { _loading = false; return; }
+        if (_selectedContextId == Guid.Empty) { _profiles = []; _loading = false; return; }
         _loading  = true;
         _profiles = (await ProfileRepo.GetByContextAsync(_selectedContextId)).ToList();
 

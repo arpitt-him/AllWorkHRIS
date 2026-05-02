@@ -10,6 +10,7 @@ public sealed record PayrollProfile
     public required DateOnly        EffectiveStartDate    { get; init; }
     public          DateOnly?       EffectiveEndDate      { get; init; }
     public required bool            FinalPayFlag          { get; init; }
+    public required bool            BlockingTasksCleared  { get; init; }
     public required string          EnrollmentSource      { get; init; }  // AUTO_HIRE | MANUAL
     public required Guid            CreatedBy             { get; init; }
     public required DateTimeOffset  CreationTimestamp     { get; init; }

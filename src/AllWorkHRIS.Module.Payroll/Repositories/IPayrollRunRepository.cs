@@ -10,4 +10,6 @@ public interface IPayrollRunRepository
     Task<Guid> InsertAsync(PayrollRun run);
     Task UpdateStatusAsync(Guid runId, int statusId, Guid updatedBy);
     Task SetRunTimestampsAsync(Guid runId, DateTimeOffset startTimestamp, DateTimeOffset? endTimestamp, Guid updatedBy);
+    Task InsertRunExceptionAsync(PayrollRunException exception);
+    Task<IReadOnlyList<PayrollRunException>> GetRunExceptionsAsync(Guid runId);
 }

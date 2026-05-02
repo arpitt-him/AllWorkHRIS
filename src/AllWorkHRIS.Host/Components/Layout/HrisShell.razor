@@ -1,0 +1,32 @@
+@rendermode InteractiveServer
+@inherits LayoutComponentBase
+@layout MainLayout
+@inject NavigationManager Nav
+
+<div class="hris-shell">
+
+    <HrisEntityHeader />
+
+    <div class="hris-shell__tabs">
+        <a class="hris-tab @ActiveClass("/hris/employees")"         href="/hris/employees">Employees</a>
+        <a class="hris-tab @ActiveClass("/hris/org")"               href="/hris/org">Org Structure</a>
+        <a class="hris-tab @ActiveClass("/hris/jobs")"              href="/hris/jobs">Jobs &amp; Positions</a>
+        <a class="hris-tab @ActiveClass("/hris/workqueue")"         href="/hris/workqueue">Work Queue</a>
+        <a class="hris-tab @ActiveClass("/hris/documents")"         href="/hris/documents/expiring">Documents</a>
+    </div>
+
+    <div class="hris-shell__body">
+        @Body
+    </div>
+
+</div>
+
+@code {
+    private string ActiveClass(string segment)
+    {
+        var uri = Nav.ToBaseRelativePath(Nav.Uri);
+        return uri.StartsWith(segment.TrimStart('/'), StringComparison.OrdinalIgnoreCase)
+            ? "hris-tab--active"
+            : "";
+    }
+}

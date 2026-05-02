@@ -1,11 +1,28 @@
 @* AllWorkHRIS.Host/Components/Layout/TopBar.razor *@
 @using AllWorkHRIS.Core.Security
+@using AllWorkHRIS.Core.Temporal
+@implements IDisposable
 @inject AuthenticationStateProvider AuthStateProvider
+@inject ITemporalOverrideService    TemporalOverride
 
 <div class="shell-topbar">
     <div class="shell-topbar-left">
         @AppDisplayName
     </div>
+
+    @if (TemporalOverride.IsEnabled)
+    {
+        <div class="shell-topbar-center">
+            <span class="dev-env-pill">DEV</span>
+            @if (TdoActive)
+            {
+                <span class="dev-tdo-date">
+                    &#9200;&nbsp;Operative Date: <strong>@TemporalOverride.OverrideDate!.Value.ToString("yyyy-MM-dd")</strong>
+                </span>
+            }
+        </div>
+    }
+
     <div class="shell-topbar-right">
         <span class="shell-user-name">@_displayName</span>
         <a href="/account/logout" class="shell-logout-link">Sign out</a>
@@ -18,9 +35,46 @@
     private string AppDisplayName =>
         Environment.GetEnvironmentVariable("APP_DISPLAY_NAME") ?? "AllWorkHRIS";
 
+    private bool TdoActive =>
+        TemporalOverride.IsOverrideActive &&
+        TemporalOverride.OverrideDate != DateOnly.FromDateTime(DateTime.Today);
+
     protected override async Task OnInitializedAsync()
     {
         var authState = await AuthStateProvider.GetAuthenticationStateAsync();
         _displayName = authState.User.GetDisplayName();
+        TemporalOverride.OnChanged += HandleTdoChanged;
     }
+
+    private void HandleTdoChanged()
+        => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => TemporalOverride.OnChanged -= HandleTdoChanged;
 }
+
+<style>
+    .shell-topbar-center {
+        position: absolute;
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+    }
+
+    .dev-env-pill {
+        font-size: 0.65rem;
+        font-weight: var(--font-weight-semibold);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        padding: 1px 6px;
+        border-radius: var(--radius-sm);
+        background: #D1D5DB;
+        color: #374151;
+    }
+
+    .dev-tdo-date {
+        font-size: var(--font-size-sm);
+        color: #92400E;
+    }
+</style>
