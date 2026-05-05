@@ -7,21 +7,31 @@ namespace AllWorkHRIS.Host.Hris.Jobs;
 
 public sealed class LeaveStatusTransitionJob : BackgroundService
 {
-    private readonly IServiceScopeFactory _scopeFactory;
+    private readonly IServiceScopeFactory              _scopeFactory;
+    private readonly ITemporalOverrideService          _overrideService;
     private readonly ILogger<LeaveStatusTransitionJob> _logger;
 
+    private DateOnly?     _lastRunDate;
+    private volatile bool _tdo;
+
     public LeaveStatusTransitionJob(
-        IServiceScopeFactory scopeFactory,
+        IServiceScopeFactory              scopeFactory,
+        ITemporalOverrideService          overrideService,
         ILogger<LeaveStatusTransitionJob> logger)
     {
-        _scopeFactory = scopeFactory;
-        _logger       = logger;
+        _scopeFactory    = scopeFactory;
+        _overrideService = overrideService;
+        _logger          = logger;
+
+        _overrideService.OnChanged += () => _tdo = true;
     }
 
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
         {
+            _tdo = false;
+
             try
             {
                 await RunCycleAsync(ct);
@@ -31,21 +41,32 @@ public sealed class LeaveStatusTransitionJob : BackgroundService
                 _logger.LogError(ex, "LeaveStatusTransitionJob cycle failed.");
             }
 
-            await Task.Delay(TimeSpan.FromHours(24), ct);
+            var deadline = DateTime.UtcNow.AddHours(24);
+            while (!ct.IsCancellationRequested && !_tdo && DateTime.UtcNow < deadline)
+                await Task.Delay(TimeSpan.FromSeconds(10), ct);
         }
     }
 
     private async Task RunCycleAsync(CancellationToken ct)
     {
-        await using var scope = _scopeFactory.CreateAsyncScope();
-        var connectionFactory = scope.ServiceProvider.GetRequiredService<IConnectionFactory>();
-        var lookupCache       = scope.ServiceProvider.GetRequiredService<ILookupCache>();
-        var temporalContext   = scope.ServiceProvider.GetRequiredService<ITemporalContext>();
-        var leaveRepo         = scope.ServiceProvider.GetRequiredService<ILeaveRequestRepository>();
+        await using var scope   = _scopeFactory.CreateAsyncScope();
+        var connectionFactory   = scope.ServiceProvider.GetRequiredService<IConnectionFactory>();
+        var lookupCache         = scope.ServiceProvider.GetRequiredService<ILookupCache>();
+        var temporalContext     = scope.ServiceProvider.GetRequiredService<ITemporalContext>();
+        var leaveRepo           = scope.ServiceProvider.GetRequiredService<ILeaveRequestRepository>();
 
-        var operativeDate   = DateOnly.FromDateTime(temporalContext.GetOperativeDate());
-        var inProgressId    = lookupCache.GetId(LookupTables.LeaveStatus, "IN_PROGRESS");
-        var systemActorId   = Guid.Empty;
+        var operativeDate = DateOnly.FromDateTime(temporalContext.GetOperativeDate());
+
+        if (_lastRunDate.HasValue && operativeDate <= _lastRunDate.Value)
+        {
+            _logger.LogDebug(
+                "LeaveStatusTransitionJob: skipping cycle — operative date {Today} has not advanced past last run {Last}.",
+                operativeDate, _lastRunDate.Value);
+            return;
+        }
+
+        var inProgressId  = lookupCache.GetId(LookupTables.LeaveStatus, "IN_PROGRESS");
+        var systemActorId = Guid.Empty;
 
         var approvedRequests = await leaveRepo.GetByStatusAsync("APPROVED");
 
@@ -74,5 +95,7 @@ public sealed class LeaveStatusTransitionJob : BackgroundService
                 _logger.LogError(ex, "Failed to transition leave {Id}.", req.LeaveRequestId);
             }
         }
+
+        _lastRunDate = operativeDate;
     }
 }

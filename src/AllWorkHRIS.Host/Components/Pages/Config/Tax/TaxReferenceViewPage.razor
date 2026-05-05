@@ -1,0 +1,146 @@
+@page "/config/tax/reference"
+@layout TaxConfigShell
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = "TaxAdmin,ComplianceReviewer,PayrollAdmin,SystemAdmin")]
+@using Microsoft.AspNetCore.Authorization
+@using AllWorkHRIS.Host.Config.Tax
+@inject ITaxConfigRepository TaxConfig
+
+<PageTitle>Rate Reference — Tax Configuration</PageTitle>
+
+<div class="page-header">
+    <h2 class="page-title">Rate Reference</h2>
+    <p class="page-subtitle">Active calculation steps and current rate data per jurisdiction. Read-only.</p>
+</div>
+
+@if (_loading)
+{
+    <p class="loading-text">Loading…</p>
+}
+else
+{
+    @foreach (var jur in _stepsByJurisdiction)
+    {
+        <div class="ref-jurisdiction" style="margin-bottom:1.5rem;">
+            <h3 class="ref-jur-heading">@jur.Key</h3>
+            <div class="grid-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Seq</th>
+                            <th>Step Code</th>
+                            <th>Name</th>
+                            <th>Type</th>
+                            <th>Applies To</th>
+                            <th>Current Rates</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var step in jur.Value)
+                        {
+                            var rates = _ratesByStep.TryGetValue(step.StepCode, out var r) ? r : [];
+                            var current = rates.Where(x => x.EffectiveTo == null || x.EffectiveTo >= _today).ToList();
+                            <tr>
+                                <td class="mono">@step.SequenceNumber</td>
+                                <td class="mono">@step.StepCode</td>
+                                <td>@step.StepName</td>
+                                <td><span class="type-badge type-@step.StepType.ToLower().Replace('_','-')">@StepTypeLabel(step.StepType)</span></td>
+                                <td>@step.AppliesTo</td>
+                                <td>
+                                    @if (current.Count == 0)
+                                    {
+                                        <span style="color:#6b7280;font-size:.8rem;">—</span>
+                                    }
+                                    else
+                                    {
+                                        @foreach (var rate in current)
+                                        {
+                                            <div style="font-size:.8rem;">
+                                                <span class="rate-type-tag">@rate.RowType</span>
+                                                @rate.Summary
+                                                <span style="color:#9ca3af;margin-left:.25rem;">from @rate.EffectiveFrom.ToString("yyyy-MM-dd")</span>
+                                            </div>
+                                        }
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    private bool   _loading = true;
+    private DateOnly _today = DateOnly.FromDateTime(DateTime.Today);
+
+    private Dictionary<string, List<TaxStepConfigRow>>          _stepsByJurisdiction = [];
+    private Dictionary<string, IReadOnlyList<TaxRateRowSummary>> _ratesByStep        = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var steps = await TaxConfig.GetAllActiveStepsAsync();
+
+        _stepsByJurisdiction = steps
+            .GroupBy(s => $"{s.JurisdictionName} ({s.JurisdictionCode})")
+            .ToDictionary(g => g.Key, g => g.ToList());
+
+        foreach (var step in steps)
+            _ratesByStep[step.StepCode] = await TaxConfig.GetRateSummaryAsync(step.StepCode);
+
+        _loading = false;
+    }
+
+    private static string StepTypeLabel(string t) => t switch
+    {
+        "PROGRESSIVE_BRACKET" => "Progressive",
+        "FLAT_RATE"           => "Flat Rate",
+        "TIERED_FLAT"         => "Tiered",
+        "ALLOWANCE"           => "Allowance",
+        "CREDIT"              => "Credit",
+        "STANDARD_DEDUCTION"  => "Std Deduction",
+        "PERCENTAGE_OF_PRIOR" => "% of Prior",
+        _                     => t
+    };
+}
+
+<style>
+    .page-header    { margin-bottom: 1.5rem; }
+    .page-title     { font-size: var(--font-size-lg); font-weight: 600; color: var(--aw-navy); margin: 0 0 .25rem; }
+    .page-subtitle  { font-size: var(--font-size-sm); color: #6b7280; margin: 0; }
+    .loading-text   { color: #6b7280; font-style: italic; }
+
+    .ref-jur-heading {
+        font-size: var(--font-size-sm);
+        font-weight: 600;
+        color: var(--aw-navy);
+        text-transform: uppercase;
+        letter-spacing: .05em;
+        margin: 0 0 .5rem;
+    }
+
+    .grid-container { background: white; border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); overflow: hidden; }
+
+    .data-table { width: 100%; border-collapse: collapse; font-size: var(--font-size-sm); }
+    .data-table th {
+        background: #f9fafb; padding: var(--space-3) var(--space-4);
+        text-align: left; font-weight: 500; color: #6b7280;
+        border-bottom: 1px solid #e5e7eb; white-space: nowrap;
+    }
+    .data-table td { padding: var(--space-3) var(--space-4); border-bottom: 1px solid #f3f4f6; color: var(--aw-navy); vertical-align: top; }
+    .data-table tr:last-child td { border-bottom: none; }
+    .mono { font-family: monospace; font-size: .8rem; }
+
+    .type-badge {
+        display: inline-block; padding: 1px 6px; border-radius: 4px;
+        font-size: .75rem; font-weight: 500; background: #e0f2fe; color: #0369a1;
+    }
+
+    .rate-type-tag {
+        display: inline-block; padding: 1px 5px; border-radius: 3px;
+        font-size: .7rem; background: #f3f4f6; color: #374151;
+        margin-right: .25rem;
+    }
+</style>

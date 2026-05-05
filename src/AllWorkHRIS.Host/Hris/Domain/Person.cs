@@ -53,6 +53,15 @@ public sealed record Person
     }
 }
 
+public sealed record PersonSocialProfile
+{
+    public Guid    PersonId      { get; init; }
+    public byte[]? PhotoData     { get; init; }
+    public string? PhotoMimeType { get; init; }
+    public string? BioText       { get; init; }
+    public DateTimeOffset UpdatedAt { get; init; }
+}
+
 public sealed record PersonAddress
 {
     public Guid PersonAddressId { get; init; }

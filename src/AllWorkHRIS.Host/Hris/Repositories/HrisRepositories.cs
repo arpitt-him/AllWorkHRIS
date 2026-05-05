@@ -2,6 +2,7 @@ using Dapper;
 using AllWorkHRIS.Core.Data;
 using AllWorkHRIS.Host.Hris.Domain;
 using AllWorkHRIS.Host.Hris.Queries;
+using System.Data;
 
 namespace AllWorkHRIS.Host.Hris.Repositories;
 
@@ -718,9 +719,9 @@ public sealed class OrgUnitRepository : IOrgUnitRepository
     {
         const string sql = """
             WITH RECURSIVE org_tree AS (
-                SELECT org_unit_id FROM org_unit WHERE org_unit_id = @OrgUnitId
+                SELECT org_unit_id, legal_entity_id FROM org_unit WHERE org_unit_id = @OrgUnitId
                 UNION ALL
-                SELECT o.org_unit_id FROM org_unit o
+                SELECT o.org_unit_id, o.legal_entity_id FROM org_unit o
                 INNER JOIN org_tree t ON o.parent_org_unit_id = t.org_unit_id
             )
             SELECT
@@ -754,6 +755,7 @@ public sealed class OrgUnitRepository : IOrgUnitRepository
             LEFT  JOIN lkp_compensation_rate_type lcrt ON lcrt.id = cr.rate_type_id
             LEFT  JOIN lkp_pay_frequency          lpf  ON lpf.id  = cr.pay_frequency_id
             WHERE e.employment_status_id = (SELECT id FROM lkp_employment_status WHERE code = 'ACTIVE')
+              AND e.legal_entity_id = (SELECT legal_entity_id FROM org_unit WHERE org_unit_id = @OrgUnitId)
             ORDER BY p.legal_last_name, p.legal_first_name
             """;
         using var conn = _connectionFactory.CreateConnection();
@@ -991,5 +993,92 @@ public sealed class EmployeeEventRepository : IEmployeeEventRepository
             """;
         await uow.Connection.ExecuteAsync(sql, employeeEvent, uow.Transaction);
         return employeeEvent.EventId;
+    }
+}
+
+// ============================================================
+// PERSON SOCIAL PROFILE
+// ============================================================
+
+public interface IPersonSocialProfileRepository
+{
+    Task<PersonSocialProfile?> GetAsync(Guid personId);
+    Task SavePhotoAsync(Guid personId, byte[] photoData, string mimeType);
+    Task SaveBioAsync(Guid personId, string? bioText);
+}
+
+public sealed class PersonSocialProfileRepository : IPersonSocialProfileRepository
+{
+    private readonly IConnectionFactory _db;
+    public PersonSocialProfileRepository(IConnectionFactory db) => _db = db;
+
+    public async Task<PersonSocialProfile?> GetAsync(Guid personId)
+    {
+        const string sql = """
+            SELECT person_id       AS PersonId,
+                   photo_data      AS PhotoData,
+                   photo_mime_type AS PhotoMimeType,
+                   bio_text        AS BioText,
+                   updated_at      AS UpdatedAt
+            FROM   person_social_profile
+            WHERE  person_id = @PersonId
+            """;
+        using var conn = _db.CreateConnection();
+        return await conn.QuerySingleOrDefaultAsync<PersonSocialProfile>(sql, new { PersonId = personId });
+    }
+
+    public async Task SavePhotoAsync(Guid personId, byte[] photoData, string mimeType)
+    {
+        using var conn = _db.CreateConnection();
+        var exists = await conn.ExecuteScalarAsync<int>(
+            "SELECT COUNT(1) FROM person_social_profile WHERE person_id = @PersonId",
+            new { PersonId = personId }) > 0;
+
+        if (exists)
+        {
+            await conn.ExecuteAsync("""
+                UPDATE person_social_profile
+                SET    photo_data      = @PhotoData,
+                       photo_mime_type = @MimeType,
+                       updated_at      = @Now
+                WHERE  person_id = @PersonId
+                """,
+                new { PhotoData = photoData, MimeType = mimeType, Now = DateTimeOffset.UtcNow, PersonId = personId });
+        }
+        else
+        {
+            await conn.ExecuteAsync("""
+                INSERT INTO person_social_profile (person_id, photo_data, photo_mime_type, updated_at)
+                VALUES (@PersonId, @PhotoData, @MimeType, @Now)
+                """,
+                new { PersonId = personId, PhotoData = photoData, MimeType = mimeType, Now = DateTimeOffset.UtcNow });
+        }
+    }
+
+    public async Task SaveBioAsync(Guid personId, string? bioText)
+    {
+        using var conn = _db.CreateConnection();
+        var exists = await conn.ExecuteScalarAsync<int>(
+            "SELECT COUNT(1) FROM person_social_profile WHERE person_id = @PersonId",
+            new { PersonId = personId }) > 0;
+
+        if (exists)
+        {
+            await conn.ExecuteAsync("""
+                UPDATE person_social_profile
+                SET    bio_text   = @BioText,
+                       updated_at = @Now
+                WHERE  person_id  = @PersonId
+                """,
+                new { BioText = bioText, Now = DateTimeOffset.UtcNow, PersonId = personId });
+        }
+        else
+        {
+            await conn.ExecuteAsync("""
+                INSERT INTO person_social_profile (person_id, bio_text, updated_at)
+                VALUES (@PersonId, @BioText, @Now)
+                """,
+                new { PersonId = personId, BioText = bioText, Now = DateTimeOffset.UtcNow });
+        }
     }
 }

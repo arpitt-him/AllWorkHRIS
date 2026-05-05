@@ -358,7 +358,7 @@
                 }
                 @if (_currentStep < _totalSteps)
                 {
-                    <button class="btn-primary" @onclick="async () => await NextStep()">Next →</button>
+                    <button class="btn-primary" @onclick="() => NextStep()">Next →</button>
                 }
                 else
                 {
@@ -433,7 +433,7 @@
         _payrollContextIdStr = _payrollContexts.Count == 1 ? _payrollContexts[0].Id.ToString() : "";
     }
 
-    private async Task NextStep()
+    private void NextStep()
     {
         _errorMessage = string.Empty;
         if (!ValidateCurrentStep()) return;

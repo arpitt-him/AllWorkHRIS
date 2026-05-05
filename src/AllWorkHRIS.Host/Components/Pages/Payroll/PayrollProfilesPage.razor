@@ -13,13 +13,12 @@
 @using AllWorkHRIS.Core.Lookups
 @using AllWorkHRIS.Core.Temporal
 @using AllWorkHRIS.Host.Hris.Services
-@using AllWorkHRIS.Host.Payroll.Services
 @inject IPayrollContextRepository   ContextRepo
 @inject IPayrollProfileRepository   ProfileRepo
 @inject IPersonService              PersonService
 @inject IEmploymentService          EmploymentService
 @inject IOrgStructureService        OrgService
-@inject IPayrollSessionState        SessionState
+@inject IHrisSessionState           SessionState
 @inject ILookupCache                LookupCache
 @inject ITemporalContext            TemporalContext
 @inject AuthenticationStateProvider AuthState

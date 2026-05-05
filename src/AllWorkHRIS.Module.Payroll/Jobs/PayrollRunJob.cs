@@ -208,6 +208,7 @@ public sealed class PayrollRunJob : BackgroundService
                     ResultSetId             = resultSet.PayrollRunResultSetId,
                     EmploymentId            = employmentId,
                     PersonId                = Guid.Empty,
+                    PayrollContextId        = run.PayrollContextId,
                     PeriodId                = run.PeriodId,
                     PayDate                 = run.PayDate,
                     AnnualEquivalent        = annualEquivalent,

@@ -1,0 +1,63 @@
+@rendermode InteractiveServer
+@inherits LayoutComponentBase
+@layout MainLayout
+@inject NavigationManager Nav
+
+<div class="ben-shell">
+
+    <div class="ben-shell__tabs">
+        <a class="ben-tab @ActiveClass("/benefits/codes")"     href="/benefits/codes">Deduction Codes</a>
+        <a class="ben-tab @ActiveClass("/benefits/elections")" href="/benefits/elections">Elections</a>
+        <a class="ben-tab @ActiveClass("/benefits/import")"    href="/benefits/import">Import</a>
+    </div>
+
+    <div class="ben-shell__body">
+        @Body
+    </div>
+
+</div>
+
+@code {
+    private string ActiveClass(string path)
+    {
+        var uri = Nav.ToBaseRelativePath(Nav.Uri);
+        return uri.StartsWith(path.TrimStart('/'), StringComparison.OrdinalIgnoreCase)
+            ? "ben-tab--active"
+            : "";
+    }
+}
+
+<style>
+    .ben-shell { display: flex; flex-direction: column; height: 100%; }
+
+    .ben-shell__tabs {
+        display: flex;
+        gap: 0;
+        border-bottom: 2px solid #e5e7eb;
+        background: white;
+        padding: 0 var(--space-6, 1.5rem);
+        flex-shrink: 0;
+    }
+
+    .ben-tab {
+        padding: var(--space-3, .75rem) var(--space-4, 1rem);
+        font-size: var(--font-size-sm, .875rem);
+        font-weight: var(--font-weight-medium, 500);
+        color: #6b7280;
+        text-decoration: none;
+        border-bottom: 2px solid transparent;
+        margin-bottom: -2px;
+        white-space: nowrap;
+        transition: color .15s, border-color .15s;
+    }
+
+    .ben-tab:hover { color: var(--module-benefits, #047857); }
+
+    .ben-tab--active {
+        color: var(--module-benefits, #047857);
+        border-bottom-color: var(--module-benefits, #047857);
+        font-weight: var(--font-weight-semibold, 600);
+    }
+
+    .ben-shell__body { flex: 1; overflow: auto; padding: var(--space-6, 1.5rem); }
+</style>

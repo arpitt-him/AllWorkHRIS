@@ -6,7 +6,7 @@
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Components.Authorization
 @using AllWorkHRIS.Core.Events
-@using AllWorkHRIS.Host.Payroll.Services
+@using AllWorkHRIS.Host.Hris.Services
 @using AllWorkHRIS.Module.Payroll.Commands
 @using AllWorkHRIS.Module.Payroll.Domain.Calendar
 @using AllWorkHRIS.Module.Payroll.Domain.Run
@@ -15,7 +15,7 @@
 @using AllWorkHRIS.Module.Payroll.Services
 @inject IPayrollRunService          RunService
 @inject IPayrollContextRepository   ContextRepo
-@inject IPayrollSessionState        SessionState
+@inject IHrisSessionState           SessionState
 @inject ITemporalContext            TemporalContext
 @inject IRunProgressNotifier        ProgressNotifier
 @inject NavigationManager           Nav

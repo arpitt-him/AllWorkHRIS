@@ -1,0 +1,53 @@
+@* AllWorkHRIS.Host/Components/Pages/Dashboard/OpsDashboard.razor *@
+@page "/ops"
+@attribute [Authorize(Roles = "OperationsAdmin")]
+@rendermode InteractiveServer
+
+<PageTitle>Operations — AllWork HRIS</PageTitle>
+
+<div class="ops-dashboard">
+    <div class="ops-dashboard-header">
+        <h1 class="ops-dashboard-title">Operations Console</h1>
+        <p class="ops-dashboard-sub">Cross-entity payroll job monitoring and resource management.</p>
+    </div>
+    <div class="ops-placeholder">
+        <p>Monitoring console — coming in a future release.</p>
+    </div>
+</div>
+
+<style>
+    .ops-dashboard {
+        padding: var(--space-6) var(--space-8);
+    }
+
+    .ops-dashboard-header {
+        margin-bottom: var(--space-6);
+    }
+
+    .ops-dashboard-title {
+        font-size: var(--font-size-xl);
+        font-weight: var(--font-weight-semibold);
+        color: var(--aw-navy);
+        margin: 0 0 var(--space-1) 0;
+    }
+
+    .ops-dashboard-sub {
+        font-size: var(--font-size-sm);
+        color: #6b7280;
+        margin: 0;
+    }
+
+    .ops-placeholder {
+        background: #f9fafb;
+        border: 1px dashed #d1d5db;
+        border-radius: var(--radius-lg);
+        padding: var(--space-10) var(--space-8);
+        text-align: center;
+        color: #9ca3af;
+        font-size: var(--font-size-sm);
+    }
+
+    .ops-placeholder p {
+        margin: 0;
+    }
+</style>

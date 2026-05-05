@@ -1,0 +1,180 @@
+@page "/config/tax/review"
+@layout TaxConfigShell
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = "ComplianceReviewer")]
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using AllWorkHRIS.Host.Config.Tax
+@inject ITaxConfigRepository        TaxConfig
+@inject AuthenticationStateProvider AuthState
+
+<PageTitle>Review &amp; Approve — Tax Configuration</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h2 class="page-title">Review &amp; Approve</h2>
+        <p class="page-subtitle">Items submitted by TaxAdmin awaiting ComplianceReviewer approval.</p>
+    </div>
+    <button class="btn-secondary" @onclick="LoadAsync">Refresh</button>
+</div>
+
+@if (_loading)
+{
+    <p class="loading-text">Loading…</p>
+}
+else if (_items.Count == 0)
+{
+    <div class="empty-state">
+        <p style="font-size:1rem;font-weight:600;margin:0 0 .5rem;">No items pending review</p>
+        <p style="color:#6b7280;margin:0;">When TaxAdmin submits a step or form field for review, it will appear here.</p>
+    </div>
+}
+else
+{
+    <div class="grid-container">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Type</th>
+                    <th>Jurisdiction / Form</th>
+                    <th>Item</th>
+                    <th>Submitted By</th>
+                    <th>Submitted At</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var item in _items)
+                {
+                    var it = item;
+                    <tr>
+                        <td><span class="type-badge">@(it.EntityType == "step" ? "Step" : "Form Field")</span></td>
+                        <td class="mono">@it.JurisdictionCode</td>
+                        <td>@it.EntityName</td>
+                        <td>@it.SubmittedBy</td>
+                        <td class="mono">@(it.SubmittedAt == DateTime.MinValue ? "—" : it.SubmittedAt.ToString("yyyy-MM-dd HH:mm"))</td>
+                        <td>
+                            @if (_confirmingId == it.EntityId)
+                            {
+                                <div style="display:flex;flex-direction:column;gap:.5rem;">
+                                    <textarea class="form-control" rows="2" placeholder="Note (optional)"
+                                              @bind="_reviewNote" style="font-size:.8rem;" />
+                                    <div style="display:flex;gap:.5rem;">
+                                        <button class="btn-action btn-action--success" @onclick="() => ApproveAsync(it)">Confirm Approve</button>
+                                        <button class="btn-action btn-action--danger"  @onclick="() => RejectAsync(it)">Confirm Reject</button>
+                                        <button class="btn-action" @onclick="CancelConfirm">Cancel</button>
+                                    </div>
+                                </div>
+                            }
+                            else
+                            {
+                                <div style="display:flex;gap:.5rem;">
+                                    <button class="btn-action btn-action--success" @onclick="() => StartConfirm(it.EntityId)">Approve…</button>
+                                    <button class="btn-action btn-action--danger"  @onclick="() => StartConfirm(it.EntityId)">Reject…</button>
+                                </div>
+                            }
+                            @if (_actionErrors.TryGetValue(it.EntityId, out var err) && err is not null)
+                            {
+                                <p style="color:#dc2626;font-size:.75rem;margin:.25rem 0 0;">@err</p>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private bool                    _loading      = true;
+    private List<PendingReviewItem> _items        = [];
+    private string?                 _confirmingId = null;
+    private string                  _reviewNote   = string.Empty;
+    private Dictionary<string, string?> _actionErrors = [];
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _confirmingId = null;
+        _reviewNote   = string.Empty;
+        _actionErrors.Clear();
+        StateHasChanged();
+        _items   = (await TaxConfig.GetPendingReviewItemsAsync()).ToList();
+        _loading = false;
+    }
+
+    private void StartConfirm(string entityId)
+    {
+        _confirmingId = entityId;
+        _reviewNote   = string.Empty;
+    }
+
+    private void CancelConfirm() => _confirmingId = null;
+
+    private async Task ApproveAsync(PendingReviewItem item)
+    {
+        _actionErrors[item.EntityId] = null;
+        try
+        {
+            var auth  = await AuthState.GetAuthenticationStateAsync();
+            var actor = auth.User.Identity?.Name ?? "system";
+            if (item.EntityType == "step")
+                await TaxConfig.UpdateStepStatusAsync(int.Parse(item.EntityId), item.EntityName,
+                    "PENDING_REVIEW", "APPROVED", actor, (string.IsNullOrWhiteSpace(_reviewNote) ? null : _reviewNote));
+            else
+                await TaxConfig.UpdateFormFieldStatusAsync(int.Parse(item.EntityId), item.EntityName,
+                    "PENDING_REVIEW", "APPROVED", actor, (string.IsNullOrWhiteSpace(_reviewNote) ? null : _reviewNote));
+            await LoadAsync();
+        }
+        catch (Exception ex) { _actionErrors[item.EntityId] = ex.Message; }
+    }
+
+    private async Task RejectAsync(PendingReviewItem item)
+    {
+        _actionErrors[item.EntityId] = null;
+        try
+        {
+            var auth  = await AuthState.GetAuthenticationStateAsync();
+            var actor = auth.User.Identity?.Name ?? "system";
+            if (item.EntityType == "step")
+                await TaxConfig.UpdateStepStatusAsync(int.Parse(item.EntityId), item.EntityName,
+                    "PENDING_REVIEW", "DRAFT", actor, (string.IsNullOrWhiteSpace(_reviewNote) ? null : _reviewNote));
+            else
+                await TaxConfig.UpdateFormFieldStatusAsync(int.Parse(item.EntityId), item.EntityName,
+                    "PENDING_REVIEW", "DRAFT", actor, (string.IsNullOrWhiteSpace(_reviewNote) ? null : _reviewNote));
+            await LoadAsync();
+        }
+        catch (Exception ex) { _actionErrors[item.EntityId] = ex.Message; }
+    }
+}
+
+
+<style>
+    .page-header   { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:1.5rem; gap:1rem; }
+    .page-title    { font-size:var(--font-size-lg); font-weight:600; color:var(--aw-navy); margin:0 0 .25rem; }
+    .page-subtitle { font-size:var(--font-size-sm); color:#6b7280; margin:0; }
+    .loading-text  { color:#6b7280; font-style:italic; }
+
+    .empty-state { background:white; border-radius:var(--radius-lg); box-shadow:var(--shadow-sm); padding:3rem 2rem; text-align:center; }
+
+    .grid-container { background:white; border-radius:var(--radius-lg); box-shadow:var(--shadow-sm); overflow:hidden; }
+    .data-table { width:100%; border-collapse:collapse; font-size:var(--font-size-sm); }
+    .data-table th { background:#f9fafb; padding:var(--space-3) var(--space-4); text-align:left; font-weight:500; color:#6b7280; border-bottom:1px solid #e5e7eb; white-space:nowrap; }
+    .data-table td { padding:var(--space-3) var(--space-4); border-bottom:1px solid #f3f4f6; color:var(--aw-navy); vertical-align:top; }
+    .data-table tr:last-child td { border-bottom:none; }
+    .mono { font-family:monospace; font-size:.8rem; }
+
+    .type-badge { display:inline-block; padding:1px 6px; border-radius:4px; font-size:.75rem; font-weight:500; background:#e0f2fe; color:#0369a1; }
+
+    .btn-action { padding:3px 10px; border-radius:4px; font-size:.8rem; cursor:pointer; border:1px solid #d1d5db; background:white; color:var(--aw-navy); }
+    .btn-action:hover { background:#f9fafb; }
+    .btn-action--success { background:#dcfce7; border-color:#86efac; color:#166534; }
+    .btn-action--danger  { background:#fee2e2; border-color:#fca5a5; color:#991b1b; }
+
+    .btn-secondary { background:white; color:#374151; border:1px solid #d1d5db; border-radius:var(--radius-md); padding:var(--space-2) var(--space-4); font-size:var(--font-size-sm); font-weight:500; cursor:pointer; }
+    .btn-secondary:hover { background:#f9fafb; }
+
+    .form-control { padding:var(--space-2); border:1px solid #d1d5db; border-radius:var(--radius-md); font-size:var(--font-size-sm); background:white; width:100%; box-sizing:border-box; }
+</style>

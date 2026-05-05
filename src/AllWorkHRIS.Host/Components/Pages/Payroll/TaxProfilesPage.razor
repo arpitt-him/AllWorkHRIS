@@ -1,0 +1,820 @@
+@page "/payroll/tax-profiles"
+@layout MainLayout
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = "PayrollAdmin,PayrollOperator")]
+@implements IDisposable
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using AllWorkHRIS.Core.Audit
+@using AllWorkHRIS.Core.Temporal
+@using AllWorkHRIS.Host.Hris.Queries
+@using AllWorkHRIS.Host.Hris.Services
+@using AllWorkHRIS.Host.Payroll.Tax
+@inject ITaxProfileRepository        TaxRepo
+@inject IEmploymentService           EmploymentService
+@inject ITemporalContext             TemporalContext
+@inject IAuditService                AuditService
+@inject IHrisSessionState            SessionState
+@inject AuthenticationStateProvider AuthState
+
+<PageTitle>Tax Profiles — AllWork HRIS</PageTitle>
+
+<div class="page-container">
+
+    <div class="page-header">
+        <h2 class="page-title">Tax Profiles</h2>
+        <p class="page-subtitle">View and record employee tax withholding elections by jurisdiction.</p>
+    </div>
+
+    @* ── Not-ready Worklist ─────────────────────────────────────── *@
+    @if (_notReadyTotal > 0 || _notReady.Count > 0)
+    {
+        <div class="panel-card" style="margin-bottom:1.5rem;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem;">
+                <div>
+                    <span style="font-weight:600;font-size:.9rem;color:var(--aw-navy,#1a2e44);">Incomplete Tax Elections</span>
+                    <span class="status-badge" style="margin-left:.5rem;background:#fef3c7;color:#92400e;font-size:.7rem;">@_notReadyTotal employee@(_notReadyTotal == 1 ? "" : "s")</span>
+                </div>
+                @if (_notReadyTotal > NotReadyPageSize)
+                {
+                    <div style="display:flex;align-items:center;gap:.5rem;font-size:.8rem;color:var(--color-text-secondary);">
+                        <span>@((_notReadyPage - 1) * NotReadyPageSize + 1)–@(Math.Min(_notReadyPage * NotReadyPageSize, _notReadyTotal)) of @_notReadyTotal</span>
+                        <button class="btn-secondary" style="padding:2px 8px;font-size:.75rem;"
+                                disabled="@(_notReadyPage <= 1)"
+                                @onclick="() => NotReadyPageChanged(_notReadyPage - 1)">‹</button>
+                        <button class="btn-secondary" style="padding:2px 8px;font-size:.75rem;"
+                                disabled="@(_notReadyPage * NotReadyPageSize >= _notReadyTotal)"
+                                @onclick="() => NotReadyPageChanged(_notReadyPage + 1)">›</button>
+                    </div>
+                }
+            </div>
+            <table style="width:100%;border-collapse:collapse;font-size:.875rem;">
+                <thead>
+                    <tr style="border-bottom:1px solid var(--color-border,#e5e7eb);text-align:left;">
+                        <th style="padding:.4rem .5rem;font-weight:600;color:var(--color-text-secondary);">Employee</th>
+                        <th style="padding:.4rem .5rem;font-weight:600;color:var(--color-text-secondary);">Missing Elections</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @{
+                        string? lastContext = null;
+                    }
+                    @foreach (var row in _notReady)
+                    {
+                        var r = row;
+                        var isSelected = _selectedEmploymentId == r.EmploymentId;
+                        var contextLabel = r.PayrollContextName ?? "Unassigned";
+                        if (contextLabel != lastContext)
+                        {
+                            lastContext = contextLabel;
+                            <tr>
+                                <td colspan="2" class="not-ready-group-header">@contextLabel</td>
+                            </tr>
+                        }
+                        <tr class="not-ready-row @(isSelected ? "not-ready-row-selected" : "")"
+                            @onclick="() => SelectNotReadyEmployee(r)">
+                            <td style="padding:.5rem .5rem .5rem 1.25rem;">@r.LegalLastName, @r.LegalFirstName</td>
+                            <td style="padding:.5rem .5rem;">
+                                <span class="status-badge" style="background:#fee2e2;color:#991b1b;font-size:.7rem;">@r.MissingCount missing</span>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+
+    @* ── Employee Selection ─────────────────────────────────────── *@
+    <div class="panel-card" style="margin-bottom:1.5rem;display:flex;align-items:flex-start;justify-content:space-between;gap:1.5rem;flex-wrap:wrap;">
+
+        @* Search *@
+        <div class="form-field" style="flex:1;min-width:240px;max-width:420px;">
+            <label class="form-label">Search</label>
+            @if (_selectedEmploymentId != Guid.Empty)
+            {
+                <div style="display:flex;align-items:center;gap:.75rem;">
+                    <span style="font-weight:600;font-size:.9rem;">@_selectedEmployeeName</span>
+                    <button class="btn-secondary" style="padding:2px 10px;font-size:.8rem;"
+                            @onclick="ClearEmployee">Change</button>
+                </div>
+            }
+            else
+            {
+                <input type="text" class="form-control" placeholder="Type name to search…"
+                       value="@_searchText" @oninput="OnSearchChanged"
+                       autocomplete="off" />
+                @if (!string.IsNullOrWhiteSpace(_searchText) && _filteredEmployees.Count > 0)
+                {
+                    <div class="emp-results">
+                        @foreach (var e in _filteredEmployees.Take(12))
+                        {
+                            var emp = e;
+                            <div class="emp-result-item" @onclick="() => SelectEmployee(emp)">
+                                @emp.LegalLastName, @emp.LegalFirstName
+                            </div>
+                        }
+                    </div>
+                }
+                else if (!string.IsNullOrWhiteSpace(_searchText))
+                {
+                    <p style="font-size:.8rem;color:#6b7280;margin-top:.25rem;">No employees match.</p>
+                }
+            }
+        </div>
+
+        @* Dropdown *@
+        <div class="form-field" style="flex:1;min-width:200px;max-width:320px;">
+            <label class="form-label">Employee</label>
+            <select class="form-control"
+                    value="@_selectedEmploymentId.ToString()"
+                    @onchange="OnDropdownChanged">
+                <option value="@Guid.Empty.ToString()">— select employee —</option>
+                @foreach (var emp in _allEmployees.OrderBy(e => e.LegalLastName).ThenBy(e => e.LegalFirstName))
+                {
+                    <option value="@emp.EmploymentId.ToString()">@emp.LegalLastName, @emp.LegalFirstName</option>
+                }
+            </select>
+        </div>
+
+    </div>
+
+    @* ── Jurisdiction Sections ──────────────────────────────────── *@
+    @if (_selectedEmploymentId != Guid.Empty)
+    {
+        @if (_loading)
+        {
+            <p class="loading-text">Loading tax profiles…</p>
+        }
+        else
+        {
+            @foreach (var jur in _jurisdictions)
+            {
+                var jCode = jur.JurisdictionCode;
+                var form  = _forms[jCode];
+                var edit  = _editMode[jCode];
+                var saved = _profiles.TryGetValue(jCode, out var profile) && profile is not null;
+                var filingStatuses = _filingStatuses.TryGetValue(jCode, out var fs) ? fs : [];
+
+                <div class="panel-card tax-jurisdiction-card" style="margin-bottom:1rem;">
+                    <div class="tax-jur-header" @onclick="() => ToggleExpand(jCode)" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;">
+                        <div style="display:flex;align-items:center;gap:.75rem;">
+                            <span class="country-flag">@FlagEmoji(jur.CountryCode)</span>
+                            <div>
+                                <span class="tax-jur-name">@jur.JurisdictionName</span>
+                                <span class="tax-jur-code" style="margin-left:.5rem;color:var(--color-text-secondary);font-size:.75rem;">(@jCode)</span>
+                            </div>
+                            @if (saved)
+                            {
+                                <span class="status-badge status-active" style="font-size:.7rem;">On file</span>
+                            }
+                            else
+                            {
+                                <span class="status-badge" style="font-size:.7rem;background:#f3f4f6;color:#6b7280;">No form</span>
+                            }
+                            @if (jur.PendingEffectiveDate.HasValue)
+                            {
+                                <span class="status-badge status-pending" style="font-size:.7rem;">
+                                    Pending — Effective @jur.PendingEffectiveDate.Value.ToString("MMM d, yyyy")
+                                </span>
+                            }
+                        </div>
+                        <span style="color:var(--color-text-secondary)">@(_expanded[jCode] ? "▲" : "▼")</span>
+                    </div>
+
+                    @if (_expanded[jCode])
+                    {
+                        <div style="margin-top:1rem;border-top:1px solid var(--color-border);padding-top:1rem;">
+
+                            @* Current submission summary *@
+                            @if (saved && !edit)
+                            {
+                                <div class="form-grid form-grid-3" style="margin-bottom:1rem;">
+                                    <div>
+                                        <span class="form-label">Form Type</span>
+                                        <p class="form-value">@profile!.FormTypeCode</p>
+                                    </div>
+                                    <div>
+                                        <span class="form-label">Effective From</span>
+                                        <p class="form-value">@profile.EffectiveFrom.ToString("yyyy-MM-dd")</p>
+                                    </div>
+                                    <div>
+                                        <span class="form-label">Exempt</span>
+                                        <p class="form-value">@(profile.ExemptFlag ? "Yes" : "No")</p>
+                                    </div>
+                                    @if (profile.FilingStatusCode is not null)
+                                    {
+                                        <div>
+                                            <span class="form-label">Filing Status</span>
+                                            <p class="form-value">@profile.FilingStatusCode</p>
+                                        </div>
+                                    }
+                                    @if (profile.AllowanceCount > 0)
+                                    {
+                                        <div>
+                                            <span class="form-label">Allowances</span>
+                                            <p class="form-value">@profile.AllowanceCount</p>
+                                        </div>
+                                    }
+                                    @if (profile.AdditionalWithholding > 0)
+                                    {
+                                        <div>
+                                            <span class="form-label">Extra Withholding</span>
+                                            <p class="form-value">@profile.AdditionalWithholding.ToString("N2")</p>
+                                        </div>
+                                    }
+                                    @if (profile.CreditsAmount > 0)
+                                    {
+                                        <div>
+                                            <span class="form-label">Credits (Step 3)</span>
+                                            <p class="form-value">@profile.CreditsAmount.ToString("N2")</p>
+                                        </div>
+                                    }
+                                    @if (profile.OtherIncomeAmount > 0)
+                                    {
+                                        <div>
+                                            <span class="form-label">Other Income (4a)</span>
+                                            <p class="form-value">@profile.OtherIncomeAmount.ToString("N2")</p>
+                                        </div>
+                                    }
+                                    @if (profile.DeductionsAmount > 0)
+                                    {
+                                        <div>
+                                            <span class="form-label">Deductions (4b)</span>
+                                            <p class="form-value">@profile.DeductionsAmount.ToString("N2")</p>
+                                        </div>
+                                    }
+                                    @if (profile.TotalClaimAmount.HasValue)
+                                    {
+                                        <div>
+                                            <span class="form-label">Total Claim Amount</span>
+                                            <p class="form-value">@profile.TotalClaimAmount!.Value.ToString("N2")</p>
+                                        </div>
+                                    }
+                                    @if (profile.ClaimCode.HasValue)
+                                    {
+                                        <div>
+                                            <span class="form-label">Claim Code</span>
+                                            <p class="form-value">@profile.ClaimCode</p>
+                                        </div>
+                                    }
+                                    @if (profile.AdditionalTaxAmount > 0)
+                                    {
+                                        <div>
+                                            <span class="form-label">Additional Tax / Period</span>
+                                            <p class="form-value">@profile.AdditionalTaxAmount.ToString("N2")</p>
+                                        </div>
+                                    }
+                                </div>
+                                <button class="btn-secondary" @onclick="() => EnterEditMode(jCode, profile!)">Edit / New Election</button>
+                            }
+
+                            @* Edit form *@
+                            @if (edit || !saved)
+                            {
+                                <div>
+                                    @if (jCode == "BB")
+                                    {
+                                        <p class="form-section-label">Barbados — Personal allowance and NIS rates are employer-managed. Only the exemption flag is employee-elected.</p>
+                                    }
+
+                                    @* Effective Date *@
+                                    <div class="form-grid form-grid-3" style="margin-bottom:1rem;">
+                                        <div class="form-field">
+                                            <label class="form-label">Effective From <span style="color:var(--color-danger)">*</span></label>
+                                            <input type="date" class="form-control"
+                                                   value="@_effectiveDates[jCode].ToString("yyyy-MM-dd")"
+                                                   @onchange="e => OnEffectiveDateChanged(jCode, e)" />
+                                        </div>
+
+                                        @* W-4 legacy toggle (US-FED only) *@
+                                        @if (jCode == "US-FED")
+                                        {
+                                            <div class="form-field" style="display:flex;align-items:flex-end;padding-bottom:6px;">
+                                                <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;">
+                                                    <input type="checkbox" @bind="form.IsLegacyForm" />
+                                                    <span class="form-label" style="margin:0;">Pre-2020 W-4 (legacy allowances format)</span>
+                                                </label>
+                                            </div>
+                                        }
+
+                                        @* Exempt flag *@
+                                        <div class="form-field" style="display:flex;align-items:flex-end;padding-bottom:6px;">
+                                            <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;">
+                                                <input type="checkbox" @bind="form.ExemptFlag" />
+                                                <span class="form-label" style="margin:0;">Exempt from withholding</span>
+                                            </label>
+                                        </div>
+                                    </div>
+
+                                    @* Filing status — US jurisdictions only *@
+                                    @if (jCode != "BB" && jCode != "CA-FED" && filingStatuses.Count > 0)
+                                    {
+                                        <div class="form-grid form-grid-3" style="margin-bottom:1rem;">
+                                            <div class="form-field">
+                                                <label class="form-label">Filing Status <span style="color:var(--color-danger)">*</span></label>
+                                                <select class="form-control" @bind="form.FilingStatusCode"
+                                                        @bind:after="() => _saveErrors[jCode] = null">
+                                                    <option value="">— select —</option>
+                                                    @foreach (var fs2 in filingStatuses)
+                                                    {
+                                                        <option value="@fs2.FilingStatusCode">@fs2.FilingStatusName</option>
+                                                    }
+                                                </select>
+                                            </div>
+                                        </div>
+                                    }
+
+                                    @* Legacy W-4 / state forms — allowance-based *@
+                                    @if (IsAllowanceBased(jCode, form))
+                                    {
+                                        <div class="form-grid form-grid-3" style="margin-bottom:1rem;">
+                                            <div class="form-field">
+                                                <label class="form-label">Allowances</label>
+                                                <input type="number" class="form-control" min="0"
+                                                       @bind="form.AllowanceCount" />
+                                            </div>
+                                            <div class="form-field">
+                                                <label class="form-label">Additional Withholding / Period</label>
+                                                <input type="number" class="form-control" min="0" step="0.01"
+                                                       @bind="form.AdditionalWithholding" />
+                                            </div>
+                                        </div>
+                                    }
+
+                                    @* W-4 2020+ specific fields *@
+                                    @if (jCode == "US-FED" && !form.IsLegacyForm)
+                                    {
+                                        <div class="form-grid form-grid-3" style="margin-bottom:1rem;">
+                                            <div class="form-field">
+                                                <label class="form-label">Step 3 — Child & Other Credits ($)</label>
+                                                <input type="number" class="form-control" min="0" step="0.01"
+                                                       @bind="form.CreditsAmount" />
+                                            </div>
+                                            <div class="form-field">
+                                                <label class="form-label">Step 4a — Other Income ($)</label>
+                                                <input type="number" class="form-control" min="0" step="0.01"
+                                                       @bind="form.OtherIncomeAmount" />
+                                            </div>
+                                            <div class="form-field">
+                                                <label class="form-label">Step 4b — Deductions ($)</label>
+                                                <input type="number" class="form-control" min="0" step="0.01"
+                                                       @bind="form.DeductionsAmount" />
+                                            </div>
+                                            <div class="form-field">
+                                                <label class="form-label">Step 4c — Extra Withholding / Period ($)</label>
+                                                <input type="number" class="form-control" min="0" step="0.01"
+                                                       @bind="form.AdditionalWithholding" />
+                                            </div>
+                                        </div>
+                                    }
+
+                                    @* TD1 — Canada Federal *@
+                                    @if (jCode == "CA-FED")
+                                    {
+                                        <p class="form-section-label" style="margin-bottom:.5rem;">Provide either a claim code (1–10) or a custom total claim amount.</p>
+                                        <div class="form-grid form-grid-3" style="margin-bottom:1rem;">
+                                            <div class="form-field">
+                                                <label class="form-label">Claim Code (1–10)</label>
+                                                <input type="number" class="form-control" min="1" max="10"
+                                                       @bind="form.ClaimCode"
+                                                       @onfocus="() => { form.TotalClaimAmount = null; }" />
+                                            </div>
+                                            <div class="form-field">
+                                                <label class="form-label">— OR — Total Claim Amount ($)</label>
+                                                <input type="number" class="form-control" min="0" step="0.01"
+                                                       @bind="form.TotalClaimAmount"
+                                                       @onfocus="() => { form.ClaimCode = null; }" />
+                                            </div>
+                                            <div class="form-field">
+                                                <label class="form-label">Additional Tax / Period ($)</label>
+                                                <input type="number" class="form-control" min="0" step="0.01"
+                                                       @bind="form.AdditionalTaxAmount" />
+                                            </div>
+                                        </div>
+                                    }
+
+                                    @* Action buttons *@
+                                    <div style="display:flex;gap:.75rem;margin-top:1rem;">
+                                        <button class="btn-primary"
+                                                disabled="@_saving[jCode]"
+                                                @onclick="() => SaveProfileAsync(jCode)">
+                                            @(_saving[jCode] ? "Saving…" : "Save Election")
+                                        </button>
+                                        @if (edit)
+                                        {
+                                            <button class="btn-secondary" @onclick="() => CancelEdit(jCode)">Cancel</button>
+                                        }
+                                    </div>
+
+                                    @if (_saveErrors.TryGetValue(jCode, out var err) && err is not null)
+                                    {
+                                        <p class="form-error" style="margin-top:.5rem;color:var(--color-danger);font-size:.8rem;">@err</p>
+                                    }
+                                    @if (_saveSuccess.TryGetValue(jCode, out var ok) && ok)
+                                    {
+                                        <p style="margin-top:.5rem;color:var(--color-success,green);font-size:.8rem;">Saved successfully.</p>
+                                    }
+                                </div>
+                            }
+
+                        </div>
+                    }
+                </div>
+            }
+        }
+    }
+    else
+    {
+        <div class="panel-card">
+            <p style="color:var(--color-text-secondary);font-style:italic;">Select an employee above to view and manage their tax withholding elections.</p>
+        </div>
+    }
+
+</div>
+
+@code {
+    // ── State ────────────────────────────────────────────────────
+    private List<EmploymentListItem>               _allEmployees      = [];
+    private List<EmploymentListItem>               _filteredEmployees = [];
+    private string                                 _searchText        = string.Empty;
+    private string                                 _selectedEmployeeName = string.Empty;
+    private Guid                                   _selectedEmploymentId = Guid.Empty;
+    private bool                                   _loading           = false;
+
+    // ── Not-ready worklist ───────────────────────────────────────
+    private IReadOnlyList<MissingElectionRow>      _notReady          = [];
+    private long                                   _notReadyTotal     = 0;
+    private int                                    _notReadyPage      = 1;
+    private const int                              NotReadyPageSize   = 10;
+
+    private IReadOnlyList<EmployeeJurisdictionRow>         _jurisdictions  = [];
+    private Dictionary<string, TaxProfileRow?>            _profiles       = [];
+    private Dictionary<string, IReadOnlyList<TaxFilingStatusRow>> _filingStatuses = [];
+    private Dictionary<string, TaxProfileSaveModel>       _forms          = [];
+    private Dictionary<string, bool>                      _editMode       = [];
+    private Dictionary<string, bool>                      _expanded       = [];
+    private Dictionary<string, DateOnly>                  _effectiveDates = [];
+    private Dictionary<string, bool>                      _saving         = [];
+    private Dictionary<string, string?>                   _saveErrors     = [];
+    private Dictionary<string, bool>                      _saveSuccess    = [];
+
+    // ── Lifecycle ────────────────────────────────────────────────
+    protected override async Task OnInitializedAsync()
+    {
+        SessionState.OnChanged += HandleEntityChanged;
+
+        await ReloadJurisdictionsAsync();
+        InitJurisdictionState();
+        await LoadEmployeesAsync();
+        await LoadNotReadyAsync();
+    }
+
+    private void HandleEntityChanged()
+    {
+        _ = InvokeAsync(async () =>
+        {
+            _selectedEmploymentId = Guid.Empty;
+            _searchText           = string.Empty;
+            _notReadyPage         = 1;
+            await ReloadJurisdictionsAsync();
+            InitJurisdictionState();
+            await LoadEmployeesAsync();
+            await LoadNotReadyAsync();
+            StateHasChanged();
+        });
+    }
+
+    private async Task LoadNotReadyAsync()
+    {
+        if (!SessionState.HasEntity || !SessionState.SelectedLegalEntityId.HasValue)
+        {
+            _notReady      = [];
+            _notReadyTotal = 0;
+            return;
+        }
+        var asOf = DateOnly.FromDateTime(TemporalContext.GetOperativeDate());
+        var rows = await TaxRepo.GetEmployeesMissingElectionsAsync(
+            SessionState.SelectedLegalEntityId.Value, asOf, _notReadyPage, NotReadyPageSize);
+        _notReady      = rows;
+        _notReadyTotal = rows.Count > 0 ? rows[0].TotalCount : 0;
+    }
+
+    private async Task NotReadyPageChanged(int newPage)
+    {
+        _notReadyPage = newPage;
+        await LoadNotReadyAsync();
+    }
+
+    private async Task ReloadJurisdictionsAsync()
+    {
+        if (_selectedEmploymentId != Guid.Empty
+            && SessionState.HasEntity
+            && SessionState.SelectedLegalEntityId.HasValue)
+        {
+            var operativeDate = DateOnly.FromDateTime(TemporalContext.GetOperativeDate());
+            _jurisdictions = await TaxRepo.GetJurisdictionsByEmployeeAsync(
+                SessionState.SelectedLegalEntityId.Value,
+                _selectedEmploymentId,
+                operativeDate);
+        }
+        else if (SessionState.HasEntity && SessionState.SelectedLegalEntityId.HasValue)
+        {
+            var rows = await TaxRepo.GetJurisdictionsByLegalEntityAsync(SessionState.SelectedLegalEntityId.Value);
+            _jurisdictions = rows.Select(r => new EmployeeJurisdictionRow(r.JurisdictionId, r.JurisdictionCode, r.JurisdictionName, r.CountryCode, null)).ToList();
+        }
+        else
+        {
+            var rows = await TaxRepo.GetAllJurisdictionsAsync();
+            _jurisdictions = rows.Select(r => new EmployeeJurisdictionRow(r.JurisdictionId, r.JurisdictionCode, r.JurisdictionName, r.CountryCode, null)).ToList();
+        }
+
+        _filingStatuses.Clear();
+        foreach (var jur in _jurisdictions)
+        {
+            _filingStatuses[jur.JurisdictionCode] =
+                await TaxRepo.GetFilingStatusesAsync(jur.JurisdictionCode);
+        }
+    }
+
+    private async Task LoadEmployeesAsync()
+    {
+        var entityId = SessionState.HasEntity ? SessionState.SelectedLegalEntityId : (Guid?)null;
+        _allEmployees      = (await EmploymentService.GetAllActiveListAsync(entityId)).ToList();
+        _filteredEmployees = _allEmployees;
+        FilterEmployees();
+    }
+
+    public void Dispose() => SessionState.OnChanged -= HandleEntityChanged;
+
+    private void InitJurisdictionState()
+    {
+        var today = DateOnly.FromDateTime(TemporalContext.GetOperativeDate());
+        _profiles.Clear();
+        _forms.Clear();
+        _editMode.Clear();
+        _expanded.Clear();
+        _effectiveDates.Clear();
+        _saving.Clear();
+        _saveErrors.Clear();
+        _saveSuccess.Clear();
+        foreach (var jur in _jurisdictions)
+        {
+            var code = jur.JurisdictionCode;
+            _profiles[code]       = null;
+            _forms[code]          = new TaxProfileSaveModel();
+            _editMode[code]       = false;
+            _expanded[code]       = false;
+            _effectiveDates[code] = jur.PendingEffectiveDate ?? today;
+            _saving[code]         = false;
+            _saveErrors[code]     = null;
+            _saveSuccess[code]    = false;
+        }
+    }
+
+    // ── Employee search ──────────────────────────────────────────
+    private void OnSearchChanged(ChangeEventArgs e)
+    {
+        _searchText = e.Value?.ToString() ?? string.Empty;
+        FilterEmployees();
+    }
+
+    private void FilterEmployees()
+    {
+        if (string.IsNullOrWhiteSpace(_searchText))
+        {
+            _filteredEmployees = _allEmployees;
+            return;
+        }
+        _filteredEmployees = _allEmployees
+            .Where(e =>
+                e.LegalFirstName.Contains(_searchText, StringComparison.OrdinalIgnoreCase) ||
+                e.LegalLastName.Contains(_searchText, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+    }
+
+    private async Task SelectNotReadyEmployee(MissingElectionRow row)
+    {
+        var emp = _allEmployees.FirstOrDefault(e => e.EmploymentId == row.EmploymentId);
+        if (emp is not null) await SelectEmployee(emp);
+    }
+
+    private async Task SelectEmployee(EmploymentListItem emp)
+    {
+        _selectedEmploymentId = emp.EmploymentId;
+        _selectedEmployeeName = $"{emp.LegalLastName}, {emp.LegalFirstName}";
+        _searchText           = string.Empty;
+        _filteredEmployees    = _allEmployees;
+        await ReloadJurisdictionsAsync();
+        InitJurisdictionState();
+        await LoadProfilesAsync();
+    }
+
+    private async Task OnDropdownChanged(ChangeEventArgs e)
+    {
+        if (!Guid.TryParse(e.Value?.ToString(), out var id) || id == Guid.Empty)
+        {
+            await ClearEmployee();
+            return;
+        }
+        var emp = _allEmployees.FirstOrDefault(x => x.EmploymentId == id);
+        if (emp is not null) await SelectEmployee(emp);
+    }
+
+    private async Task ClearEmployee()
+    {
+        _selectedEmploymentId = Guid.Empty;
+        _selectedEmployeeName = string.Empty;
+        _searchText           = string.Empty;
+        _filteredEmployees    = _allEmployees;
+        await ReloadJurisdictionsAsync();
+        InitJurisdictionState();
+    }
+
+    private async Task LoadProfilesAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+
+        var asOf = DateOnly.FromDateTime(TemporalContext.GetOperativeDate());
+        foreach (var jur in _jurisdictions)
+        {
+            var code    = jur.JurisdictionCode;
+            var profile = await TaxRepo.GetActiveProfileAsync(_selectedEmploymentId, code, asOf);
+            _profiles[code]    = profile;
+            _editMode[code]    = false;
+            _saveErrors[code]  = null;
+            _saveSuccess[code] = false;
+            // Pre-populate form from existing profile
+            _forms[code] = profile is null ? new TaxProfileSaveModel() : ProfileToForm(profile);
+        }
+
+        _loading = false;
+    }
+
+    // ── UI helpers ───────────────────────────────────────────────
+    private void ToggleExpand(string code) => _expanded[code] = !_expanded[code];
+
+    private void EnterEditMode(string code, TaxProfileRow profile)
+    {
+        _forms[code]       = ProfileToForm(profile);
+        _editMode[code]    = true;
+        _saveErrors[code]  = null;
+        _saveSuccess[code] = false;
+    }
+
+    private void CancelEdit(string code)
+    {
+        _editMode[code]    = false;
+        _saveErrors[code]  = null;
+        _saveSuccess[code] = false;
+        if (_profiles.TryGetValue(code, out var p) && p is not null)
+            _forms[code] = ProfileToForm(p);
+    }
+
+    private void OnEffectiveDateChanged(string code, ChangeEventArgs e)
+    {
+        if (DateOnly.TryParse(e.Value?.ToString(), out var d))
+            _effectiveDates[code] = d;
+    }
+
+    private static bool IsAllowanceBased(string jurisdictionCode, TaxProfileSaveModel form) =>
+        jurisdictionCode switch
+        {
+            "US-GA" or "US-NY" or "US-CA" => true,
+            "US-FED"                       => form.IsLegacyForm,
+            _                              => false
+        };
+
+    private static string FlagEmoji(string countryCode) => countryCode switch
+    {
+        "US" => "🇺🇸",
+        "CA" => "🇨🇦",
+        "BB" => "🇧🇧",
+        _    => "🌍"
+    };
+
+    private static TaxProfileSaveModel ProfileToForm(TaxProfileRow p) => new()
+    {
+        ExemptFlag            = p.ExemptFlag,
+        IsLegacyForm          = p.IsLegacyForm,
+        FilingStatusCode      = p.FilingStatusCode,
+        AllowanceCount        = p.AllowanceCount,
+        AdditionalWithholding = p.AdditionalWithholding,
+        OtherIncomeAmount     = p.OtherIncomeAmount,
+        DeductionsAmount      = p.DeductionsAmount,
+        CreditsAmount         = p.CreditsAmount,
+        ClaimCode             = p.ClaimCode,
+        TotalClaimAmount      = p.TotalClaimAmount,
+        AdditionalTaxAmount   = p.AdditionalTaxAmount
+    };
+
+    // ── Save ─────────────────────────────────────────────────────
+    private async Task SaveProfileAsync(string jurisdictionCode)
+    {
+        _saving[jurisdictionCode]      = true;
+        _saveErrors[jurisdictionCode]  = null;
+        _saveSuccess[jurisdictionCode] = false;
+        StateHasChanged();
+
+        try
+        {
+            var authState = await AuthState.GetAuthenticationStateAsync();
+            var userName  = authState.User.Identity?.Name ?? "system";
+            var form      = _forms[jurisdictionCode];
+            var effFrom   = _effectiveDates[jurisdictionCode];
+
+            // Filing status required for all US jurisdictions
+            var hasFilingStatuses = _filingStatuses.TryGetValue(jurisdictionCode, out var fsList) && fsList.Count > 0;
+            if (hasFilingStatuses && string.IsNullOrEmpty(form.FilingStatusCode))
+            {
+                _saveErrors[jurisdictionCode] = "Filing status is required.";
+                return;
+            }
+
+            // Enforce TD1 XOR rule
+            if (jurisdictionCode == "CA-FED" && form.ClaimCode.HasValue && form.TotalClaimAmount.HasValue)
+            {
+                _saveErrors[jurisdictionCode] = "Provide either a claim code or a total claim amount, not both.";
+                return;
+            }
+
+            await TaxRepo.SaveProfileAsync(
+                _selectedEmploymentId, jurisdictionCode, form, userName, effFrom);
+
+            await AuditService.LogAsync(new AuditEventRecord(
+                EventType:     "TAX_PROFILE_SAVED",
+                EntityType:    "employee_tax_form_submission",
+                EntityId:      _selectedEmploymentId,
+                ModuleName:    "Tax",
+                ChangeSummary: $"Tax election saved for jurisdiction {jurisdictionCode} effective {effFrom:yyyy-MM-dd}"));
+
+            // Reload
+            var asOf = DateOnly.FromDateTime(TemporalContext.GetOperativeDate());
+            _profiles[jurisdictionCode] = await TaxRepo.GetActiveProfileAsync(
+                _selectedEmploymentId, jurisdictionCode, asOf);
+            _editMode[jurisdictionCode]    = false;
+            _saveSuccess[jurisdictionCode] = true;
+            await LoadNotReadyAsync();
+        }
+        catch (Exception ex)
+        {
+            _saveErrors[jurisdictionCode] = $"Save failed: {ex.Message}";
+        }
+        finally
+        {
+            _saving[jurisdictionCode] = false;
+        }
+    }
+}
+
+<style>
+    .tax-jurisdiction-card { border: 1px solid var(--color-border, #e5e7eb); }
+    .status-pending        { background: #fef3c7; color: #92400e; }
+
+    .not-ready-row {
+        cursor: pointer;
+        border-bottom: 1px solid var(--color-border, #f3f4f6);
+        transition: background .1s;
+    }
+    .not-ready-row:hover          { background: #f9fafb; }
+    .not-ready-row-selected       { background: #eff6ff; }
+    .not-ready-row-selected:hover { background: #dbeafe; }
+
+    .not-ready-group-header {
+        padding: .5rem .5rem .25rem;
+        font-size: .7rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .05em;
+        color: var(--color-text-secondary, #6b7280);
+        background: #f9fafb;
+        border-top: 1px solid var(--color-border, #e5e7eb);
+    }
+    .tax-jur-header        { padding: .5rem 0; user-select: none; }
+    .tax-jur-name          { font-weight: 600; font-size: .9rem; }
+    .country-flag          { font-size: 1.2rem; }
+    .form-value            { margin: .25rem 0 0; font-size: .875rem; color: var(--color-text-primary, #111827); }
+    .form-section-label    { font-size: .8rem; color: var(--color-text-secondary, #6b7280); font-style: italic; margin-bottom: .75rem; }
+    .loading-text          { color: var(--color-text-secondary, #6b7280); font-style: italic; }
+    .page-subtitle         { color: var(--color-text-secondary, #6b7280); font-size: .875rem; margin-top: .25rem; }
+
+    .emp-results {
+        margin-top: .25rem;
+        border: 1px solid #d1d5db;
+        border-radius: var(--radius-md, 6px);
+        background: white;
+        max-height: 260px;
+        overflow-y: auto;
+    }
+
+    .emp-result-item {
+        padding: .5rem .75rem;
+        font-size: .875rem;
+        cursor: pointer;
+        color: var(--aw-navy, #1a2e44);
+        border-bottom: 1px solid #f3f4f6;
+    }
+
+    .emp-result-item:last-child { border-bottom: none; }
+    .emp-result-item:hover { background: #f3f4f6; }
+</style>

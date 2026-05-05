@@ -5,6 +5,7 @@ using AllWorkHRIS.Core.Audit;
 using AllWorkHRIS.Core.Data;
 using AllWorkHRIS.Core.Events;
 using AllWorkHRIS.Core.Lookups;
+using AllWorkHRIS.Core.Pipeline;
 using AllWorkHRIS.Core.Temporal;
 using AllWorkHRIS.Host.Hris.Commands;
 using AllWorkHRIS.Host.Hris.Repositories;
@@ -481,6 +482,8 @@ public sealed class PayrollGateTests : IDisposable
         builder.RegisterInstance((IAuditService)new NullAuditService()).As<IAuditService>().SingleInstance();
         builder.RegisterInstance((ITemporalContext)new SystemTemporalContext()).As<ITemporalContext>().SingleInstance();
         builder.RegisterInstance(NullLogger<CalculationEngine>.Instance).As<ILogger<CalculationEngine>>().SingleInstance();
+        builder.RegisterInstance(new NullPayrollPipelineService()).As<IPayrollPipelineService>().SingleInstance();
+        builder.RegisterInstance(new NullEmploymentJurisdictionLookup()).As<IEmploymentJurisdictionLookup>().SingleInstance();
 
         builder.RegisterType<PayrollRunRepository>()                  .As<IPayrollRunRepository>()                  .InstancePerLifetimeScope();
         builder.RegisterType<PayrollRunResultSetRepository>()         .As<IPayrollRunResultSetRepository>()         .InstancePerLifetimeScope();

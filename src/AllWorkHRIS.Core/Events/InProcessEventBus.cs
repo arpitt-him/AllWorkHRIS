@@ -20,6 +20,6 @@ public sealed class InProcessEventBus : IEventPublisher
                 await handler(payload);
 
         // No handlers registered = silent no-op.
-        // This is the correct and expected behaviour in HRIS-only deployments.
+        // This is the correct and expected behavior in HRIS-only deployments.
     }
 }

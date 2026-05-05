@@ -8,10 +8,10 @@
 @using AllWorkHRIS.Core.Lookups
 @using AllWorkHRIS.Module.Payroll.Domain.Calendar
 @using AllWorkHRIS.Module.Payroll.Repositories
-@using AllWorkHRIS.Host.Payroll.Services
+@using AllWorkHRIS.Host.Hris.Services
 @using AllWorkHRIS.Core.Temporal
 @inject IPayrollContextRepository   ContextRepo
-@inject IPayrollSessionState        SessionState
+@inject IHrisSessionState           SessionState
 @inject ILookupCache                LookupCache
 @inject AuthenticationStateProvider AuthState
 @inject NavigationManager           Nav

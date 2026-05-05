@@ -86,8 +86,8 @@ public sealed class PayrollModuleCompositionTests
         var module        = new PayrollModule();
         var contributions = module.GetMenuContributions().ToList();
 
-        // Six items: one parent + five children
-        Assert.Equal(6, contributions.Count);
+        // Seven items: one parent + six children
+        Assert.Equal(7, contributions.Count);
 
         // Parent — no href (it is a group header)
         Assert.Contains(contributions, c =>
@@ -117,6 +117,11 @@ public sealed class PayrollModuleCompositionTests
             c.Label == "Payroll Profiles" &&
             c.Href  == "/payroll/profiles" &&
             c.RequiredRole == "PayrollAdmin");
+
+        Assert.Contains(contributions, c =>
+            c.Label == "Tax Profiles" &&
+            c.Href  == "/payroll/tax-profiles" &&
+            c.RequiredRole == "PayrollAdmin,PayrollOperator");
     }
 
     // -------------------------------------------------------

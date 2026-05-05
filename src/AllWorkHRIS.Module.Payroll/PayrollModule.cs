@@ -2,7 +2,9 @@ using System.Composition;
 using System.Threading.Channels;
 using Autofac;
 using AllWorkHRIS.Core.Composition;
+using AllWorkHRIS.Core.Dashboard;
 using AllWorkHRIS.Core.Events;
+using AllWorkHRIS.Core.Navigation;
 using AllWorkHRIS.Module.Payroll.Domain.Events;
 using AllWorkHRIS.Module.Payroll.Jobs;
 using AllWorkHRIS.Module.Payroll.Repositories;
@@ -70,6 +72,16 @@ public sealed class PayrollModule : IPlatformModule
         builder.RegisterType<OnboardingBlockingTasksGateHandler>().SingleInstance();
         builder.RegisterType<OnboardingPlanGateHandler>().SingleInstance();
 
+        // Dashboard contributor
+        builder.RegisterType<PayrollDashboardContributor>()
+               .As<IDashboardContributor>()
+               .InstancePerLifetimeScope();
+
+        // Nav contributor
+        builder.RegisterType<PayrollNavContributor>()
+               .As<INavContributor>()
+               .SingleInstance();
+
         // HRIS event subscriptions — register and wire handlers after container build
         // This is called after the bus is resolved by the host; see Phase 4.3 notes
         builder.RegisterType<PayrollEventSubscriber>()
@@ -133,6 +145,15 @@ public sealed class PayrollModule : IPlatformModule
             Icon         = "PayrollIcon",
             SortOrder    = 5,
             RequiredRole = "PayrollAdmin",
+            ParentLabel  = "Payroll"
+        };
+        yield return new MenuContribution
+        {
+            Label        = "Tax Profiles",
+            Href         = "/payroll/tax-profiles",
+            Icon         = "PayrollIcon",
+            SortOrder    = 6,
+            RequiredRole = "PayrollAdmin,PayrollOperator",
             ParentLabel  = "Payroll"
         };
     }

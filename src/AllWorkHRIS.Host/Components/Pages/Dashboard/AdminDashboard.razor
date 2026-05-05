@@ -1,0 +1,147 @@
+@* AllWorkHRIS.Host/Components/Pages/Dashboard/AdminDashboard.razor *@
+@page "/admin"
+@attribute [Authorize(Roles = "SystemAdmin")]
+@rendermode InteractiveServer
+@using AllWorkHRIS.Host.Hris.Services
+@inject IOrgStructureService OrgService
+@inject NavigationManager    Nav
+
+<PageTitle>System Administration — AllWork HRIS</PageTitle>
+
+<div class="admin-dashboard">
+    <div class="admin-dashboard-header">
+        <h1 class="admin-dashboard-title">System Administration</h1>
+        <p class="admin-dashboard-sub">Platform-level configuration and management.</p>
+    </div>
+
+    <div class="admin-stat-grid">
+        <div class="admin-stat-card">
+            <div class="admin-stat-value">@_entityCount</div>
+            <div class="admin-stat-label">Legal Entities</div>
+        </div>
+    </div>
+
+    <div class="admin-quicklinks">
+        <h2 class="admin-section-title">Quick Links</h2>
+        <div class="admin-link-grid">
+            <a href="/config/legal-entities" class="admin-link-card">
+                <span class="admin-link-title">Legal Entities</span>
+                <span class="admin-link-sub">Manage registered entities</span>
+            </a>
+            <a href="/config/tax/reference" class="admin-link-card">
+                <span class="admin-link-title">Tax Rates &amp; Brackets</span>
+                <span class="admin-link-sub">View effective-dated rate schedule</span>
+            </a>
+            <a href="/config/tax/steps" class="admin-link-card">
+                <span class="admin-link-title">Calculation Steps</span>
+                <span class="admin-link-sub">Manage jurisdiction calculation pipeline</span>
+            </a>
+            <a href="/config/tax/review" class="admin-link-card">
+                <span class="admin-link-title">Tax Review</span>
+                <span class="admin-link-sub">Pending configuration changes</span>
+            </a>
+        </div>
+    </div>
+</div>
+
+@code {
+    private int _entityCount;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var entities  = await OrgService.GetLegalEntitiesAsync();
+        _entityCount  = entities.Count();
+    }
+}
+
+<style>
+    .admin-dashboard {
+        padding: var(--space-6) var(--space-8);
+        max-width: 960px;
+    }
+
+    .admin-dashboard-header {
+        margin-bottom: var(--space-6);
+    }
+
+    .admin-dashboard-title {
+        font-size: var(--font-size-xl);
+        font-weight: var(--font-weight-semibold);
+        color: var(--aw-navy);
+        margin: 0 0 var(--space-1) 0;
+    }
+
+    .admin-dashboard-sub {
+        font-size: var(--font-size-sm);
+        color: #6b7280;
+        margin: 0;
+    }
+
+    .admin-stat-grid {
+        display: flex;
+        gap: var(--space-4);
+        margin-bottom: var(--space-8);
+    }
+
+    .admin-stat-card {
+        background: #fff;
+        border: 1px solid #e5e7eb;
+        border-radius: var(--radius-lg);
+        padding: var(--space-4) var(--space-6);
+        text-align: center;
+        min-width: 120px;
+    }
+
+    .admin-stat-value {
+        font-size: 2rem;
+        font-weight: var(--font-weight-semibold);
+        color: var(--aw-navy);
+    }
+
+    .admin-stat-label {
+        font-size: var(--font-size-sm);
+        color: #6b7280;
+        margin-top: var(--space-1);
+    }
+
+    .admin-section-title {
+        font-size: var(--font-size-lg);
+        font-weight: var(--font-weight-semibold);
+        color: var(--aw-navy);
+        margin: 0 0 var(--space-4) 0;
+    }
+
+    .admin-link-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: var(--space-3);
+    }
+
+    .admin-link-card {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-1);
+        background: #fff;
+        border: 1px solid #e5e7eb;
+        border-radius: var(--radius-lg);
+        padding: var(--space-4);
+        text-decoration: none;
+        transition: box-shadow 0.15s ease, border-color 0.15s ease;
+    }
+
+    .admin-link-card:hover {
+        box-shadow: 0 2px 8px rgba(0,0,0,0.07);
+        border-color: var(--aw-blue);
+    }
+
+    .admin-link-title {
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-semibold);
+        color: var(--aw-navy);
+    }
+
+    .admin-link-sub {
+        font-size: 11px;
+        color: #9ca3af;
+    }
+</style>

@@ -43,9 +43,9 @@
     Items.Where(i => i.ParentLabel is null);
 
     private IEnumerable<MenuContribution> ChildrenOf(string parentLabel) =>
-        Items.Where(i => i.ParentLabel == parentLabel && IsAuthorised(i));
+        Items.Where(i => i.ParentLabel == parentLabel && IsAuthorized(i));
 
-    private bool IsAuthorised(MenuContribution item)
+    private bool IsAuthorized(MenuContribution item)
     {
         if (item.RequiredRole is null) return true;
         var required = item.RequiredRole.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);

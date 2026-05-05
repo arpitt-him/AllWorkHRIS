@@ -1,0 +1,856 @@
+@page "/benefits/elections"
+@layout BenefitsShell
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = "HrisAdmin,BenefitsAdmin,PayrollOperator")]
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.Security.Claims
+@using AllWorkHRIS.Host.Hris.Queries
+@using AllWorkHRIS.Host.Hris.Services
+@using AllWorkHRIS.Module.Benefits.Commands
+@using AllWorkHRIS.Module.Benefits.Domain.Codes
+@using AllWorkHRIS.Module.Benefits.Queries
+@using AllWorkHRIS.Module.Benefits.Repositories
+@using AllWorkHRIS.Module.Benefits.Services
+@inject IBenefitElectionService        ElectionService
+@inject IBenefitElectionRepository     ElectionRepo
+@inject IDeductionRepository           CodeRepo
+@inject IDeductionRateTableRepository  RateTableRepo
+@inject IEmploymentService             EmploymentService
+@inject AuthenticationStateProvider   AuthState
+
+<PageTitle>Benefit Elections — AllWork HRIS</PageTitle>
+
+<div class="page-container">
+
+    <div class="page-header">
+        <h2 class="page-title">Benefit Elections</h2>
+        <AuthorizeView Roles="HrisAdmin,BenefitsAdmin">
+            <Authorized>
+                <button class="btn btn-primary" @onclick="StartWizard">+ Add Election</button>
+            </Authorized>
+        </AuthorizeView>
+    </div>
+
+    @* ── Add Election Wizard ─────────────────────────────────────── *@
+    @if (_wizardStep > 0)
+    {
+        <div class="form-panel" style="margin-bottom:1.5rem;border:2px solid #2F4350;border-radius:10px;padding:1.5rem;">
+
+            @* Step indicator *@
+            <div style="display:flex;align-items:flex-start;gap:.375rem;margin-bottom:2rem;flex-wrap:wrap;max-width:40%;">
+                @foreach (var (label, num) in StepLabels)
+                {
+                    var done    = _wizardStep > num;
+                    var current = _wizardStep == num;
+                    <div style="display:flex;flex-direction:column;align-items:center;gap:.3rem;flex-shrink:0;">
+                        <div style="width:28px;height:28px;border-radius:50%;display:flex;align-items:center;
+                                    justify-content:center;font-size:.78rem;font-weight:700;flex-shrink:0;
+                                    background:@(done ? "#16a34a" : current ? "#2563eb" : "#e5e7eb");
+                                    color:@(done || current ? "#fff" : "#9ca3af");">
+                            @(done ? "✓" : num.ToString())
+                        </div>
+                        <span style="font-size:.72rem;white-space:nowrap;text-align:center;
+                                     font-weight:@(current ? "600" : "400");
+                                     color:@(current ? "inherit" : done ? "#374151" : "#9ca3af");">@label</span>
+                    </div>
+                    @if (num < 5)
+                    {
+                        <div style="flex:1;min-width:.75rem;height:2px;align-self:flex-start;margin-top:13px;
+                                    background:@(done ? "#16a34a" : "#e5e7eb");"></div>
+                    }
+                }
+            </div>
+
+            @* ── Step 1: Employee ───────────────────────────────────── *@
+            @if (_wizardStep == 1)
+            {
+                <h3 style="margin-bottom:.25rem;">Who is this election for?</h3>
+                <p style="color:#6b7280;font-size:.9rem;margin-bottom:1.25rem;">
+                    Search by name or employee number and select from the results.
+                </p>
+                <div style="max-width:540px;">
+                    <div class="form-group">
+                        <input class="form-input" value="@_empSearch"
+                               @oninput="OnEmpSearchInput"
+                               placeholder="e.g. Smith or EMP-0042"
+                               autocomplete="off" style="font-size:1rem;" />
+                    </div>
+                    @if (_filteredEmployees.Count > 0)
+                    {
+                        <select class="form-select" size="6" style="margin-top:.25rem;"
+                                @onchange="OnEmpSelected">
+                            @foreach (var emp in _filteredEmployees)
+                            {
+                                <option value="@emp.EmploymentId">
+                                    @emp.LegalLastName, @emp.LegalFirstName — @emp.EmployeeNumber
+                                </option>
+                            }
+                        </select>
+                    }
+                    @if (_selectedEmployee is not null)
+                    {
+                        <div style="margin-top:.75rem;padding:.75rem 1rem;background:#f0fdf4;
+                                    border:1px solid #bbf7d0;border-radius:6px;display:flex;
+                                    align-items:center;gap:.5rem;">
+                            <span style="color:#16a34a;font-size:1.1rem;">✓</span>
+                            <span>
+                                <strong>@_selectedEmployee.LegalLastName, @_selectedEmployee.LegalFirstName</strong>
+                                <samp style="font-size:.85rem;margin-left:.4rem;">@_selectedEmployee.EmployeeNumber</samp>
+                            </span>
+                        </div>
+                    }
+                </div>
+            }
+
+            @* ── Step 2: Benefit selection ──────────────────────────── *@
+            @if (_wizardStep == 2)
+            {
+                <h3 style="margin-bottom:.25rem;">Which benefit are you enrolling?</h3>
+                <p style="color:#6b7280;font-size:.9rem;margin-bottom:1.25rem;">
+                    Select a deduction from the plan. Each card shows how the amount is calculated.
+                </p>
+                @if (_activeCodes.Count == 0)
+                {
+                    <p class="empty-state">No active deduction codes are configured. Add codes on the Deduction Codes page first.</p>
+                }
+                else
+                {
+                    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:.875rem;margin-bottom:.5rem;">
+                        @foreach (var d in _activeCodes)
+                        {
+                            var sel = _selectedDeduction?.DeductionId == d.DeductionId;
+                            <div @onclick="() => SelectDeduction(d)"
+                                 style="border:2px solid @(sel ? "#2563eb" : "#e5e7eb");border-radius:8px;
+                                        padding:.875rem 1rem;cursor:pointer;
+                                        background:@(sel ? "rgba(37,99,235,.04)" : "#fff");
+                                        transition:border-color .12s,background .12s;">
+                                <div style="display:flex;justify-content:space-between;
+                                            align-items:flex-start;margin-bottom:.4rem;gap:.5rem;">
+                                    <samp style="font-size:1rem;font-weight:700;">@d.Code</samp>
+                                    <div style="display:flex;gap:.25rem;flex-wrap:wrap;justify-content:flex-end;">
+                                        <span class="badge @(d.TaxTreatment == "PRE_TAX" ? "badge-blue" : "badge-orange")" style="font-size:.7rem;">
+                                            @d.TaxTreatment
+                                        </span>
+                                        <span class="badge badge-gray" style="font-size:.7rem;">@d.CalculationMode</span>
+                                    </div>
+                                </div>
+                                <div style="font-weight:500;margin-bottom:.375rem;">@d.Description</div>
+                                <div style="font-size:.82rem;color:#6b7280;line-height:1.4;">
+                                    @GetModeDescription(d.CalculationMode)
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            }
+
+            @* ── Step 3: Contribution ───────────────────────────────── *@
+            @if (_wizardStep == 3 && _selectedDeduction is not null)
+            {
+                var mode = _selectedDeduction.CalculationMode;
+                <h3 style="margin-bottom:.25rem;">How much will @_selectedEmployee!.LegalFirstName contribute?</h3>
+                <p style="color:#6b7280;font-size:.9rem;margin-bottom:1.5rem;">
+                    <samp>@_selectedDeduction.Code</samp> — @_selectedDeduction.Description
+                </p>
+
+                @if (mode is CalculationMode.PctPreTax or CalculationMode.PctPostTax)
+                {
+                    <div style="max-width:420px;">
+                        <div style="background:@(mode == CalculationMode.PctPreTax ? "#eff6ff" : "#fdf4ff");
+                                    border:1px solid @(mode == CalculationMode.PctPreTax ? "#bfdbfe" : "#e9d5ff");
+                                    border-radius:8px;padding:1rem;margin-bottom:1.5rem;">
+                            <strong>@(mode == CalculationMode.PctPreTax ? "Pre-Tax Contribution" : "After-Tax (Roth) Contribution")</strong>
+                            <p style="margin:.4rem 0 0;font-size:.88rem;line-height:1.5;">
+                                @GetModeDescription(mode)
+                            </p>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Contribution % <span class="required">*</span></label>
+                            <div style="position:relative;">
+                                <input class="form-input" type="number" step="0.001" min="0.001" max="100"
+                                       @bind="_addContributionPct" placeholder="e.g. 6"
+                                       style="padding-right:2.25rem;" />
+                                <span style="position:absolute;right:1rem;top:50%;transform:translateY(-50%);
+                                             font-size:1.2rem;color:#6b7280;pointer-events:none;">%</span>
+                            </div>
+                            <small class="hint-text">
+                                Enter as a percentage of gross pay — e.g. <strong>6</strong> deducts 6% each period.
+                                @if (_addContributionPct.HasValue && _addContributionPct.Value > 0)
+                                {
+                                    <span> At a $3,000 paycheck that would be <strong>$@((_addContributionPct.Value / 100m * 3000m).ToString("N2"))</strong>.</span>
+                                }
+                            </small>
+                        </div>
+                    </div>
+                }
+                else if (mode == CalculationMode.CoverageBased)
+                {
+                    <p style="font-size:.9rem;color:#374151;margin-bottom:1rem;">
+                        Select the coverage level that applies to this employee.
+                        @if (_coverageRateEntries.Count == 0)
+                        {
+                            <span style="color:#d97706;"> No rate table has been configured for this plan — rates shown as TBD.</span>
+                        }
+                    </p>
+                    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(185px,1fr));gap:.875rem;">
+                        @foreach (var (tierCode, tierLabel) in CoverageTiers)
+                        {
+                            var sel   = _addCoverageTier == tierCode;
+                            var entry = _coverageRateEntries.FirstOrDefault(e => e.TierCode == tierCode);
+                            <div @onclick="() => _addCoverageTier = tierCode"
+                                 style="border:2px solid @(sel ? "#2563eb" : "#e5e7eb");border-radius:8px;
+                                        padding:1rem;cursor:pointer;text-align:center;
+                                        background:@(sel ? "rgba(37,99,235,.04)" : "#fff");
+                                        transition:border-color .12s,background .12s;">
+                                <div style="font-weight:600;margin-bottom:.5rem;">@tierLabel</div>
+                                @if (entry is not null)
+                                {
+                                    <div style="font-size:1.3rem;font-weight:700;color:#2563eb;">
+                                        $@entry.EmployeeRate.ToString("N2")
+                                    </div>
+                                    <div style="font-size:.78rem;color:#6b7280;">employee / period</div>
+                                    @if (entry.EmployerRate.HasValue && entry.EmployerRate.Value > 0)
+                                    {
+                                        <div style="font-size:.78rem;color:#6b7280;margin-top:.2rem;">
+                                            + $@entry.EmployerRate.Value.ToString("N2") employer
+                                        </div>
+                                    }
+                                }
+                                else
+                                {
+                                    <div style="font-size:.85rem;color:#9ca3af;">Rate TBD</div>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+                else
+                {
+                    <div style="max-width:420px;">
+                        <p style="font-size:.9rem;color:#6b7280;margin-bottom:1.25rem;">
+                            @GetContributionHint(mode)
+                        </p>
+                        <div class="form-group">
+                            <label class="form-label">@GetAmountLabel(mode)</label>
+                            <input class="form-input" type="number" step="0.01" min="0"
+                                   @bind="_addEmployeeAmount" placeholder="0.00" />
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">
+                                Employer Contribution
+                                <span style="font-size:.8rem;color:#6b7280;">(optional)</span>
+                            </label>
+                            <input class="form-input" type="number" step="0.01" min="0"
+                                   @bind="_addEmployerAmount" placeholder="0.00" />
+                            <small class="hint-text">
+                                A fixed employer dollar contribution each period — separate from any percentage-match rule
+                                configured on the deduction code.
+                            </small>
+                        </div>
+                    </div>
+                }
+            }
+
+            @* ── Step 4: Effective dates ────────────────────────────── *@
+            @if (_wizardStep == 4)
+            {
+                <h3 style="margin-bottom:.25rem;">When does this election take effect?</h3>
+                <p style="color:#6b7280;font-size:.9rem;margin-bottom:1.5rem;">
+                    Set the date range for this election. An open-ended election continues until it is
+                    amended, corrected, or terminated.
+                </p>
+                <div style="max-width:400px;">
+                    <div class="form-group">
+                        <label class="form-label">Effective Start <span class="required">*</span></label>
+                        <input class="form-input" type="date" @bind="_addStart" />
+                        <small class="hint-text">
+                            @if (_addStart.HasValue && _addStart.Value > DateOnly.FromDateTime(DateTime.Today))
+                            {
+                                <span>
+                                    This election will be in <strong>PENDING</strong> status until
+                                    <strong>@_addStart.Value.ToString("MMM d, yyyy")</strong>.
+                                    It will not deduct until that date passes.
+                                </span>
+                            }
+                            else
+                            {
+                                <span>
+                                    A start date of today or earlier makes the election
+                                    <strong>ACTIVE</strong> immediately and deductions begin on the
+                                    next qualifying payroll run.
+                                </span>
+                            }
+                        </small>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">
+                            Effective End
+                            <span style="font-size:.8rem;color:#6b7280;">(optional)</span>
+                        </label>
+                        <input class="form-input" type="date" @bind="_addEnd" />
+                        <small class="hint-text">
+                            Leave blank for ongoing elections. Set an end date for seasonal coverage,
+                            a defined benefit period, or a known leave of absence duration.
+                        </small>
+                    </div>
+                </div>
+            }
+
+            @* ── Step 5: Review & confirm ───────────────────────────── *@
+            @if (_wizardStep == 5 && _selectedEmployee is not null && _selectedDeduction is not null)
+            {
+                <h3 style="margin-bottom:.25rem;">Review &amp; Confirm</h3>
+                <p style="color:#6b7280;font-size:.9rem;margin-bottom:1.5rem;">
+                    Confirm the details below before saving. Use <em>Back</em> to make changes.
+                </p>
+                <div style="max-width:520px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:1rem;">
+                    <div style="background:#f9fafb;padding:.6rem 1rem;border-bottom:1px solid #e5e7eb;">
+                        <strong style="font-size:.9rem;">Election Summary</strong>
+                    </div>
+                    <table style="width:100%;border-collapse:collapse;font-size:.9rem;">
+                        <tr>
+                            <td style="padding:.55rem 1rem;color:#6b7280;width:38%;border-bottom:1px solid #f3f4f6;">Employee</td>
+                            <td style="padding:.55rem 1rem;border-bottom:1px solid #f3f4f6;">
+                                <strong>@_selectedEmployee.LegalLastName, @_selectedEmployee.LegalFirstName</strong>
+                                <samp style="font-size:.82rem;margin-left:.4rem;">@_selectedEmployee.EmployeeNumber</samp>
+                            </td>
+                        </tr>
+                        <tr style="background:#f9fafb;">
+                            <td style="padding:.55rem 1rem;color:#6b7280;border-bottom:1px solid #f3f4f6;">Benefit</td>
+                            <td style="padding:.55rem 1rem;border-bottom:1px solid #f3f4f6;">
+                                <samp style="font-weight:600;">@_selectedDeduction.Code</samp>
+                                <span style="color:#6b7280;margin-left:.4rem;">@_selectedDeduction.Description</span>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td style="padding:.55rem 1rem;color:#6b7280;border-bottom:1px solid #f3f4f6;">Tax Treatment</td>
+                            <td style="padding:.55rem 1rem;border-bottom:1px solid #f3f4f6;">
+                                <span class="badge @TreatmentClass(_selectedDeduction.TaxTreatment)">
+                                    @_selectedDeduction.TaxTreatment
+                                </span>
+                            </td>
+                        </tr>
+                        <tr style="background:#f9fafb;">
+                            <td style="padding:.55rem 1rem;color:#6b7280;border-bottom:1px solid #f3f4f6;">Contribution</td>
+                            <td style="padding:.55rem 1rem;border-bottom:1px solid #f3f4f6;">
+                                <strong>@FormatReviewContribution()</strong>
+                            </td>
+                        </tr>
+                        @if (_addEmployerAmount.HasValue && _addEmployerAmount.Value > 0
+                             && _selectedDeduction.CalculationMode is not (CalculationMode.PctPreTax or CalculationMode.PctPostTax or CalculationMode.CoverageBased))
+                        {
+                            <tr>
+                                <td style="padding:.55rem 1rem;color:#6b7280;border-bottom:1px solid #f3f4f6;">Employer Contrib.</td>
+                                <td style="padding:.55rem 1rem;border-bottom:1px solid #f3f4f6;">
+                                    $@_addEmployerAmount.Value.ToString("N2") per period
+                                </td>
+                            </tr>
+                        }
+                        <tr style="@(_addEmployerAmount.HasValue ? "background:#f9fafb;" : "")">
+                            <td style="padding:.55rem 1rem;color:#6b7280;">Effective Period</td>
+                            <td style="padding:.55rem 1rem;">
+                                @_addStart!.Value.ToString("MMM d, yyyy")
+                                @if (_addEnd.HasValue)
+                                {
+                                    <span> – @_addEnd.Value.ToString("MMM d, yyyy")</span>
+                                }
+                                else
+                                {
+                                    <span style="color:#6b7280;"> — open-ended</span>
+                                }
+                                <span class="badge @(_addStart.Value <= DateOnly.FromDateTime(DateTime.Today) ? "badge-green" : "badge-yellow")"
+                                      style="margin-left:.5rem;font-size:.72rem;">
+                                    @(_addStart.Value <= DateOnly.FromDateTime(DateTime.Today) ? "ACTIVE" : "PENDING")
+                                </span>
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+            }
+
+            @* Error banner *@
+            @if (_wizardError is not null)
+            {
+                <p class="form-error" style="margin-top:.75rem;">@_wizardError</p>
+            }
+
+            @* Navigation *@
+            <div class="form-actions" style="margin-top:1.5rem;">
+                @if (_wizardStep > 1)
+                {
+                    <button class="btn btn-ghost" @onclick="PrevStep">← Back</button>
+                }
+                @if (_wizardStep < 5)
+                {
+                    <button class="btn btn-primary" @onclick="NextStep">
+                        Next →
+                    </button>
+                }
+                else
+                {
+                    <button class="btn btn-primary" @onclick="ConfirmElection" disabled="@_saving">
+                        @(_saving ? "Saving…" : "Confirm Election")
+                    </button>
+                }
+                <button class="btn btn-ghost" @onclick="CancelWizard">Cancel</button>
+            </div>
+
+        </div>
+    }
+
+    @* ── Terminate confirmation ──────────────────────────────────── *@
+    @if (_terminateTarget is not null)
+    {
+        <div class="confirm-panel confirm-panel--warn" style="margin-bottom:1.5rem;border:2px solid #2F4350;border-radius:10px;padding:1.5rem;">
+            <p>Terminate election <strong>@_terminateTarget.DeductionCode</strong> for
+               <strong>@_terminateTarget.EmployeeDisplayName</strong>
+               <samp style="font-size:.85em;">(@_terminateTarget.EmployeeNumber)</samp>?</p>
+            <div class="form-actions">
+                <button class="btn btn-danger" @onclick="ConfirmTerminate" disabled="@_saving">
+                    @(_saving ? "Terminating…" : "Yes, Terminate")
+                </button>
+                <button class="btn btn-ghost" @onclick="() => _terminateTarget = null">Cancel</button>
+            </div>
+        </div>
+    }
+
+    <div class="filter-bar">
+        <input class="form-input filter-input" @bind="_filterCode" @bind:event="oninput"
+               placeholder="Filter by code…" />
+        <select class="form-select filter-select" @bind="_filterStatus">
+            <option value="">All statuses</option>
+            <option value="PENDING">Pending</option>
+            <option value="ACTIVE">Active</option>
+            <option value="SUSPENDED">Suspended</option>
+            <option value="TERMINATED">Terminated</option>
+        </select>
+        <button class="btn btn-secondary btn-sm" @onclick="ApplyFiltersAsync">Filter</button>
+    </div>
+
+    @if (_loading)
+    {
+        <p class="loading-text">Loading…</p>
+    }
+    else if (_error is not null)
+    {
+        <p class="error-text">@_error</p>
+    }
+    else
+    {
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Employee</th>
+                    <th>Code</th>
+                    <th>Treatment</th>
+                    <th>Contribution</th>
+                    <th>ER Amount</th>
+                    <th>Effective Start</th>
+                    <th>Effective End</th>
+                    <th>Status</th>
+                    <th>Source</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var item in _page.Items)
+                {
+                    <tr>
+                        <td>
+                            <div>@item.EmployeeDisplayName</div>
+                            <small class="text-muted">@item.EmployeeNumber</small>
+                        </td>
+                        <td><samp>@item.DeductionCode</samp></td>
+                        <td><span class="badge @TreatmentClass(item.TaxTreatment)">@item.TaxTreatment</span></td>
+                        <td>@FormatContribution(item)</td>
+                        <td>@(item.EmployerContributionAmount?.ToString("N2") ?? "—")</td>
+                        <td>@item.EffectiveStartDate.ToString("yyyy-MM-dd")</td>
+                        <td>@(item.EffectiveEndDate?.ToString("yyyy-MM-dd") ?? "—")</td>
+                        <td><span class="badge @StatusClass(item.Status)">@item.Status</span></td>
+                        <td><span class="badge badge-gray">@item.Source</span></td>
+                        <td>
+                            <AuthorizeView Roles="HrisAdmin,BenefitsAdmin">
+                                <Authorized>
+                                    @if (item.Status is "ACTIVE" or "PENDING")
+                                    {
+                                        <button class="btn btn-sm btn-ghost"
+                                                @onclick="() => StartTerminate(item)">Terminate</button>
+                                    }
+                                </Authorized>
+                            </AuthorizeView>
+                        </td>
+                    </tr>
+                }
+                @if (_page.Items.Count == 0)
+                {
+                    <tr><td colspan="10" class="empty-state">No elections found.</td></tr>
+                }
+            </tbody>
+        </table>
+
+        @if (_page.TotalPages > 1)
+        {
+            <div class="pagination">
+                <button class="btn btn-sm btn-ghost" disabled="@(_query.Page <= 1)"
+                        @onclick="PrevPage">← Prev</button>
+                <span>Page @_page.Page of @_page.TotalPages</span>
+                <button class="btn btn-sm btn-ghost" disabled="@(_query.Page >= _page.TotalPages)"
+                        @onclick="NextPage">Next →</button>
+            </div>
+        }
+    }
+
+
+</div>
+
+@code {
+
+    // ── Static configuration ─────────────────────────────────────────
+    private static readonly (string Label, int Num)[] StepLabels =
+        [("Employee", 1), ("Benefit", 2), ("Contribution", 3), ("Dates", 4), ("Review", 5)];
+
+    private static readonly (string Code, string Label)[] CoverageTiers =
+        [("EE_ONLY", "Employee Only"), ("EE_SPOUSE", "Employee + Spouse"),
+         ("EE_CHILD", "Employee + Child(ren)"), ("FAMILY", "Family")];
+
+    // ── List / filter ────────────────────────────────────────────────
+    private AllWorkHRIS.Core.Domain.PagedResult<ElectionListItem> _page = new();
+    private ElectionListQuery _query   = new() { Page = 1, PageSize = 20 };
+    private bool              _loading = true;
+    private string?           _error;
+    private string            _filterCode   = string.Empty;
+    private string            _filterStatus = string.Empty;
+
+    // ── Terminate ────────────────────────────────────────────────────
+    private ElectionListItem? _terminateTarget;
+    private bool              _saving;
+
+    // ── Wizard state ─────────────────────────────────────────────────
+    private int _wizardStep = 0;   // 0 = wizard closed
+    private string? _wizardError;
+
+    // Step 1 — Employee
+    private List<EmploymentListItem> _allEmployees      = [];
+    private List<EmploymentListItem> _filteredEmployees = [];
+    private string                   _empSearch         = string.Empty;
+    private EmploymentListItem?      _selectedEmployee;
+
+    // Step 2 — Benefit
+    private List<Deduction> _activeCodes       = [];
+    private Deduction?      _selectedDeduction;
+
+    // Step 3 — Contribution
+    private decimal? _addEmployeeAmount;
+    private decimal? _addEmployerAmount;
+    private decimal? _addContributionPct;   // user-facing %; divide by 100 on save
+    private string   _addCoverageTier = string.Empty;
+    private List<DeductionRateEntry> _coverageRateEntries = [];
+
+    // Step 4 — Dates
+    private DateOnly? _addStart;
+    private DateOnly? _addEnd;
+
+    // ── Lifecycle ────────────────────────────────────────────────────
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _activeCodes  = (await CodeRepo.GetActiveCodesAsync()).ToList();
+            _allEmployees = (await EmploymentService.GetAllActiveListAsync()).ToList();
+            await LoadPageAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    // ── Wizard navigation ────────────────────────────────────────────
+
+    private void StartWizard()
+    {
+        _wizardStep        = 1;
+        _wizardError       = null;
+        _empSearch         = string.Empty;
+        _filteredEmployees = [];
+        _selectedEmployee  = null;
+        _selectedDeduction = null;
+        _addEmployeeAmount = null;
+        _addEmployerAmount = null;
+        _addContributionPct = null;
+        _addCoverageTier   = string.Empty;
+        _coverageRateEntries = [];
+        _addStart = DateOnly.FromDateTime(DateTime.Today);
+        _addEnd   = null;
+    }
+
+    private async Task NextStep()
+    {
+        if (!ValidateCurrentStep()) return;
+
+        if (_wizardStep == 2 && _selectedDeduction?.CalculationMode == CalculationMode.CoverageBased)
+            await LoadCoverageRates();
+
+        _wizardStep++;
+    }
+
+    private void PrevStep()
+    {
+        _wizardError = null;
+        _wizardStep--;
+    }
+
+    private void CancelWizard()
+    {
+        _wizardStep  = 0;
+        _wizardError = null;
+    }
+
+    private bool ValidateCurrentStep()
+    {
+        _wizardError = null;
+        switch (_wizardStep)
+        {
+            case 1:
+                if (_selectedEmployee is null)
+                { _wizardError = "Please select an employee before continuing."; return false; }
+                break;
+
+            case 2:
+                if (_selectedDeduction is null)
+                { _wizardError = "Please select a benefit before continuing."; return false; }
+                break;
+
+            case 3:
+                var mode = _selectedDeduction?.CalculationMode ?? string.Empty;
+                if (mode is CalculationMode.PctPreTax or CalculationMode.PctPostTax)
+                {
+                    if (_addContributionPct is null or <= 0 or > 100)
+                    { _wizardError = "Contribution % must be between 0 and 100."; return false; }
+                }
+                else if (mode == CalculationMode.CoverageBased)
+                {
+                    if (string.IsNullOrEmpty(_addCoverageTier))
+                    { _wizardError = "Please select a coverage tier."; return false; }
+                }
+                break;
+
+            case 4:
+                if (_addStart is null)
+                { _wizardError = "Effective Start date is required."; return false; }
+                if (_addEnd.HasValue && _addEnd.Value < _addStart.Value)
+                { _wizardError = "Effective End must be on or after Effective Start."; return false; }
+                break;
+        }
+        return true;
+    }
+
+    // ── Step 2: Deduction selection ──────────────────────────────────
+
+    private void SelectDeduction(Deduction d)
+    {
+        if (_selectedDeduction?.DeductionId == d.DeductionId) return;
+        _selectedDeduction  = d;
+        _addEmployeeAmount  = null;
+        _addEmployerAmount  = null;
+        _addContributionPct = null;
+        _addCoverageTier    = string.Empty;
+        _coverageRateEntries = [];
+    }
+
+    private async Task LoadCoverageRates()
+    {
+        if (_selectedDeduction is null) return;
+        try
+        {
+            var asOf  = DateOnly.FromDateTime(DateTime.Today);
+            var table = await RateTableRepo.GetActiveByDeductionIdAsync(_selectedDeduction.DeductionId, asOf);
+            _coverageRateEntries = table is not null
+                ? (await RateTableRepo.GetEntriesAsync(table.RateTableId)).ToList()
+                : [];
+        }
+        catch { _coverageRateEntries = []; }
+    }
+
+    // ── Step 1: Employee search ──────────────────────────────────────
+
+    private void OnEmpSearchInput(ChangeEventArgs e)
+    {
+        _empSearch        = e.Value?.ToString() ?? string.Empty;
+        _selectedEmployee = null;
+        _filteredEmployees = _empSearch.Length >= 2
+            ? _allEmployees
+                .Where(x => x.LegalLastName.Contains(_empSearch,  StringComparison.OrdinalIgnoreCase)
+                         || x.LegalFirstName.Contains(_empSearch, StringComparison.OrdinalIgnoreCase)
+                         || x.EmployeeNumber.Contains(_empSearch, StringComparison.OrdinalIgnoreCase))
+                .Take(20).ToList()
+            : [];
+    }
+
+    private void OnEmpSelected(ChangeEventArgs e)
+    {
+        if (Guid.TryParse(e.Value?.ToString(), out var id))
+        {
+            _selectedEmployee  = _allEmployees.FirstOrDefault(x => x.EmploymentId == id);
+            _filteredEmployees = [];
+            if (_selectedEmployee is not null)
+                _empSearch = $"{_selectedEmployee.LegalLastName}, {_selectedEmployee.LegalFirstName} ({_selectedEmployee.EmployeeNumber})";
+        }
+    }
+
+    // ── Save ─────────────────────────────────────────────────────────
+
+    private async Task ConfirmElection()
+    {
+        if (_selectedEmployee is null || _selectedDeduction is null || _addStart is null) return;
+
+        var mode = _selectedDeduction.CalculationMode;
+
+        decimal? employeeAmount  = null;
+        decimal? employerAmount  = null;
+        decimal? contributionPct = null;
+        string?  coverageTier    = null;
+
+        if (mode is CalculationMode.PctPreTax or CalculationMode.PctPostTax)
+            contributionPct = Math.Round(_addContributionPct!.Value / 100m, 6);
+        else if (mode == CalculationMode.CoverageBased)
+            coverageTier = _addCoverageTier;
+        else
+        {
+            employeeAmount = _addEmployeeAmount;
+            employerAmount = _addEmployerAmount;
+        }
+
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        Guid.TryParse(auth.User.FindFirstValue(ClaimTypes.NameIdentifier), out var createdBy);
+
+        _saving = true; _wizardError = null;
+        try
+        {
+            await ElectionService.CreateElectionAsync(new CreateElectionCommand
+            {
+                EmploymentId               = _selectedEmployee.EmploymentId,
+                DeductionId                = _selectedDeduction.DeductionId,
+                EmployeeAmount             = employeeAmount,
+                EmployerContributionAmount = employerAmount,
+                ContributionPct            = contributionPct,
+                CoverageTier               = coverageTier,
+                EffectiveStartDate         = _addStart.Value,
+                EffectiveEndDate           = _addEnd,
+                Source                     = "MANUAL",
+                CreatedBy                  = createdBy
+            });
+            CancelWizard();
+            await LoadPageAsync();
+        }
+        catch (Exception ex) { _wizardError = ex.Message; }
+        finally { _saving = false; }
+    }
+
+    // ── List operations ──────────────────────────────────────────────
+
+    private async Task LoadPageAsync()        => _page = await ElectionRepo.GetPagedListAsync(_query);
+    private async Task ApplyFiltersAsync()
+    {
+        _query = new ElectionListQuery
+        {
+            Page          = 1,
+            PageSize      = 20,
+            DeductionCode = string.IsNullOrWhiteSpace(_filterCode)   ? null : _filterCode.Trim(),
+            Status        = string.IsNullOrWhiteSpace(_filterStatus) ? null : _filterStatus
+        };
+        await LoadPageAsync();
+    }
+    private async Task PrevPage() { _query = _query with { Page = _query.Page - 1 }; await LoadPageAsync(); }
+    private async Task NextPage() { _query = _query with { Page = _query.Page + 1 }; await LoadPageAsync(); }
+
+    // ── Terminate ────────────────────────────────────────────────────
+
+    private void StartTerminate(ElectionListItem item) => _terminateTarget = item;
+
+    private async Task ConfirmTerminate()
+    {
+        if (_terminateTarget is null) return;
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        Guid.TryParse(auth.User.FindFirstValue(ClaimTypes.NameIdentifier), out var terminatedBy);
+
+        _saving = true;
+        try
+        {
+            await ElectionService.TerminateElectionAsync(new TerminateElectionCommand
+            {
+                ElectionId   = _terminateTarget.ElectionId,
+                TerminatedBy = terminatedBy
+            });
+            _terminateTarget = null;
+            await LoadPageAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _saving = false; }
+    }
+
+    // ── Formatting helpers ───────────────────────────────────────────
+
+    private string FormatReviewContribution()
+    {
+        var mode = _selectedDeduction?.CalculationMode ?? string.Empty;
+        return mode switch
+        {
+            CalculationMode.PctPreTax or
+            CalculationMode.PctPostTax  => $"{_addContributionPct:N3}% of gross pay",
+            CalculationMode.CoverageBased
+                                        => CoverageTiers.FirstOrDefault(t => t.Code == _addCoverageTier).Label
+                                           ?? _addCoverageTier,
+            CalculationMode.FixedAnnual => $"${_addEmployeeAmount ?? 0:N2} / year",
+            CalculationMode.FixedMonthly => $"${_addEmployeeAmount ?? 0:N2} / month",
+            _                           => $"${_addEmployeeAmount ?? 0:N2} / period"
+        };
+    }
+
+    private static string FormatContribution(ElectionListItem item) =>
+        item.CalculationMode switch
+        {
+            CalculationMode.PctPreTax or
+            CalculationMode.PctPostTax  => item.ContributionPct.HasValue
+                                            ? $"{item.ContributionPct.Value * 100m:N2}%"
+                                            : "—",
+            CalculationMode.CoverageBased => item.CoverageTier ?? "—",
+            _                             => item.EmployeeAmount.ToString("N2")
+        };
+
+    private static string GetModeDescription(string mode) => mode switch
+    {
+        CalculationMode.FixedPerPeriod  => "A flat dollar amount is deducted from every paycheck, regardless of earnings.",
+        CalculationMode.FixedMonthly    => "A monthly target amount spread across pay dates. In months with an extra paycheck the amount is redistributed per your payroll rules.",
+        CalculationMode.FixedAnnual     => "An annual election amount divided equally across all pay periods in the year.",
+        CalculationMode.PctPreTax       => "A percentage of gross pay taken before taxes are calculated — lowering taxable income. Typical for traditional 401(k) and HSA contributions.",
+        CalculationMode.PctPostTax      => "A percentage of pay deducted after taxes — no reduction in taxable income. Typical for Roth 401(k) and similar after-tax plans.",
+        CalculationMode.CoverageBased   => "The premium is set by the coverage tier selected. Amounts come from the plan's rate table and may change at plan renewal.",
+        _                               => string.Empty
+    };
+
+    private static string GetContributionHint(string mode) => mode switch
+    {
+        CalculationMode.FixedAnnual  => "Enter the total annual election amount — it will be divided equally across all pay periods in the year.",
+        CalculationMode.FixedMonthly => "Enter the monthly election amount — it will be split across pay dates each month. Three-paycheck months follow your payroll context rule.",
+        _                            => "Enter the flat dollar amount to deduct from each paycheck."
+    };
+
+    private static string GetAmountLabel(string mode) => mode switch
+    {
+        CalculationMode.FixedAnnual  => "Annual Amount ($)",
+        CalculationMode.FixedMonthly => "Monthly Amount ($)",
+        _                            => "Amount per Period ($)"
+    };
+
+    private static string TreatmentClass(string t) => t == "PRE_TAX" ? "badge-blue" : "badge-orange";
+
+    private static string StatusClass(string s) => s switch
+    {
+        "ACTIVE"     => "badge-green",
+        "PENDING"    => "badge-yellow",
+        "SUSPENDED"  => "badge-orange",
+        "TERMINATED" => "badge-red",
+        _            => "badge-gray"
+    };
+}

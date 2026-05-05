@@ -20,7 +20,7 @@
     --module-recruiting:  var(--aw-purple);
     --module-performance: var(--aw-brown);
 
-    /* Semantic colours */
+    /* Semantic colors */
     --color-success: #6AAE63;
     --color-warning: #C79A55;
     --color-danger:  #E9836B;
@@ -241,6 +241,46 @@ html, body {
     border-radius: var(--radius-sm);
     color: #FFFFFF;
     letter-spacing: 0.03em;
+}
+
+/* Switch client / back to clients affordance */
+.nav-switch-client {
+    display: flex;
+    align-items: center;
+    gap: .375rem;
+    width: 100%;
+    padding: var(--space-3) var(--space-4);
+    background: none;
+    border: none;
+    border-bottom: 1px solid var(--sidebar-border, rgba(255,255,255,0.1));
+    color: var(--sidebar-text);
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-medium);
+    text-align: left;
+    text-decoration: none;
+    cursor: pointer;
+    opacity: 0.8;
+    transition: opacity 0.15s ease;
+    margin-bottom: var(--space-2);
+}
+
+.nav-switch-client:hover {
+    opacity: 1;
+    color: var(--sidebar-text-active);
+}
+
+/* Entity name shown below Switch Client when locked */
+.nav-entity-label {
+    padding: var(--space-2) var(--space-4);
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-semibold);
+    color: var(--sidebar-text-active);
+    letter-spacing: 0.01em;
+    border-bottom: 1px solid var(--sidebar-border, rgba(255,255,255,0.1));
+    margin-bottom: var(--space-2);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 /* ------------------------------------------------------------------ */

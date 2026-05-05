@@ -1,0 +1,65 @@
+@rendermode InteractiveServer
+@inherits LayoutComponentBase
+@layout MainLayout
+@inject NavigationManager Nav
+
+<div class="tax-shell">
+
+    <div class="tax-shell__tabs">
+        <a class="tax-tab @ActiveClass("/config/tax/reference")"   href="/config/tax/reference">Rate Reference</a>
+        <a class="tax-tab @ActiveClass("/config/tax/steps")"       href="/config/tax/steps">Calculation Steps</a>
+        <a class="tax-tab @ActiveClass("/config/tax/form-fields")" href="/config/tax/form-fields">Form Fields</a>
+        <a class="tax-tab @ActiveClass("/config/tax/review")"      href="/config/tax/review">Review &amp; Approve</a>
+        <a class="tax-tab @ActiveClass("/config/tax/preview")"     href="/config/tax/preview">Preview Sandbox</a>
+    </div>
+
+    <div class="tax-shell__body">
+        @Body
+    </div>
+
+</div>
+
+@code {
+    private string ActiveClass(string path)
+    {
+        var uri = Nav.ToBaseRelativePath(Nav.Uri);
+        return uri.StartsWith(path.TrimStart('/'), StringComparison.OrdinalIgnoreCase)
+            ? "tax-tab--active"
+            : "";
+    }
+}
+
+<style>
+    .tax-shell { display: flex; flex-direction: column; height: 100%; }
+
+    .tax-shell__tabs {
+        display: flex;
+        gap: 0;
+        border-bottom: 2px solid #e5e7eb;
+        background: white;
+        padding: 0 var(--space-6, 1.5rem);
+        flex-shrink: 0;
+    }
+
+    .tax-tab {
+        padding: var(--space-3, .75rem) var(--space-4, 1rem);
+        font-size: var(--font-size-sm, .875rem);
+        font-weight: var(--font-weight-medium, 500);
+        color: #6b7280;
+        text-decoration: none;
+        border-bottom: 2px solid transparent;
+        margin-bottom: -2px;
+        white-space: nowrap;
+        transition: color .15s, border-color .15s;
+    }
+
+    .tax-tab:hover { color: var(--module-tax, #0f766e); }
+
+    .tax-tab--active {
+        color: var(--module-tax, #0f766e);
+        border-bottom-color: var(--module-tax, #0f766e);
+        font-weight: var(--font-weight-semibold, 600);
+    }
+
+    .tax-shell__body { flex: 1; overflow: auto; padding: var(--space-6, 1.5rem); }
+</style>

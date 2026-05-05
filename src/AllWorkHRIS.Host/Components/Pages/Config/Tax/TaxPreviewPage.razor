@@ -1,0 +1,260 @@
+@page "/config/tax/preview"
+@layout TaxConfigShell
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = "TaxAdmin,ComplianceReviewer,PayrollAdmin,SystemAdmin")]
+@using Microsoft.AspNetCore.Authorization
+@using AllWorkHRIS.Core.Pipeline
+@using AllWorkHRIS.Core.Temporal
+@inject IPayrollPipelineService Pipeline
+@inject ITemporalContext         TemporalContext
+@inject ITaxProfileRepository    TaxRepo
+@using AllWorkHRIS.Host.Payroll.Tax
+
+<PageTitle>Preview Sandbox — Tax Configuration</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h2 class="page-title">Preview Sandbox</h2>
+        <p class="page-subtitle">Run a hypothetical calculation against current pipeline configuration. No payroll records are created.</p>
+    </div>
+</div>
+
+<div class="panel-card" style="max-width:640px;margin-bottom:1.5rem;">
+    <div class="form-grid-2">
+        <div class="form-field">
+            <label class="form-label">Jurisdiction <span class="req">*</span></label>
+            <select class="form-control" @bind="_jurisdictionCode" @bind:after="OnJurisdictionChangedAsync">
+                <option value="">— select —</option>
+                @foreach (var jCode in _jurisdictions)
+                {
+                    <option value="@jCode">@jCode</option>
+                }
+            </select>
+        </div>
+        <div class="form-field">
+            <label class="form-label">Pay Date <span class="req">*</span></label>
+            <input type="date" class="form-control" @bind="_payDate" />
+        </div>
+        <div class="form-field">
+            <label class="form-label">Gross Pay (period) <span class="req">*</span></label>
+            <input type="number" class="form-control" min="0" step="0.01" @bind="_grossPay" />
+        </div>
+        <div class="form-field">
+            <label class="form-label">Pay Periods / Year <span class="req">*</span></label>
+            <select class="form-control" @bind="_periodsPerYear">
+                <option value="52">52 — Weekly</option>
+                <option value="26">26 — Biweekly</option>
+                <option value="24">24 — Semi-monthly</option>
+                <option value="12">12 — Monthly</option>
+            </select>
+        </div>
+        <div class="form-field">
+            <label class="form-label">Filing Status (optional)</label>
+            @if (_filingStatuses.Count > 0)
+            {
+                <select class="form-control" @bind="_filingStatus">
+                    <option value="">— none —</option>
+                    @foreach (var fs in _filingStatuses)
+                    {
+                        <option value="@fs.FilingStatusCode">@fs.FilingStatusName (@fs.FilingStatusCode)</option>
+                    }
+                </select>
+            }
+            else
+            {
+                <input type="text" class="form-control" placeholder="e.g. SINGLE, MFJ" @bind="_filingStatus" />
+            }
+        </div>
+    </div>
+
+    @if (_error is not null)
+    {
+        <p class="form-error">@_error</p>
+    }
+
+    <div style="margin-top:1rem;">
+        <button class="btn-primary" @onclick="RunPreviewAsync" disabled="@_running">
+            @(_running ? "Running…" : "Run Preview")
+        </button>
+    </div>
+</div>
+
+@if (_result is not null)
+{
+    <div>
+        <h3 class="section-heading">Pipeline Result</h3>
+        <p style="font-size:.75rem;color:#6b7280;margin:0 0 .75rem;">Filing status: <code>@(_diagFilingStatus ?? "—")</code> &nbsp;|&nbsp; @_result.StepResults.Count employee step(s), @_result.EmployerStepResults.Count employer step(s)</p>
+
+        <div style="display:flex;gap:1rem;margin-bottom:1rem;flex-wrap:wrap;">
+            <div class="summary-card">
+                <span class="summary-label">Gross Pay</span>
+                <span class="summary-value">@_result.GrossPayPeriod.ToString("N4")</span>
+            </div>
+            <div class="summary-card">
+                <span class="summary-label">Computed Tax</span>
+                <span class="summary-value">@_result.ComputedTax.ToString("N4")</span>
+            </div>
+            <div class="summary-card">
+                <span class="summary-label">Employer Cost</span>
+                <span class="summary-value">@_result.EmployerCost.ToString("N4")</span>
+            </div>
+            <div class="summary-card">
+                <span class="summary-label">Net Pay</span>
+                <span class="summary-value">@_result.NetPay.ToString("N4")</span>
+            </div>
+        </div>
+
+        @if (_result.StepResults.Count > 0)
+        {
+            <h4 class="section-heading" style="font-size:.8rem;">Employee Step Results</h4>
+            <div class="grid-container" style="margin-bottom:1rem;">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Step Code</th>
+                            <th style="text-align:right;">Amount</th>
+                            <th style="text-align:right;">% of Gross</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var kv in _result.StepResults)
+                        {
+                            <tr>
+                                <td class="mono">@kv.Key</td>
+                                <td class="mono" style="text-align:right;">@kv.Value.ToString("N4")</td>
+                                <td class="mono pct" style="text-align:right;">@PctOfGross(kv.Value)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+
+        @if (_result.EmployerStepResults.Count > 0)
+        {
+            <h4 class="section-heading" style="font-size:.8rem;">Employer Step Results</h4>
+            <div class="grid-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Step Code</th>
+                            <th style="text-align:right;">Amount</th>
+                            <th style="text-align:right;">% of Gross</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var kv in _result.EmployerStepResults)
+                        {
+                            <tr>
+                                <td class="mono">@kv.Key</td>
+                                <td class="mono" style="text-align:right;">@kv.Value.ToString("N4")</td>
+                                <td class="mono pct" style="text-align:right;">@PctOfGross(kv.Value)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+
+        @if (!_result.Succeeded)
+        {
+            <p class="form-error">Pipeline failed: @_result.FailureReason</p>
+        }
+    </div>
+}
+
+@code {
+    private string   _jurisdictionCode = string.Empty;
+    private DateTime _payDate;
+    private decimal  _grossPay         = 10000m;
+    private int      _periodsPerYear   = 26;
+    private string   _filingStatus     = string.Empty;
+    private bool     _running          = false;
+    private string?  _error            = null;
+    private PipelineResult? _result    = null;
+    private string?  _diagFilingStatus = null;
+
+    private List<TaxFilingStatusRow> _filingStatuses = [];
+
+    private static readonly string[] _jurisdictions =
+        ["BB", "CA-FED", "US-CA", "US-FED", "US-GA", "US-NY"];
+
+    protected override void OnInitialized()
+        => _payDate = TemporalContext.GetOperativeDate();
+
+    private async Task OnJurisdictionChangedAsync()
+    {
+        _filingStatus  = string.Empty;
+        _filingStatuses = string.IsNullOrEmpty(_jurisdictionCode)
+            ? []
+            : (await TaxRepo.GetFilingStatusesAsync(_jurisdictionCode)).ToList();
+    }
+
+    private string PctOfGross(decimal amount)
+        => _grossPay == 0 ? "—" : (amount / _grossPay).ToString("P2");
+
+    private async Task RunPreviewAsync()
+    {
+        _error  = null;
+        _result = null;
+        _diagFilingStatus = null;
+
+        if (string.IsNullOrEmpty(_jurisdictionCode)) { _error = "Jurisdiction is required."; return; }
+        if (_grossPay <= 0)                          { _error = "Gross pay must be greater than zero."; return; }
+
+        _running = true;
+        try
+        {
+            var request = new PipelineRequest
+            {
+                EmploymentId      = Guid.Empty,
+                EmployeeId        = Guid.Empty,
+                PayrollContextId  = Guid.Empty,
+                PeriodId          = Guid.Empty,
+                PayDate           = DateOnly.FromDateTime(_payDate),
+                GrossPayPeriod    = _grossPay,
+                PayPeriodsPerYear = _periodsPerYear,
+                JurisdictionCode  = _jurisdictionCode,
+                FilingStatusCode  = string.IsNullOrWhiteSpace(_filingStatus) ? null : _filingStatus.Trim().ToUpperInvariant()
+            };
+
+            _diagFilingStatus = request.FilingStatusCode ?? "(null)";
+            _result = await Pipeline.RunAsync(request, CancellationToken.None);
+        }
+        catch (Exception ex) { _error = $"Error: {ex.Message}"; }
+        finally { _running = false; }
+    }
+}
+
+<style>
+    .page-header   { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:1.5rem; }
+    .page-title    { font-size:var(--font-size-lg); font-weight:600; color:var(--aw-navy); margin:0 0 .25rem; }
+    .page-subtitle { font-size:var(--font-size-sm); color:#6b7280; margin:0; }
+
+    .panel-card { background:white; border-radius:var(--radius-lg); box-shadow:var(--shadow-sm); padding:var(--space-5,1.25rem); }
+
+    .form-grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:var(--space-4,1rem); margin-bottom:var(--space-4,1rem); }
+    .form-field  { display:flex; flex-direction:column; gap:var(--space-1,.25rem); }
+    .form-label  { font-size:var(--font-size-sm); font-weight:500; color:#374151; }
+    .form-control { padding:var(--space-2); border:1px solid #d1d5db; border-radius:var(--radius-md); font-size:var(--font-size-sm); background:white; }
+    .form-error  { color:#dc2626; font-size:var(--font-size-sm); margin:.5rem 0 0; }
+    .req         { color:#dc2626; }
+
+    .btn-primary { background:var(--aw-teal); color:white; border:none; border-radius:var(--radius-md); padding:var(--space-2) var(--space-4); font-size:var(--font-size-sm); font-weight:500; cursor:pointer; }
+    .btn-primary:hover:not(:disabled) { opacity:.9; }
+    .btn-primary:disabled { opacity:.5; cursor:not-allowed; }
+
+    .section-heading { font-size:var(--font-size-sm); font-weight:600; color:var(--aw-navy); text-transform:uppercase; letter-spacing:.05em; margin:0 0 .5rem; }
+
+    .summary-card { background:white; border-radius:var(--radius-lg); box-shadow:var(--shadow-sm); padding:.75rem 1.25rem; min-width:140px; }
+    .summary-label { display:block; font-size:.75rem; color:#6b7280; font-weight:500; margin-bottom:.2rem; }
+    .summary-value { display:block; font-size:1rem; font-weight:700; color:var(--aw-navy); font-family:monospace; }
+
+    .grid-container { background:white; border-radius:var(--radius-lg); box-shadow:var(--shadow-sm); overflow:hidden; }
+    .data-table { width:100%; border-collapse:collapse; font-size:var(--font-size-sm); }
+    .data-table th { background:#f9fafb; padding:var(--space-3) var(--space-4); text-align:left; font-weight:500; color:#6b7280; border-bottom:1px solid #e5e7eb; }
+    .data-table td { padding:var(--space-3) var(--space-4); border-bottom:1px solid #f3f4f6; color:var(--aw-navy); }
+    .data-table tr:last-child td { border-bottom:none; }
+    .mono { font-family:monospace; font-size:.85rem; }
+    .pct  { color:#6b7280; font-size:.8rem; }
+</style>

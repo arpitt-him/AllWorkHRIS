@@ -11,6 +11,7 @@ using Syncfusion.Blazor;
 using AllWorkHRIS.Core;
 using AllWorkHRIS.Core.Audit;
 using AllWorkHRIS.Core.Composition;
+using AllWorkHRIS.Core.Pipeline;
 using AllWorkHRIS.Core.Data;
 using AllWorkHRIS.Core.Events;
 using AllWorkHRIS.Core.Lookups;
@@ -113,7 +114,7 @@ builder.Host.ConfigureContainer<ContainerBuilder>(autofacBuilder =>
                       .SingleInstance();
     }
 
-    // Lookup cache — must be singleton so it is initialised once and shared
+    // Lookup cache — must be singleton so it is initialized once and shared
     autofacBuilder.RegisterType<LookupCache>()
                   .As<ILookupCache>()
                   .SingleInstance();
@@ -125,6 +126,10 @@ builder.Host.ConfigureContainer<ContainerBuilder>(autofacBuilder =>
     // Repositories
     autofacBuilder.RegisterType<PersonRepository>()
                   .As<IPersonRepository>()
+                  .InstancePerLifetimeScope();
+
+    autofacBuilder.RegisterType<PersonSocialProfileRepository>()
+                  .As<IPersonSocialProfileRepository>()
                   .InstancePerLifetimeScope();
 
     autofacBuilder.RegisterType<PersonAddressRepository>()
@@ -188,13 +193,6 @@ builder.Host.ConfigureContainer<ContainerBuilder>(autofacBuilder =>
                   .As<IPositionService>()
                   .InstancePerLifetimeScope();
 
-    autofacBuilder.RegisterType<AllWorkHRIS.Host.Payroll.Services.PayrollSessionState>()
-                  .As<AllWorkHRIS.Host.Payroll.Services.IPayrollSessionState>()
-                  .InstancePerLifetimeScope();
-
-    autofacBuilder.RegisterType<AllWorkHRIS.Host.Hris.Services.HrisSessionState>()
-                  .As<AllWorkHRIS.Host.Hris.Services.IHrisSessionState>()
-                  .InstancePerLifetimeScope();
 
     // -----------------------------------------------------------------------
     // PHASE 3 — Leave, Documents, Onboarding, Work Queue
@@ -252,10 +250,52 @@ builder.Host.ConfigureContainer<ContainerBuilder>(autofacBuilder =>
                   .As<IOnboardingService>()
                   .InstancePerLifetimeScope();
 
+    // Dashboard contributors — Host-side (HRIS documents and leave)
+    autofacBuilder.RegisterType<AllWorkHRIS.Host.Hris.Dashboard.HrisDashboardContributor>()
+                  .As<AllWorkHRIS.Core.Dashboard.IDashboardContributor>()
+                  .InstancePerLifetimeScope();
+
+    autofacBuilder.RegisterType<AllWorkHRIS.Host.Hris.Dashboard.LeaveDashboardContributor>()
+                  .As<AllWorkHRIS.Core.Dashboard.IDashboardContributor>()
+                  .InstancePerLifetimeScope();
+
+    // Nav contributors — Host-side
+    autofacBuilder.RegisterType<AllWorkHRIS.Host.Hris.Navigation.HrisNavContributor>()
+                  .As<AllWorkHRIS.Core.Navigation.INavContributor>()
+                  .SingleInstance();
+
+    autofacBuilder.RegisterType<AllWorkHRIS.Host.Config.Navigation.TaxNavContributor>()
+                  .As<AllWorkHRIS.Core.Navigation.INavContributor>()
+                  .SingleInstance();
+
+    autofacBuilder.RegisterType<AllWorkHRIS.Host.Config.Navigation.SystemAdminNavContributor>()
+                  .As<AllWorkHRIS.Core.Navigation.INavContributor>()
+                  .SingleInstance();
+
+    autofacBuilder.RegisterType<AllWorkHRIS.Host.Config.Navigation.OperationsAdminNavContributor>()
+                  .As<AllWorkHRIS.Core.Navigation.INavContributor>()
+                  .SingleInstance();
+
     // Fallback no-op for optional Core abstractions — modules override via last-registration-wins
     autofacBuilder.RegisterType<NullPayrollContextLookup>()
                   .As<IPayrollContextLookup>()
                   .SingleInstance();
+
+    autofacBuilder.RegisterType<NullPayrollPipelineService>()
+                  .As<IPayrollPipelineService>()
+                  .SingleInstance();
+
+    autofacBuilder.RegisterType<NullEmploymentJurisdictionLookup>()
+                  .As<IEmploymentJurisdictionLookup>()
+                  .SingleInstance();
+
+    autofacBuilder.RegisterType<AllWorkHRIS.Host.Payroll.Tax.TaxProfileRepository>()
+                  .As<AllWorkHRIS.Host.Payroll.Tax.ITaxProfileRepository>()
+                  .InstancePerLifetimeScope();
+
+    autofacBuilder.RegisterType<AllWorkHRIS.Host.Config.Tax.TaxConfigRepository>()
+                  .As<AllWorkHRIS.Host.Config.Tax.ITaxConfigRepository>()
+                  .InstancePerLifetimeScope();
 
     // Audit service — NullAuditService is the fallback for module isolation tests;
     // AuditService (below) overrides it via last-registration-wins in the full host.
@@ -274,72 +314,19 @@ builder.Host.ConfigureContainer<ContainerBuilder>(autofacBuilder =>
 });
 
 // ---------------------------------------------------------------------------
-// 5. Collect menu contributions — HRIS first, then module-discovered
+// 5. Session state — scoped to Blazor circuit so entity lock survives
+//    page-to-page navigation within a single user session.
 // ---------------------------------------------------------------------------
-var hrisMenuItems = new List<MenuContribution>
-{
-    new MenuContribution
-    {
-        Label        = "Employees",
-        Icon         = "HrisIcon",
-        SortOrder    = 10,
-        AccentColor  = "var(--module-hris)",
-        BadgeLabel   = "HRIS",
-        RequiredRole = "HrisViewer"
-    },
-    new MenuContribution
-    {
-        Label        = "Employees",
-        Href         = "/hris/employees",
-        Icon         = "HrisIcon",
-        SortOrder    = 1,
-        ParentLabel  = "Employees",
-        RequiredRole = "HrisViewer"
-    },
-    new MenuContribution
-    {
-        Label        = "Organisation",
-        Href         = "/hris/org",
-        Icon         = "HrisIcon",
-        SortOrder    = 2,
-        ParentLabel  = "Employees",
-        RequiredRole = "HrisViewer"
-    },
-    new MenuContribution
-    {
-        Label        = "Jobs & Positions",
-        Href         = "/hris/jobs",
-        Icon         = "HrisIcon",
-        SortOrder    = 3,
-        ParentLabel  = "Employees",
-        RequiredRole = "HrisAdmin"
-    },
-    new MenuContribution
-    {
-        Label        = "Work Queue",
-        Href         = "/hris/workqueue",
-        Icon         = "HrisIcon",
-        SortOrder    = 4,
-        ParentLabel  = "Employees",
-        RequiredRole = "HrisAdmin"
-    },
-    new MenuContribution
-    {
-        Label        = "Doc Expiration",
-        Href         = "/hris/documents/expiring",
-        Icon         = "HrisIcon",
-        SortOrder    = 5,
-        ParentLabel  = "Employees",
-        RequiredRole = "HrisAdmin"
-    }
-};
+builder.Services.AddScoped<AllWorkHRIS.Host.Hris.Services.IHrisSessionState,
+                            AllWorkHRIS.Host.Hris.Services.HrisSessionState>();
 
-var allMenuItems = hrisMenuItems
-    .Concat(platformModules.SelectMany(m => m.GetMenuContributions()))
-    .OrderBy(c => c.SortOrder)
-    .ToList();
-
-builder.Services.AddSingleton<IReadOnlyList<MenuContribution>>(allMenuItems);
+// ---------------------------------------------------------------------------
+// 6. Nav is now driven by INavContributor registrations (Phase 7).
+// MenuContribution singleton kept as empty — About page still calls
+// GetMenuContributions() on each module for display purposes only.
+// ---------------------------------------------------------------------------
+builder.Services.AddSingleton<IReadOnlyList<MenuContribution>>(
+    new List<MenuContribution>().AsReadOnly());
 builder.Services.AddSingleton<IReadOnlyList<IPlatformModule>>(platformModules);
 
 // ---------------------------------------------------------------------------
@@ -416,6 +403,7 @@ builder.Services.AddCascadingAuthenticationState();
 // ---------------------------------------------------------------------------
 builder.Services.AddHostedService<LeaveStatusTransitionJob>();
 builder.Services.AddHostedService<DocumentExpirationCheckJob>();
+builder.Services.AddHostedService<BenefitElectionActivationJob>();
 
 // ---------------------------------------------------------------------------
 // 10. Build
@@ -501,6 +489,20 @@ app.MapGet("/api/documents/{id:guid}/content", async (
     {
         return Results.NotFound();
     }
+})
+.RequireAuthorization();
+
+// Profile photo — serves stored photo bytes with correct MIME type.
+// Returns 404 when the person has no photo uploaded yet.
+app.MapGet("/api/profile-photo/{personId:guid}", async (
+    Guid personId,
+    IPersonSocialProfileRepository profileRepo,
+    HttpContext ctx) =>
+{
+    var profile = await profileRepo.GetAsync(personId);
+    if (profile?.PhotoData is null) return Results.NotFound();
+    ctx.Response.Headers["Cache-Control"] = "private, max-age=3600";
+    return Results.File(profile.PhotoData, profile.PhotoMimeType ?? "image/jpeg");
 })
 .RequireAuthorization();
 

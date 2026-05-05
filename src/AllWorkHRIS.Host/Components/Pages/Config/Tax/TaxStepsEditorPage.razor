@@ -1,0 +1,270 @@
+@page "/config/tax/steps"
+@layout TaxConfigShell
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = "TaxAdmin,ComplianceReviewer,PayrollAdmin,SystemAdmin")]
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using AllWorkHRIS.Host.Config.Tax
+@inject ITaxConfigRepository         TaxConfig
+@inject AuthenticationStateProvider  AuthState
+
+<PageTitle>Calculation Steps — Tax Configuration</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h2 class="page-title">Calculation Steps</h2>
+        <p class="page-subtitle">Manage the status of payroll calculation steps. TaxAdmin submits for review; ComplianceReviewer approves.</p>
+    </div>
+</div>
+
+@* Jurisdiction picker *@
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;">
+    <label class="form-label" style="margin:0;white-space:nowrap;">Jurisdiction</label>
+    <select class="form-control" style="max-width:280px;" @bind="_selectedJurisdiction" @bind:after="LoadStepsAsync">
+        <option value="">— select —</option>
+        @foreach (var jCode in _jurisdictions)
+        {
+            <option value="@jCode">@jCode</option>
+        }
+    </select>
+</div>
+
+@if (_loading)
+{
+    <p class="loading-text">Loading…</p>
+}
+else if (!string.IsNullOrEmpty(_selectedJurisdiction) && _steps.Count == 0)
+{
+    <p class="loading-text">No steps found for this jurisdiction.</p>
+}
+else if (_steps.Count > 0)
+{
+    <div class="grid-container">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Seq</th>
+                    <th>Step Code</th>
+                    <th>Name</th>
+                    <th>Type</th>
+                    <th>Applies To</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var step in _steps)
+                {
+                    var s = step;
+                    <tr>
+                        <td class="mono">@s.SequenceNumber</td>
+                        <td class="mono">@s.StepCode</td>
+                        <td>@s.StepName</td>
+                        <td><span class="type-badge">@StepTypeLabel(s.StepType)</span></td>
+                        <td>@s.AppliesTo</td>
+                        <td><span class="status-badge status-@s.StatusCode.ToLower().Replace('_','-')">@s.StatusCode</span></td>
+                        <td>
+                            <div style="display:flex;gap:.5rem;flex-wrap:wrap;">
+                                @if (s.StatusCode == "DRAFT")
+                                {
+                                    <button class="btn-action" @onclick="() => SubmitForReviewAsync(s)">Submit for Review</button>
+                                    <button class="btn-action btn-action--danger" @onclick="() => ArchiveAsync(s)">Archive</button>
+                                }
+                                @if (s.StatusCode == "APPROVED")
+                                {
+                                    <button class="btn-action btn-action--success" @onclick="() => ActivateAsync(s)">Activate</button>
+                                }
+                                @if (s.StatusCode == "ACTIVE")
+                                {
+                                    <button class="btn-action btn-action--danger" @onclick="() => ArchiveAsync(s)">Archive</button>
+                                }
+                                <button class="btn-action btn-action--neutral" @onclick="() => ToggleRates(s.StepCode)">Rates</button>
+                            </div>
+                            @if (_actionErrors.TryGetValue(s.StepCode, out var err) && err is not null)
+                            {
+                                <p style="color:#dc2626;font-size:.75rem;margin:.25rem 0 0;">@err</p>
+                            }
+                        </td>
+                    </tr>
+                    @if (_expandedRates.Contains(s.StepCode))
+                    {
+                        var rates = _ratesByStep.TryGetValue(s.StepCode, out var rr) ? rr : [];
+                        <tr>
+                            <td colspan="7" style="background:#f9fafb;padding:.75rem 1rem;">
+                                @if (rates.Count == 0)
+                                {
+                                    <span style="color:#6b7280;font-size:.8rem;">No rate rows found.</span>
+                                }
+                                else
+                                {
+                                    <table style="width:100%;font-size:.8rem;border-collapse:collapse;">
+                                        <thead>
+                                            <tr>
+                                                <th style="text-align:left;color:#6b7280;padding:2px 8px;">Type</th>
+                                                <th style="text-align:left;color:#6b7280;padding:2px 8px;">Effective From</th>
+                                                <th style="text-align:left;color:#6b7280;padding:2px 8px;">Effective To</th>
+                                                <th style="text-align:left;color:#6b7280;padding:2px 8px;">Summary</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @foreach (var rate in rates)
+                                            {
+                                                <tr>
+                                                    <td style="padding:2px 8px;"><span class="rate-type-tag">@rate.RowType</span></td>
+                                                    <td style="padding:2px 8px;font-family:monospace;">@rate.EffectiveFrom.ToString("yyyy-MM-dd")</td>
+                                                    <td style="padding:2px 8px;font-family:monospace;">@(rate.EffectiveTo?.ToString("yyyy-MM-dd") ?? "open")</td>
+                                                    <td style="padding:2px 8px;">@rate.Summary</td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                }
+                            </td>
+                        </tr>
+                    }
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@* Audit log panel *@
+@if (_auditLog.Count > 0)
+{
+    <div style="margin-top:1.5rem;">
+        <h3 class="ref-jur-heading">Recent Activity</h3>
+        <div class="grid-container">
+            <table class="data-table">
+                <thead><tr><th>Action</th><th>From</th><th>To</th><th>By</th><th>At</th><th>Note</th></tr></thead>
+                <tbody>
+                    @foreach (var row in _auditLog)
+                    {
+                        <tr>
+                            <td>@row.ActionCode</td>
+                            <td class="mono">@(row.PriorStatus ?? "—")</td>
+                            <td class="mono">@(row.NewStatus ?? "—")</td>
+                            <td>@row.ChangedBy</td>
+                            <td class="mono">@row.ChangedAt.ToString("yyyy-MM-dd HH:mm")</td>
+                            <td>@(row.ApprovalNote ?? "")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+@code {
+    private bool   _loading              = false;
+    private string _selectedJurisdiction = string.Empty;
+    private List<TaxStepConfigRow>                          _steps        = [];
+    private Dictionary<string, IReadOnlyList<TaxRateRowSummary>> _ratesByStep = [];
+    private HashSet<string>                                 _expandedRates = [];
+    private Dictionary<string, string?>                     _actionErrors  = [];
+    private List<AuditLogRow>                               _auditLog      = [];
+
+    private static readonly string[] _jurisdictions =
+        ["BB", "CA-FED", "US-CA", "US-FED", "US-GA", "US-NY"];
+
+    protected override Task OnInitializedAsync() => Task.CompletedTask;
+
+    private async Task LoadStepsAsync()
+    {
+        if (string.IsNullOrEmpty(_selectedJurisdiction)) { _steps = []; return; }
+        _loading = true;
+        _expandedRates.Clear();
+        _actionErrors.Clear();
+        _auditLog = [];
+        StateHasChanged();
+
+        _steps = (await TaxConfig.GetStepsByJurisdictionAsync(_selectedJurisdiction)).ToList();
+        _loading = false;
+    }
+
+    private async Task ToggleRates(string stepCode)
+    {
+        if (!_expandedRates.Add(stepCode))
+        {
+            _expandedRates.Remove(stepCode);
+            return;
+        }
+        if (!_ratesByStep.ContainsKey(stepCode))
+            _ratesByStep[stepCode] = await TaxConfig.GetRateSummaryAsync(stepCode);
+    }
+
+    private async Task SubmitForReviewAsync(TaxStepConfigRow step)
+    {
+        await TransitionAsync(step, "PENDING_REVIEW");
+        await RefreshAuditAsync(step.StepId);
+    }
+
+    private async Task ActivateAsync(TaxStepConfigRow step)  => await TransitionAsync(step, "ACTIVE");
+    private async Task ArchiveAsync(TaxStepConfigRow step)   => await TransitionAsync(step, "ARCHIVED");
+
+    private async Task TransitionAsync(TaxStepConfigRow step, string newStatus)
+    {
+        _actionErrors[step.StepCode] = null;
+        try
+        {
+            var auth  = await AuthState.GetAuthenticationStateAsync();
+            var actor = auth.User.Identity?.Name ?? "system";
+            await TaxConfig.UpdateStepStatusAsync(step.StepId, step.StepCode, step.StatusCode, newStatus, actor);
+            await LoadStepsAsync();
+            await RefreshAuditAsync(step.StepId);
+        }
+        catch (Exception ex) { _actionErrors[step.StepCode] = ex.Message; }
+    }
+
+    private async Task RefreshAuditAsync(int stepId)
+    {
+        _auditLog = (await TaxConfig.GetAuditLogAsync("payroll_calculation_steps", stepId.ToString())).ToList();
+    }
+
+    private static string StepTypeLabel(string t) => t switch
+    {
+        "PROGRESSIVE_BRACKET" => "Progressive",
+        "FLAT_RATE"           => "Flat Rate",
+        "TIERED_FLAT"         => "Tiered",
+        "ALLOWANCE"           => "Allowance",
+        "CREDIT"              => "Credit",
+        "STANDARD_DEDUCTION"  => "Std Deduction",
+        "PERCENTAGE_OF_PRIOR" => "% of Prior",
+        _                     => t
+    };
+}
+
+<style>
+    .page-header   { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:1.5rem; }
+    .page-title    { font-size:var(--font-size-lg); font-weight:600; color:var(--aw-navy); margin:0 0 .25rem; }
+    .page-subtitle { font-size:var(--font-size-sm); color:#6b7280; margin:0; }
+    .loading-text  { color:#6b7280; font-style:italic; }
+    .ref-jur-heading { font-size:var(--font-size-sm); font-weight:600; color:var(--aw-navy); text-transform:uppercase; letter-spacing:.05em; margin:0 0 .5rem; }
+
+    .grid-container { background:white; border-radius:var(--radius-lg); box-shadow:var(--shadow-sm); overflow:hidden; }
+    .data-table { width:100%; border-collapse:collapse; font-size:var(--font-size-sm); }
+    .data-table th { background:#f9fafb; padding:var(--space-3) var(--space-4); text-align:left; font-weight:500; color:#6b7280; border-bottom:1px solid #e5e7eb; white-space:nowrap; }
+    .data-table td { padding:var(--space-3) var(--space-4); border-bottom:1px solid #f3f4f6; color:var(--aw-navy); vertical-align:top; }
+    .data-table tr:last-child td { border-bottom:none; }
+    .mono { font-family:monospace; font-size:.8rem; }
+
+    .type-badge { display:inline-block; padding:1px 6px; border-radius:4px; font-size:.75rem; font-weight:500; background:#e0f2fe; color:#0369a1; }
+    .rate-type-tag { display:inline-block; padding:1px 5px; border-radius:3px; font-size:.7rem; background:#f3f4f6; color:#374151; margin-right:.25rem; }
+
+    .status-badge { display:inline-block; padding:2px 8px; border-radius:9999px; font-size:.75rem; font-weight:600; }
+    .status-draft           { background:#fef9c3; color:#854d0e; }
+    .status-pending-review  { background:#dbeafe; color:#1d4ed8; }
+    .status-approved        { background:#dcfce7; color:#166534; }
+    .status-active          { background:#d1fae5; color:#065f46; }
+    .status-archived        { background:#f3f4f6; color:#6b7280; }
+
+    .btn-action { padding:3px 10px; border-radius:4px; font-size:.8rem; cursor:pointer; border:1px solid #d1d5db; background:white; color:var(--aw-navy); }
+    .btn-action:hover { background:#f9fafb; }
+    .btn-action--success { background:#dcfce7; border-color:#86efac; color:#166534; }
+    .btn-action--success:hover { background:#bbf7d0; }
+    .btn-action--danger  { background:#fee2e2; border-color:#fca5a5; color:#991b1b; }
+    .btn-action--danger:hover  { background:#fecaca; }
+    .btn-action--neutral { background:#f3f4f6; border-color:#d1d5db; color:#374151; }
+
+    .form-label  { font-size:var(--font-size-sm); font-weight:500; color:#374151; }
+    .form-control { padding:var(--space-2); border:1px solid #d1d5db; border-radius:var(--radius-md); font-size:var(--font-size-sm); background:white; }
+</style>

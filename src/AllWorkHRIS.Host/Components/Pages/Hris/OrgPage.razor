@@ -16,12 +16,12 @@
 @inject ITemporalContext     TemporalContext
 @inject IHrisSessionState    SessionState
 
-<PageTitle>Organisation — AllWork HRIS</PageTitle>
+<PageTitle>Organization — AllWork HRIS</PageTitle>
 
 <div class="page-container">
 
     <div class="page-header">
-        <h2 class="page-title">Organisation</h2>
+        <h2 class="page-title">Organization</h2>
         <AuthorizeView Roles="HrisAdmin">
             <Authorized>
                 <button class="btn-primary" @onclick="OpenAddOrgUnitPanel">+ Add Org Unit</button>
@@ -48,12 +48,12 @@
 
     @if (_loading)
     {
-        <p class="loading-text">Loading organisation...</p>
+        <p class="loading-text">Loading organization...</p>
     }
     else if (_selectedLegalEntityId is null)
     {
         <div class="empty-state">
-            <p>Select a legal entity to view its organisation structure.</p>
+            <p>Select a legal entity to view its organization structure.</p>
         </div>
     }
     else if (_activeView == "hierarchy")
@@ -141,7 +141,9 @@
                     <tbody>
                         @foreach (var unit in TreeUnits.OrderBy(u => u.OrgUnitTypeId).ThenBy(u => u.OrgUnitName))
                         {
-                            <tr>
+                            var isSelected = _selectedNodeId == unit.OrgUnitId;
+                            <tr class="org-table-row @(isSelected ? "selected" : "")"
+                                @onclick="async () => await SelectNodeAsync(unit.OrgUnitId, unit.OrgUnitName)">
                                 <td>@unit.OrgUnitName</td>
                                 <td>@unit.OrgUnitCode</td>
                                 <td><span class="org-type-badge">@LookupLabel(LookupTables.OrgUnitType, unit.OrgUnitTypeId)</span></td>
@@ -642,6 +644,10 @@
         border-bottom: 1px solid #F3F4F6;
         color: var(--aw-navy);
     }
+
+    .org-table-row { cursor: pointer; }
+    .org-table-row:hover td { background: #F9FAFB; }
+    .org-table-row.selected td { background: #EFF6FF; color: var(--aw-teal); }
 
     .status-badge {
         padding: 2px var(--space-2);

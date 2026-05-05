@@ -34,6 +34,20 @@ public static class ClaimsPrincipalExtensions
     }
 
     /// <summary>
+    /// Returns true if the principal holds any of the specified roles.
+    /// Uses direct claim inspection rather than IsInRole() to work with
+    /// Keycloak realm roles and MapInboundClaims = false.
+    /// </summary>
+    public static bool HasAnyRole(this ClaimsPrincipal principal, params string[] roles)
+        => roles.Any(r => principal.Claims.Any(c => c.Type == "roles" && c.Value == r));
+
+    /// <summary>
+    /// Returns all role claim values for the principal.
+    /// </summary>
+    public static IEnumerable<string> GetRoles(this ClaimsPrincipal principal)
+        => principal.Claims.Where(c => c.Type == "roles").Select(c => c.Value);
+
+    /// <summary>
     /// Returns a display name for the current principal.
     /// Prefers 'name' claim, falls back to 'preferred_username', then 'sub'.
     /// </summary>

@@ -9,6 +9,7 @@ public sealed record CalculationInput
     public required Guid     ResultSetId             { get; init; }
     public required Guid     EmploymentId            { get; init; }
     public required Guid     PersonId                { get; init; }
+    public required Guid     PayrollContextId        { get; init; }
     public required Guid     PeriodId                { get; init; }
     public required DateOnly PayDate                 { get; init; }
 

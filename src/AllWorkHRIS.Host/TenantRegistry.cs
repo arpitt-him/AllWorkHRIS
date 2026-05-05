@@ -25,6 +25,6 @@ public sealed class TenantRegistry
             return factory;
 
         throw new UnauthorizedAccessException(
-            $"Unknown or unauthorised tenant: {tenantId}");
+            $"Unknown or unauthorized tenant: {tenantId}");
     }
 }

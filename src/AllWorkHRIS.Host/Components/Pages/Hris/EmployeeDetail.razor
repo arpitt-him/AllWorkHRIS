@@ -12,6 +12,7 @@
 @using AllWorkHRIS.Host.Hris.Services
 @using AllWorkHRIS.Host.Hris.Repositories
 @using AllWorkHRIS.Host.Hris.Domain
+@using AllWorkHRIS.Module.Benefits.Repositories
 @inject IEmploymentService    EmploymentService
 @inject IPersonService        PersonService
 @inject ICompensationService  CompensationService
@@ -21,6 +22,8 @@
 @inject ILeaveService         LeaveService
 @inject IDocumentService      DocumentService
 @inject IOnboardingService    OnboardingService
+@inject IPersonSocialProfileRepository SocialProfileRepo
+@inject IBenefitElectionRepository     BenefitElectionRepo
 @inject IHrisSessionState     SessionState
 @inject ILookupCache          LookupCache
 @inject ITemporalContext      TemporalContext
@@ -667,6 +670,123 @@ else
                     }
                     break;
 
+                case "Benefits":
+                    <div class="detail-section">
+                        <h3 class="section-title">Benefit Elections</h3>
+                        @if (_benefitsLoading)
+                        {
+                            <p class="loading-text">Loading…</p>
+                        }
+                        else if (_benefitsElections.Count == 0)
+                        {
+                            <p class="placeholder-text">No active elections for this employee.</p>
+                        }
+                        else
+                        {
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Code</th>
+                                        <th>Treatment</th>
+                                        <th>Emp Amount</th>
+                                        <th>ER Amount</th>
+                                        <th>Effective Start</th>
+                                        <th>Effective End</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var e in _benefitsElections)
+                                    {
+                                        <tr>
+                                            <td><samp>@e.DeductionCode</samp></td>
+                                            <td><span class="badge @(e.TaxTreatment == "PRE_TAX" ? "badge-blue" : "badge-orange")">@e.TaxTreatment</span></td>
+                                            <td>@e.EmployeeAmount.ToString("N2")</td>
+                                            <td>@(e.EmployerContributionAmount?.ToString("N2") ?? "—")</td>
+                                            <td>@e.EffectiveStartDate.ToString("yyyy-MM-dd")</td>
+                                            <td>@(e.EffectiveEndDate?.ToString("yyyy-MM-dd") ?? "—")</td>
+                                            <td><span class="badge badge-green">@e.Status</span></td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        }
+                    </div>
+                    break;
+
+                case "Community":
+                    <div class="detail-section">
+                        <h3 class="section-title">Community Profile</h3>
+                        <p class="section-subtitle">Optional — visible to colleagues. Share a photo and a bit about yourself.</p>
+
+                        @if (_communityLoading)
+                        {
+                            <p class="loading-text">Loading…</p>
+                        }
+                        else
+                        {
+                            @* Photo *@
+                            <div class="community-photo-row">
+                                @if (_communityHasPhoto && _person is not null)
+                                {
+                                    <img src="/api/profile-photo/@_person.PersonId?t=@_communityPhotoStamp"
+                                         class="community-photo" alt="Profile photo" />
+                                }
+                                else
+                                {
+                                    <div class="community-photo-placeholder">
+                                        <span>No photo</span>
+                                    </div>
+                                }
+                                <div class="community-photo-actions">
+                                    @if (!_communityShowUpload)
+                                    {
+                                        <button class="btn-secondary" @onclick="() => { _communityShowUpload = true; _communityError = null; _communitySuccess = null; }">
+                                            @(_communityHasPhoto ? "Change Photo" : "Upload Photo")
+                                        </button>
+                                    }
+                                    else
+                                    {
+                                        <div class="upload-inline">
+                                            <input id="community-photo-input" type="file" accept="image/*" class="file-input" />
+                                            <p class="upload-hint">JPEG, PNG or WebP · max 2 MB</p>
+                                            <div style="display:flex;gap:.5rem;margin-top:.5rem;">
+                                                <button class="btn-primary" @onclick="SaveCommunityPhotoAsync" disabled="@_communitySaving">
+                                                    @(_communitySaving ? "Uploading…" : "Save Photo")
+                                                </button>
+                                                <button class="btn-secondary" @onclick="() => { _communityShowUpload = false; _communityError = null; }">Cancel</button>
+                                            </div>
+                                        </div>
+                                    }
+                                </div>
+                            </div>
+
+                            @* Bio *@
+                            <div class="community-bio-section">
+                                <label class="detail-label">About Me</label>
+                                <textarea class="community-bio-input" rows="5" maxlength="1000"
+                                          placeholder="Hobbies, interests, what you do outside of work…"
+                                          @bind="_communityBio" @bind:event="oninput" />
+                                <div class="community-bio-footer">
+                                    <span class="char-count">@_communityBio.Length / 1,000</span>
+                                    <button class="btn-primary" @onclick="SaveCommunityBioAsync" disabled="@_communitySaving">
+                                        @(_communitySaving ? "Saving…" : "Save")
+                                    </button>
+                                </div>
+                            </div>
+
+                            @if (_communityError is not null)
+                            {
+                                <p class="form-error" style="margin-top:.75rem;">@_communityError</p>
+                            }
+                            @if (_communitySuccess is not null)
+                            {
+                                <p class="form-success" style="margin-top:.75rem;">@_communitySuccess</p>
+                            }
+                        }
+                    </div>
+                    break;
+
                 case "History":
                     <div class="detail-section">
                         <h3 class="section-title">Lifecycle Event History</h3>
@@ -699,7 +819,23 @@ else
     private int _taskWaivedStatusId;
 
     private static readonly string[] _tabs =
-        ["Profile", "Employment", "Assignment", "Compensation", "Leave", "Documents", "Onboarding", "History"];
+        ["Profile", "Employment", "Assignment", "Compensation", "Leave", "Documents", "Onboarding", "Benefits", "Community", "History"];
+
+    // Community tab
+    private bool    _communityLoaded      = false;
+    private bool    _communityLoading     = false;
+    private bool    _communitySaving      = false;
+    private bool    _communityHasPhoto    = false;
+    private bool    _communityShowUpload  = false;
+    private string  _communityBio        = "";
+    private long    _communityPhotoStamp = 0;   // appended to photo URL to bust browser cache after upload
+    private string? _communityError;
+    private string? _communitySuccess;
+
+    // Benefits tab
+    private bool _benefitsLoaded  = false;
+    private bool _benefitsLoading = false;
+    private List<AllWorkHRIS.Module.Benefits.Domain.Elections.BenefitDeductionElection> _benefitsElections = [];
 
     // Assignment tab
     private bool         _assignmentLoaded   = false;
@@ -790,10 +926,12 @@ else
         _activeTab = tab;
         switch (tab)
         {
-            case "Assignment" when !_assignmentLoaded: await LoadAssignmentAsync(); break;
-            case "Leave"      when !_leaveLoaded:      await LoadLeaveAsync();      break;
-            case "Documents"  when !_documentsLoaded:  await LoadDocumentsAsync();  break;
-            case "Onboarding" when !_onboardingLoaded: await LoadOnboardingAsync(); break;
+            case "Assignment" when !_assignmentLoaded:  await LoadAssignmentAsync();  break;
+            case "Leave"      when !_leaveLoaded:       await LoadLeaveAsync();       break;
+            case "Documents"  when !_documentsLoaded:   await LoadDocumentsAsync();   break;
+            case "Onboarding" when !_onboardingLoaded:  await LoadOnboardingAsync();  break;
+            case "Benefits"   when !_benefitsLoaded:    await LoadBenefitsAsync();    break;
+            case "Community"  when !_communityLoaded:   await LoadCommunityAsync();   break;
         }
     }
 
@@ -843,6 +981,81 @@ else
             _documentsLoaded = true;
         }
         finally { _documentsLoading = false; }
+    }
+
+    private async Task LoadCommunityAsync()
+    {
+        if (_person is null) return;
+        _communityLoading = true;
+        try
+        {
+            var profile        = await SocialProfileRepo.GetAsync(_person.PersonId);
+            _communityBio      = profile?.BioText ?? "";
+            _communityHasPhoto = profile?.PhotoData is not null;
+            _communityLoaded   = true;
+        }
+        finally { _communityLoading = false; }
+    }
+
+    private async Task LoadBenefitsAsync()
+    {
+        _benefitsLoading = true;
+        try
+        {
+            var asOf = DateOnly.FromDateTime(DateTime.Today);
+            _benefitsElections = (await BenefitElectionRepo.GetActiveByEmploymentIdAsync(EmploymentId, asOf)).ToList();
+            _benefitsLoaded = true;
+        }
+        catch { _benefitsLoaded = true; }
+        finally { _benefitsLoading = false; }
+    }
+
+    private async Task SaveCommunityPhotoAsync()
+    {
+        if (_person is null) return;
+        _communityError   = null;
+        _communitySuccess = null;
+
+        var fileSize = await JSRuntime.InvokeAsync<long>("allworkFiles.getFileSize", "community-photo-input");
+        if (fileSize == 0)          { _communityError = "No file selected."; return; }
+        if (fileSize > 2_097_152)   { _communityError = "Photo must be under 2 MB."; return; }
+
+        var mimeType = await JSRuntime.InvokeAsync<string>("allworkFiles.getFileMime", "community-photo-input");
+        if (!mimeType.StartsWith("image/")) { _communityError = "Please select an image file (JPEG, PNG, or WebP)."; return; }
+
+        var base64 = await JSRuntime.InvokeAsync<string?>("allworkFiles.readBase64", "community-photo-input");
+        if (string.IsNullOrEmpty(base64)) { _communityError = "Could not read the selected file."; return; }
+
+        var bytes = Convert.FromBase64String(base64);
+        if (bytes.Length > 2_097_152) { _communityError = "Photo must be under 2 MB."; return; }
+
+        _communitySaving = true;
+        try
+        {
+            await SocialProfileRepo.SavePhotoAsync(_person.PersonId, bytes, mimeType);
+            _communityHasPhoto   = true;
+            _communityShowUpload = false;
+            _communityPhotoStamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            _communitySuccess    = "Photo updated.";
+        }
+        catch (Exception ex) { _communityError = ex.Message; }
+        finally { _communitySaving = false; }
+    }
+
+    private async Task SaveCommunityBioAsync()
+    {
+        if (_person is null) return;
+        _communityError   = null;
+        _communitySuccess = null;
+        if (_communityBio.Length > 1000) { _communityError = "Bio must be 1,000 characters or fewer."; return; }
+        _communitySaving = true;
+        try
+        {
+            await SocialProfileRepo.SaveBioAsync(_person.PersonId, _communityBio.Trim());
+            _communitySuccess = "Profile saved.";
+        }
+        catch (Exception ex) { _communityError = ex.Message; }
+        finally { _communitySaving = false; }
     }
 
     private async Task LoadOnboardingAsync()
@@ -1453,4 +1666,95 @@ else
 
     .placeholder-text { color: #6B7280; font-style: italic; }
     .loading-text, .error-text { padding: var(--space-6); color: #6B7280; text-align: center; }
+
+    /* ---- Community tab ---- */
+
+    .community-photo-row {
+        display: flex;
+        align-items: flex-start;
+        gap: var(--space-6);
+        margin-bottom: var(--space-6);
+    }
+
+    .community-photo {
+        width: 120px;
+        height: 120px;
+        border-radius: 50%;
+        object-fit: cover;
+        border: 3px solid #E5E7EB;
+        flex-shrink: 0;
+    }
+
+    .community-photo-placeholder {
+        width: 120px;
+        height: 120px;
+        border-radius: 50%;
+        background: #F3F4F6;
+        border: 2px dashed #D1D5DB;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #9CA3AF;
+        font-size: var(--font-size-sm);
+        flex-shrink: 0;
+    }
+
+    .community-photo-actions {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+        justify-content: center;
+    }
+
+    .upload-inline {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-1);
+    }
+
+    .upload-hint {
+        margin: 0;
+        font-size: var(--font-size-xs, 0.75rem);
+        color: #6B7280;
+    }
+
+    .community-bio-section {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+    }
+
+    .community-bio-input {
+        width: 100%;
+        padding: var(--space-3);
+        border: 1px solid #D1D5DB;
+        border-radius: var(--radius-md, 6px);
+        font-size: var(--font-size-sm);
+        font-family: inherit;
+        resize: vertical;
+        line-height: 1.5;
+    }
+
+    .community-bio-input:focus {
+        outline: none;
+        border-color: var(--aw-teal);
+        box-shadow: 0 0 0 2px rgba(13, 148, 136, 0.15);
+    }
+
+    .community-bio-footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }
+
+    .char-count {
+        font-size: var(--font-size-xs, 0.75rem);
+        color: #6B7280;
+    }
+
+    .form-success {
+        color: #059669;
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-medium);
+    }
 </style>

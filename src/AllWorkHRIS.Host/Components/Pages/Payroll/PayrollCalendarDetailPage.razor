@@ -9,15 +9,14 @@
 @using AllWorkHRIS.Core.Temporal
 @using AllWorkHRIS.Module.Payroll.Domain.Calendar
 @using AllWorkHRIS.Module.Payroll.Repositories
-@using AllWorkHRIS.Host.Payroll.Services
-@implements IDisposable
+@using AllWorkHRIS.Host.Hris.Services
 @inject IPayrollContextRepository   ContextRepo
 @inject IAuditService               AuditService
 @inject ILookupCache                LookupCache
 @inject ITemporalContext            TemporalContext
 @inject AuthenticationStateProvider AuthState
 @inject NavigationManager           Nav
-@inject IPayrollSessionState        SessionState
+@inject IHrisSessionState           SessionState
 
 <PageTitle>Pay Calendar Detail — AllWork HRIS</PageTitle>
 
@@ -745,7 +744,6 @@
         new LookupEntry { Id = 6, Code = "ANNUAL",       Label = "Annual"       },
     ];
 
-    public void Dispose() => SessionState.Unlock();
 
     private void BeginEditRunDate(PayrollPeriod p)
     {
