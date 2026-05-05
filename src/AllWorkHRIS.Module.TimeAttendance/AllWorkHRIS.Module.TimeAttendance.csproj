@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AllWorkHRIS.Core\AllWorkHRIS.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Autofac" Version="9.1.0" />
+    <PackageReference Include="Dapper" Version="2.1.72" />
+    <PackageReference Include="Npgsql" Version="10.0.2" />
+    <PackageReference Include="System.Composition" Version="9.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.13" />
+  </ItemGroup>
+
+  <Target Name="CopyToHostModules" AfterTargets="Build">
+    <PropertyGroup>
+      <HostModulesDir>$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)..\AllWorkHRIS.Host\modules'))</HostModulesDir>
+    </PropertyGroup>
+    <MakeDir Directories="$(HostModulesDir)" />
+    <Copy SourceFiles="$(OutputPath)$(AssemblyName).dll"
+          DestinationFolder="$(HostModulesDir)"
+          SkipUnchangedFiles="true" />
+    <Message Text="[TimeAttendance] Copied $(AssemblyName).dll → $(HostModulesDir)" Importance="normal" />
+  </Target>
+
+</Project>

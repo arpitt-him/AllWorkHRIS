@@ -20,11 +20,14 @@ public sealed record WorkQueueItem
 
 public static class WorkQueueItemTypes
 {
-    public const string LeaveApproval    = "LEAVE_APPROVAL";
-    public const string DocExpiring90    = "DOC_EXPIRING_90";
-    public const string DocExpiring30    = "DOC_EXPIRING_30";
-    public const string DocExpired       = "DOC_EXPIRED";
-    public const string OnboardingTask   = "ONBOARDING_TASK";
+    public const string LeaveApproval          = "LEAVE_APPROVAL";
+    public const string DocExpiring90          = "DOC_EXPIRING_90";
+    public const string DocExpiring30          = "DOC_EXPIRING_30";
+    public const string DocExpired             = "DOC_EXPIRED";
+    public const string OnboardingTask         = "ONBOARDING_TASK";
+    public const string TimeApproval           = "TIME_APPROVAL";
+    public const string OvertimeWarning        = "OVERTIME_WARNING";
+    public const string RetroCalcReview        = "RETRO_CALC_REVIEW";
 }
 
 public static class WorkQueuePriority

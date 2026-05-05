@@ -23,6 +23,7 @@
     <ProjectReference Include="..\..\src\AllWorkHRIS.Module.Payroll\AllWorkHRIS.Module.Payroll.csproj" />
     <ProjectReference Include="..\..\src\AllWorkHRIS.Module.Tax\AllWorkHRIS.Module.Tax.csproj" />
     <ProjectReference Include="..\..\src\AllWorkHRIS.Module.Benefits\AllWorkHRIS.Module.Benefits.csproj" />
+    <ProjectReference Include="..\..\src\AllWorkHRIS.Module.TimeAttendance\AllWorkHRIS.Module.TimeAttendance.csproj" />
   </ItemGroup>
 
   <ItemGroup>

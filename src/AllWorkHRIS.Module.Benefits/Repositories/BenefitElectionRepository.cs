@@ -348,6 +348,11 @@ public sealed class BenefitElectionRepository : IBenefitElectionRepository
         var where = new List<string>();
         var p = new DynamicParameters();
 
+        if (query.LegalEntityId.HasValue)
+        {
+            where.Add("emp.legal_entity_id = @LegalEntityId");
+            p.Add("LegalEntityId", query.LegalEntityId.Value);
+        }
         if (query.EmploymentId.HasValue)
         {
             where.Add("e.employment_id = @EmploymentId");
@@ -379,7 +384,8 @@ public sealed class BenefitElectionRepository : IBenefitElectionRepository
         var countSql = $"""
             SELECT COUNT(*)
             FROM   benefit_deduction_election e
-            JOIN   deduction d ON d.deduction_id = e.deduction_id
+            JOIN   deduction  d   ON d.deduction_id   = e.deduction_id
+            JOIN   employment emp ON emp.employment_id = e.employment_id
             {whereClause}
             """;
 

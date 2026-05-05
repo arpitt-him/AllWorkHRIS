@@ -1,0 +1,514 @@
+@page "/ta/my-timecard"
+@layout TimeAttendanceShell
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = "Employee,TimeAdmin")]
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using AllWorkHRIS.Host.TimeAttendance
+@using AllWorkHRIS.Module.TimeAttendance.Commands
+@using AllWorkHRIS.Module.TimeAttendance.Services
+@inject AuthenticationStateProvider AuthProvider
+@inject TimeAttendanceQueryService  QueryService
+@inject ITimeEntryService           TimeEntryService
+
+<PageTitle>My Timecard — AllWork HRIS</PageTitle>
+
+<div class="page-container">
+
+    <div class="page-header" style="display:flex;align-items:center;gap:var(--space-4,1rem);flex-wrap:wrap;">
+        <h2 class="page-title" style="margin:0;">My Timecard</h2>
+
+        <select class="form-input" style="width:300px;" value="@_selectedPeriodId"
+                @onchange="OnPeriodChanged">
+            <option value="">— select period —</option>
+            @foreach (var p in _periods)
+            {
+                <option value="@p.PeriodId">@p.Label</option>
+            }
+        </select>
+
+        @if (_selectedPeriod is not null)
+        {
+            <span class="badge badge--neutral" style="font-size:.8rem;">
+                @_selectedPeriod.StartDate.ToString("MMM d") – @_selectedPeriod.EndDate.ToString("MMM d, yyyy")
+            </span>
+        }
+    </div>
+
+    @if (_selectedPeriodId == Guid.Empty)
+    {
+        <div class="empty-state" style="margin-top:var(--space-8,2rem);">Select a period to view your timecard.</div>
+    }
+    else if (_loading)
+    {
+        <div class="empty-state" style="margin-top:var(--space-8,2rem);">Loading…</div>
+    }
+    else
+    {
+        @* ── Running total ──────────────────────────────────────────────── *@
+        <div class="week-total-bar @(_overtimeHours > 0 ? "week-total-bar--overtime" : "")"
+             style="margin:var(--space-4,1rem) 0;">
+            <span>Period total: <strong>@_totalHours.ToString("0.##") hrs</strong></span>
+            @if (_overtimeHours > 0)
+            {
+                <span class="overtime-badge">@_overtimeHours.ToString("0.##") hrs overtime</span>
+            }
+        </div>
+
+        @* ── Entry table ─────────────────────────────────────────────────── *@
+        <div class="card" style="margin-bottom:var(--space-5,1.25rem);">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Category</th>
+                        <th>Hours</th>
+                        <th>Start</th>
+                        <th>End</th>
+                        <th>Status</th>
+                        <th>Notes</th>
+                        <th style="width:80px;"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (!_entries.Any())
+                    {
+                        <tr>
+                            <td colspan="8" style="text-align:center;color:#9ca3af;padding:2rem;">
+                                No entries yet. Click <em>+ Add Entry</em> to get started.
+                            </td>
+                        </tr>
+                    }
+                    @foreach (var entry in _entries)
+                    {
+                        <tr class="data-row @(entry.StatusCode == "REJECTED" ? "data-row--rejected" : "")">
+                            <td>@entry.WorkDate.ToString("ddd MMM d")</td>
+                            <td>@CategoryLabel(entry.TimeCategoryCode)</td>
+                            <td>@entry.Duration.ToString("0.##")</td>
+                            <td>@(entry.StartTime?.ToString("h:mm tt") ?? "—")</td>
+                            <td>@(entry.EndTime?.ToString("h:mm tt") ?? "—")</td>
+                            <td><span class="badge @StatusBadgeClass(entry.StatusCode)">@entry.StatusCode</span></td>
+                            <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+                                title="@(entry.RejectionReason ?? entry.Notes)">
+                                @if (entry.StatusCode == "REJECTED" && entry.RejectionReason is not null)
+                                {
+                                    <em style="color:#dc2626;">@entry.RejectionReason</em>
+                                }
+                                else
+                                {
+                                    @(entry.Notes ?? "—")
+                                }
+                            </td>
+                            <td>
+                                @if (entry.StatusCode is "SUBMITTED" or "DRAFT")
+                                {
+                                    @if (_voidConfirmId == entry.TimeEntryId)
+                                    {
+                                        <span style="display:flex;gap:.3rem;">
+                                            <button class="btn btn--danger btn--sm"
+                                                    @onclick="VoidEntryAsync">Yes</button>
+                                            <button class="btn btn--ghost btn--sm"
+                                                    @onclick="() => _voidConfirmId = null">No</button>
+                                        </span>
+                                    }
+                                    else
+                                    {
+                                        <button class="btn btn--ghost btn--sm"
+                                                @onclick="() => _voidConfirmId = entry.TimeEntryId">
+                                            Void
+                                        </button>
+                                    }
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        <div style="display:flex;gap:var(--space-3,.75rem);align-items:center;">
+            <button class="btn btn--primary" @onclick="OpenAddEntry">+ Add Entry</button>
+
+            @if (!string.IsNullOrEmpty(_statusMessage))
+            {
+                <span class="@(_statusIsError ? "text-danger" : "text-success")" style="font-size:.875rem;">
+                    @_statusMessage
+                </span>
+            }
+        </div>
+    }
+
+</div>
+
+@* ── Add entry flyout ───────────────────────────────────────────────────── *@
+@if (_showEntryPanel)
+{
+    <div class="flyout-overlay" @onclick="CloseEntryPanel">
+        <div class="flyout-panel" @onclick:stopPropagation="true">
+
+            <div class="flyout-header">
+                <h3>Add Time Entry</h3>
+                <button class="btn btn--ghost btn--sm" @onclick="CloseEntryPanel">✕</button>
+            </div>
+
+            <div class="flyout-body">
+
+                <div class="form-group">
+                    <label class="form-label">Work Date</label>
+                    <input type="date" class="form-input"
+                           @bind="_entryWorkDate"
+                           min="@(_selectedPeriod?.StartDate.ToString("yyyy-MM-dd"))"
+                           max="@(_selectedPeriod?.EndDate.ToString("yyyy-MM-dd"))" />
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Category</label>
+                    <select class="form-input" @bind="_entryCategory">
+                        <option value="REGULAR">Regular</option>
+                        <option value="OVERTIME">Overtime</option>
+                        <option value="PTO">PTO</option>
+                        <option value="SICK">Sick</option>
+                        <option value="HOLIDAY">Holiday</option>
+                        <option value="BEREAVEMENT">Bereavement</option>
+                        <option value="JURY_DUTY">Jury Duty</option>
+                        <option value="UNPAID">Unpaid</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Duration (hours)</label>
+                    <input type="number" class="form-input" step="0.25" min="0.25" max="24"
+                           @bind="_entryDuration" />
+                </div>
+
+                <div style="display:flex;gap:var(--space-3,.75rem);">
+                    <div class="form-group" style="flex:1;">
+                        <label class="form-label">Start Time <span style="color:#9ca3af;font-weight:400;">(opt.)</span></label>
+                        <input type="time" class="form-input" @bind="_entryStartTime" />
+                    </div>
+                    <div class="form-group" style="flex:1;">
+                        <label class="form-label">End Time <span style="color:#9ca3af;font-weight:400;">(opt.)</span></label>
+                        <input type="time" class="form-input" @bind="_entryEndTime" />
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Notes <span style="color:#9ca3af;font-weight:400;">(opt.)</span></label>
+                    <textarea class="form-input" rows="3" @bind="_entryNotes"
+                              placeholder="Describe the work or leave blank…"></textarea>
+                </div>
+
+                @if (!string.IsNullOrEmpty(_entryError))
+                {
+                    <div class="alert alert--error">@_entryError</div>
+                }
+            </div>
+
+            <div class="flyout-footer">
+                <button class="btn btn--primary" @onclick="SubmitNewEntryAsync">Submit Entry</button>
+                <button class="btn btn--ghost" @onclick="CloseEntryPanel">Cancel</button>
+            </div>
+
+        </div>
+    </div>
+}
+
+@code {
+
+    private Guid?                         _employmentId;
+    private IReadOnlyList<TaPeriodOption> _periods     = [];
+    private IReadOnlyList<TimeEntryRow>   _entries     = [];
+    private Guid                          _selectedPeriodId;
+    private TaPeriodOption?               _selectedPeriod;
+    private bool                          _loading;
+
+    private decimal _totalHours;
+    private decimal _overtimeHours;
+    private string? _statusMessage;
+    private bool    _statusIsError;
+    private Guid?   _voidConfirmId;
+
+    // ── Entry form ──────────────────────────────────────────────────────────
+    private bool      _showEntryPanel;
+    private DateTime  _entryWorkDate  = DateTime.Today;
+    private string    _entryCategory  = "REGULAR";
+    private decimal   _entryDuration  = 8m;
+    private TimeOnly? _entryStartTime;
+    private TimeOnly? _entryEndTime;
+    private string?   _entryNotes;
+    private string?   _entryError;
+
+    // ── Lifecycle ───────────────────────────────────────────────────────────
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthProvider.GetAuthenticationStateAsync();
+        var user      = authState.User;
+
+        var empClaim = user.FindFirst("employment_id")?.Value
+                    ?? user.FindFirst("EmploymentId")?.Value;
+
+        if (Guid.TryParse(empClaim, out var eid))
+            _employmentId = eid;
+
+        if (_employmentId.HasValue)
+            await LoadPeriodsAsync();
+    }
+
+    private async Task LoadPeriodsAsync()
+    {
+        if (_employmentId is null) return;
+
+        _periods = await QueryService.GetOpenPeriodsForEmploymentAsync(_employmentId.Value);
+
+        if (_periods.Count > 0)
+        {
+            _selectedPeriodId = _periods[0].PeriodId;
+            _selectedPeriod   = _periods[0];
+            await LoadEntriesAsync();
+        }
+    }
+
+    private async Task OnPeriodChanged(ChangeEventArgs e)
+    {
+        if (Guid.TryParse(e.Value?.ToString(), out var id))
+        {
+            _selectedPeriodId = id;
+            _selectedPeriod   = _periods.FirstOrDefault(p => p.PeriodId == id);
+            await LoadEntriesAsync();
+        }
+        else
+        {
+            _selectedPeriodId = Guid.Empty;
+            _selectedPeriod   = null;
+            _entries          = [];
+        }
+    }
+
+    private async Task LoadEntriesAsync()
+    {
+        if (_employmentId is null || _selectedPeriodId == Guid.Empty) return;
+
+        _loading = true;
+        StateHasChanged();
+
+        _entries = await QueryService.GetEntriesForEmploymentAsync(
+            _employmentId.Value, _selectedPeriodId);
+
+        _totalHours    = _entries.Sum(e => e.Duration);
+        _overtimeHours = _entries.Where(e => e.TimeCategoryCode == "OVERTIME").Sum(e => e.Duration);
+
+        _loading = false;
+    }
+
+    // ── Add entry ───────────────────────────────────────────────────────────
+
+    private void OpenAddEntry()
+    {
+        _entryWorkDate  = _selectedPeriod is not null
+            ? _selectedPeriod.StartDate.ToDateTime(TimeOnly.MinValue)
+            : DateTime.Today;
+        _entryCategory  = "REGULAR";
+        _entryDuration  = 8m;
+        _entryStartTime = default;
+        _entryEndTime   = default;
+        _entryNotes     = null;
+        _entryError     = null;
+        _showEntryPanel = true;
+    }
+
+    private void CloseEntryPanel()
+    {
+        _showEntryPanel = false;
+        _entryError     = null;
+    }
+
+    private async Task SubmitNewEntryAsync()
+    {
+        if (_employmentId is null) return;
+
+        _entryError = null;
+
+        if (_entryDuration <= 0)
+        {
+            _entryError = "Duration must be greater than 0.";
+            return;
+        }
+
+        var workDate = DateOnly.FromDateTime(_entryWorkDate);
+        if (_selectedPeriod is not null &&
+            (workDate < _selectedPeriod.StartDate || workDate > _selectedPeriod.EndDate))
+        {
+            _entryError = "Work date must fall within the selected period.";
+            return;
+        }
+
+        try
+        {
+            var cmd = new SubmitTimeEntryCommand
+            {
+                EmploymentId    = _employmentId.Value,
+                PayrollPeriodId = _selectedPeriodId,
+                WorkDate        = workDate,
+                TimeCategory    = _entryCategory,
+                Duration        = _entryDuration,
+                StartTime       = _entryStartTime,
+                EndTime         = _entryEndTime,
+                Notes           = string.IsNullOrWhiteSpace(_entryNotes) ? null : _entryNotes.Trim(),
+                EntryMethod     = "SELF_SERVICE",
+                SubmittedBy     = _employmentId.Value
+            };
+
+            await TimeEntryService.SubmitTimeEntryAsync(cmd);
+            CloseEntryPanel();
+            await LoadEntriesAsync();
+            ShowStatus("Entry submitted.", false);
+        }
+        catch (Exception ex)
+        {
+            _entryError = ex.Message;
+        }
+    }
+
+    // ── Void entry ──────────────────────────────────────────────────────────
+
+    private async Task VoidEntryAsync()
+    {
+        if (_voidConfirmId is null || _employmentId is null) return;
+
+        var idToVoid = _voidConfirmId.Value;
+        _voidConfirmId = null;
+
+        try
+        {
+            await TimeEntryService.VoidTimeEntryAsync(
+                idToVoid, _employmentId.Value, "Self-service void");
+
+            await LoadEntriesAsync();
+            ShowStatus("Entry voided.", false);
+        }
+        catch (Exception ex)
+        {
+            ShowStatus(ex.Message, true);
+        }
+    }
+
+    // ── Helpers ─────────────────────────────────────────────────────────────
+
+    private void ShowStatus(string msg, bool isError)
+    {
+        _statusMessage = msg;
+        _statusIsError = isError;
+        _ = Task.Delay(4000).ContinueWith(_ =>
+        {
+            _statusMessage = null;
+            InvokeAsync(StateHasChanged);
+        });
+    }
+
+    private static string CategoryLabel(string code) => code switch
+    {
+        "REGULAR"     => "Regular",
+        "OVERTIME"    => "Overtime",
+        "PTO"         => "PTO",
+        "SICK"        => "Sick",
+        "HOLIDAY"     => "Holiday",
+        "BEREAVEMENT" => "Bereavement",
+        "JURY_DUTY"   => "Jury Duty",
+        "UNPAID"      => "Unpaid",
+        _             => code
+    };
+
+    private static string StatusBadgeClass(string code) => code switch
+    {
+        "DRAFT"     => "badge--neutral",
+        "SUBMITTED" => "badge--info",
+        "APPROVED"  => "badge--success",
+        "REJECTED"  => "badge--danger",
+        "LOCKED"    => "badge--locked",
+        _           => "badge--neutral"
+    };
+}
+
+<style>
+    .week-total-bar {
+        display: inline-flex;
+        gap: var(--space-3, .75rem);
+        align-items: center;
+        background: #f0fdf4;
+        border: 1px solid #bbf7d0;
+        border-radius: var(--radius-md, .5rem);
+        padding: .5rem 1rem;
+        font-size: .9rem;
+        color: #166534;
+    }
+
+    .week-total-bar--overtime {
+        background: #fffbeb;
+        border-color: #fde68a;
+        color: #92400e;
+    }
+
+    .overtime-badge {
+        font-size: .8rem;
+        font-weight: 600;
+        color: #b45309;
+        background: #fef3c7;
+        border-radius: 999px;
+        padding: .1rem .6rem;
+    }
+
+    .data-row--rejected td { background: #fff5f5; }
+
+    .flyout-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,.35);
+        z-index: 1000;
+        display: flex;
+        align-items: flex-start;
+        justify-content: flex-end;
+    }
+
+    .flyout-panel {
+        width: 420px;
+        max-width: 95vw;
+        height: 100vh;
+        background: white;
+        display: flex;
+        flex-direction: column;
+        box-shadow: -4px 0 24px rgba(0,0,0,.15);
+    }
+
+    .flyout-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: var(--space-5, 1.25rem) var(--space-6, 1.5rem);
+        border-bottom: 1px solid #e5e7eb;
+    }
+
+    .flyout-header h3 { margin: 0; font-size: 1rem; }
+
+    .flyout-body {
+        flex: 1;
+        overflow-y: auto;
+        padding: var(--space-6, 1.5rem);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-4, 1rem);
+    }
+
+    .flyout-footer {
+        padding: var(--space-4, 1rem) var(--space-6, 1.5rem);
+        border-top: 1px solid #e5e7eb;
+        display: flex;
+        gap: var(--space-3, .75rem);
+    }
+
+    .badge--locked {
+        background: #ede9fe;
+        color: #5b21b6;
+        border: 1px solid #c4b5fd;
+    }
+</style>

@@ -17,6 +17,7 @@
 @inject IDeductionRepository           CodeRepo
 @inject IDeductionRateTableRepository  RateTableRepo
 @inject IEmploymentService             EmploymentService
+@inject IHrisSessionState              SessionState
 @inject AuthenticationStateProvider   AuthState
 
 <PageTitle>Benefit Elections — AllWork HRIS</PageTitle>
@@ -517,6 +518,7 @@
     // ── List / filter ────────────────────────────────────────────────
     private AllWorkHRIS.Core.Domain.PagedResult<ElectionListItem> _page = new();
     private ElectionListQuery _query   = new() { Page = 1, PageSize = 20 };
+    private Guid? _entityId;
     private bool              _loading = true;
     private string?           _error;
     private string            _filterCode   = string.Empty;
@@ -555,10 +557,12 @@
 
     protected override async Task OnInitializedAsync()
     {
+        _entityId = SessionState.SelectedLegalEntityId;
+        _query    = _query with { LegalEntityId = _entityId };
         try
         {
             _activeCodes  = (await CodeRepo.GetActiveCodesAsync()).ToList();
-            _allEmployees = (await EmploymentService.GetAllActiveListAsync()).ToList();
+            _allEmployees = (await EmploymentService.GetAllActiveListAsync(_entityId)).ToList();
             await LoadPageAsync();
         }
         catch (Exception ex) { _error = ex.Message; }
@@ -756,6 +760,7 @@
         {
             Page          = 1,
             PageSize      = 20,
+            LegalEntityId = _entityId,
             DeductionCode = string.IsNullOrWhiteSpace(_filterCode)   ? null : _filterCode.Trim(),
             Status        = string.IsNullOrWhiteSpace(_filterStatus) ? null : _filterStatus
         };

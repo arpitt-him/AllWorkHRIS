@@ -24,6 +24,8 @@ using AllWorkHRIS.Host.Hris.Jobs;
 using AllWorkHRIS.Host.Hris.Repositories;
 using AllWorkHRIS.Host.Hris.Services;
 using AllWorkHRIS.Host.Platform.Audit;
+using AllWorkHRIS.Host.TimeAttendance;
+using AllWorkHRIS.Module.TimeAttendance.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -276,10 +278,28 @@ builder.Host.ConfigureContainer<ContainerBuilder>(autofacBuilder =>
                   .As<AllWorkHRIS.Core.Navigation.INavContributor>()
                   .SingleInstance();
 
+    // Employee tab contributors
+    autofacBuilder.RegisterType<AllWorkHRIS.Host.Hris.TabContributors.BenefitsTabContributor>()
+                  .As<AllWorkHRIS.Core.Composition.IEmployeeTabContributor>()
+                  .SingleInstance();
+    autofacBuilder.RegisterType<AllWorkHRIS.Host.Hris.TabContributors.TimeTabContributor>()
+                  .As<AllWorkHRIS.Core.Composition.IEmployeeTabContributor>()
+                  .SingleInstance();
+
     // Fallback no-op for optional Core abstractions — modules override via last-registration-wins
     autofacBuilder.RegisterType<NullPayrollContextLookup>()
                   .As<IPayrollContextLookup>()
                   .SingleInstance();
+
+    // T&A query service (UI-layer aggregation queries)
+    autofacBuilder.RegisterType<TimeAttendanceQueryService>()
+                  .AsSelf()
+                  .InstancePerLifetimeScope();
+
+    // T&A notifier — Host implementation routes to IWorkQueueService
+    autofacBuilder.RegisterType<WorkQueueTimeApprovalNotifier>()
+                  .As<ITimeApprovalNotifier>()
+                  .InstancePerLifetimeScope();
 
     autofacBuilder.RegisterType<NullPayrollPipelineService>()
                   .As<IPayrollPipelineService>()

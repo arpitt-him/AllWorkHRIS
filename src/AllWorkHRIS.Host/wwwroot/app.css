@@ -425,6 +425,30 @@ html, body {
     min-width: 130px;
 }
 
+.stat-card--success {
+    border-left: 4px solid #16A34A;
+}
+
+.stat-card--success .stat-value {
+    color: #16A34A;
+}
+
+.stat-card--danger {
+    border-left: 4px solid #DC2626;
+}
+
+.stat-card--danger .stat-value {
+    color: #DC2626;
+}
+
+.stat-card--warn {
+    border-left: 4px solid #D97706;
+}
+
+.stat-card--warn .stat-value {
+    color: #D97706;
+}
+
 .stat-label {
     font-size: var(--font-size-sm);
     color: #6B7280;

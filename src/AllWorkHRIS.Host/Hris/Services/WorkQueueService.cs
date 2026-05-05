@@ -11,6 +11,9 @@ public interface IWorkQueueService
                    string taskType, DateOnly dueDate);
     Task       ResolveByReferenceAsync(Guid referenceId, Guid resolvedBy);
     Task<IEnumerable<WorkQueueItem>> GetOpenByRoleAsync(string role, Guid? legalEntityId = null, Guid? employmentId = null);
+    Task<Guid> CreateTimeApprovalTaskAsync(Guid timeEntryId, Guid employmentId);
+    Task       CreateOvertimeWarningAsync(Guid employmentId, DateOnly weekStart, decimal overtimeHours);
+    Task       CreateRetroCalculationReviewAsync(Guid correctionId, Guid employmentId, Guid periodId);
 }
 
 public sealed class WorkQueueService : IWorkQueueService
@@ -110,6 +113,63 @@ public sealed class WorkQueueService : IWorkQueueService
             Priority        = WorkQueuePriority.Normal,
             Title           = $"Onboarding task: {taskType}",
             DueDate         = dueDate,
+            CreatedAt       = DateTimeOffset.UtcNow
+        };
+        await _repository.InsertAsync(item);
+    }
+
+    public async Task<Guid> CreateTimeApprovalTaskAsync(Guid timeEntryId, Guid employmentId)
+    {
+        var item = new WorkQueueItem
+        {
+            WorkQueueItemId = Guid.NewGuid(),
+            ItemType        = WorkQueueItemTypes.TimeApproval,
+            ReferenceId     = timeEntryId,
+            ReferenceType   = "TIME_ENTRY",
+            EmploymentId    = employmentId,
+            AssignedRole    = "Manager",
+            Status          = "OPEN",
+            Priority        = WorkQueuePriority.Normal,
+            Title           = "Time Entry Pending Approval",
+            Description     = $"Time entry {timeEntryId} requires your approval.",
+            CreatedAt       = DateTimeOffset.UtcNow
+        };
+        return await _repository.InsertAsync(item);
+    }
+
+    public async Task CreateOvertimeWarningAsync(Guid employmentId, DateOnly weekStart, decimal overtimeHours)
+    {
+        var item = new WorkQueueItem
+        {
+            WorkQueueItemId = Guid.NewGuid(),
+            ItemType        = WorkQueueItemTypes.OvertimeWarning,
+            ReferenceId     = employmentId,
+            ReferenceType   = "EMPLOYMENT",
+            EmploymentId    = employmentId,
+            AssignedRole    = "TimeAdmin",
+            Status          = "OPEN",
+            Priority        = WorkQueuePriority.Normal,
+            Title           = $"Overtime detected — week of {weekStart:yyyy-MM-dd}",
+            Description     = $"{overtimeHours:F2} overtime hours reclassified for week starting {weekStart:yyyy-MM-dd}.",
+            CreatedAt       = DateTimeOffset.UtcNow
+        };
+        await _repository.InsertAsync(item);
+    }
+
+    public async Task CreateRetroCalculationReviewAsync(Guid correctionId, Guid employmentId, Guid periodId)
+    {
+        var item = new WorkQueueItem
+        {
+            WorkQueueItemId = Guid.NewGuid(),
+            ItemType        = WorkQueueItemTypes.RetroCalcReview,
+            ReferenceId     = correctionId,
+            ReferenceType   = "TIME_ENTRY",
+            EmploymentId    = employmentId,
+            AssignedRole    = "PayrollOperator",
+            Status          = "OPEN",
+            Priority        = WorkQueuePriority.High,
+            Title           = "Retroactive time correction — payroll review required",
+            Description     = $"Correction {correctionId} may affect payroll period {periodId}. Review required.",
             CreatedAt       = DateTimeOffset.UtcNow
         };
         await _repository.InsertAsync(item);

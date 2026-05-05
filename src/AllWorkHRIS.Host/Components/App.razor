@@ -132,6 +132,14 @@
                 var input = document.getElementById(inputId);
                 if (!input || !input.files || !input.files.length) return '';
                 return input.files[0].type;
+            },
+            downloadBase64: function (filename, mimeType, base64) {
+                var link = document.createElement('a');
+                link.href = 'data:' + mimeType + ';base64,' + base64;
+                link.download = filename;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
             }
         };
     </script>

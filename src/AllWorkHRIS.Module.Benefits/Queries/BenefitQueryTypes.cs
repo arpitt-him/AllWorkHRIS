@@ -27,6 +27,7 @@ public sealed record ElectionListQuery
 {
     public int       Page           { get; init; } = 1;
     public int       PageSize       { get; init; } = 20;
+    public Guid?     LegalEntityId  { get; init; }
     public Guid?     EmploymentId   { get; init; }
     public string?   DeductionCode  { get; init; }
     public string?   Status         { get; init; }

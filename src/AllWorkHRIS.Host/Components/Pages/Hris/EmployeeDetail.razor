@@ -8,11 +8,11 @@
 @using Microsoft.AspNetCore.Components.Forms
 @using AllWorkHRIS.Core.Lookups
 @using AllWorkHRIS.Core.Temporal
+@using AllWorkHRIS.Core.Composition
 @using AllWorkHRIS.Host.Hris.Commands
 @using AllWorkHRIS.Host.Hris.Services
 @using AllWorkHRIS.Host.Hris.Repositories
 @using AllWorkHRIS.Host.Hris.Domain
-@using AllWorkHRIS.Module.Benefits.Repositories
 @inject IEmploymentService    EmploymentService
 @inject IPersonService        PersonService
 @inject ICompensationService  CompensationService
@@ -23,7 +23,7 @@
 @inject IDocumentService      DocumentService
 @inject IOnboardingService    OnboardingService
 @inject IPersonSocialProfileRepository SocialProfileRepo
-@inject IBenefitElectionRepository     BenefitElectionRepo
+@inject IEnumerable<IEmployeeTabContributor> TabContributors
 @inject IHrisSessionState     SessionState
 @inject ILookupCache          LookupCache
 @inject ITemporalContext      TemporalContext
@@ -84,17 +84,26 @@ else
 
         @* Tabs *@
         <div class="tab-bar">
-            @foreach (var tab in _tabs)
+            @foreach (var tab in _allTabs)
             {
-                <button class="tab-btn @(_activeTab == tab ? "active" : "")"
-                        @onclick="() => SwitchTabAsync(tab)">
-                    @tab
+                <button class="tab-btn @(_activeTab == tab.Label ? "active" : "")"
+                        @onclick="() => SwitchTabAsync(tab.Label)">
+                    @tab.Label
                 </button>
             }
         </div>
 
         @* Tab content *@
         <div class="tab-content">
+            @{
+                var _activeEntry = _allTabs.FirstOrDefault(t => t.Label == _activeTab);
+            }
+            @if (_activeEntry?.ComponentType is not null)
+            {
+                <DynamicComponent Type="_activeEntry.ComponentType"
+                                  Parameters="_tabParams" />
+            }
+            else
             @switch (_activeTab)
             {
                 case "Profile":
@@ -670,50 +679,6 @@ else
                     }
                     break;
 
-                case "Benefits":
-                    <div class="detail-section">
-                        <h3 class="section-title">Benefit Elections</h3>
-                        @if (_benefitsLoading)
-                        {
-                            <p class="loading-text">Loading…</p>
-                        }
-                        else if (_benefitsElections.Count == 0)
-                        {
-                            <p class="placeholder-text">No active elections for this employee.</p>
-                        }
-                        else
-                        {
-                            <table class="data-table">
-                                <thead>
-                                    <tr>
-                                        <th>Code</th>
-                                        <th>Treatment</th>
-                                        <th>Emp Amount</th>
-                                        <th>ER Amount</th>
-                                        <th>Effective Start</th>
-                                        <th>Effective End</th>
-                                        <th>Status</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    @foreach (var e in _benefitsElections)
-                                    {
-                                        <tr>
-                                            <td><samp>@e.DeductionCode</samp></td>
-                                            <td><span class="badge @(e.TaxTreatment == "PRE_TAX" ? "badge-blue" : "badge-orange")">@e.TaxTreatment</span></td>
-                                            <td>@e.EmployeeAmount.ToString("N2")</td>
-                                            <td>@(e.EmployerContributionAmount?.ToString("N2") ?? "—")</td>
-                                            <td>@e.EffectiveStartDate.ToString("yyyy-MM-dd")</td>
-                                            <td>@(e.EffectiveEndDate?.ToString("yyyy-MM-dd") ?? "—")</td>
-                                            <td><span class="badge badge-green">@e.Status</span></td>
-                                        </tr>
-                                    }
-                                </tbody>
-                            </table>
-                        }
-                    </div>
-                    break;
-
                 case "Community":
                     <div class="detail-section">
                         <h3 class="section-title">Community Profile</h3>
@@ -818,8 +783,23 @@ else
     private int _taskCompletedStatusId;
     private int _taskWaivedStatusId;
 
-    private static readonly string[] _tabs =
-        ["Profile", "Employment", "Assignment", "Compensation", "Leave", "Documents", "Onboarding", "Benefits", "Community", "History"];
+    private sealed record TabEntry(string Label, int SortOrder, Type? ComponentType = null);
+
+    private static readonly TabEntry[] _coreTabs =
+    [
+        new("Profile",      10),
+        new("Employment",   20),
+        new("Assignment",   30),
+        new("Compensation", 40),
+        new("Leave",        50),
+        new("Documents",    60),
+        new("Onboarding",   70),
+        new("Community",    90),
+        new("History",      100),
+    ];
+
+    private List<TabEntry> _allTabs = [];
+    private Dictionary<string, object?> _tabParams => new() { ["EmploymentId"] = EmploymentId };
 
     // Community tab
     private bool    _communityLoaded      = false;
@@ -831,11 +811,6 @@ else
     private long    _communityPhotoStamp = 0;   // appended to photo URL to bust browser cache after upload
     private string? _communityError;
     private string? _communitySuccess;
-
-    // Benefits tab
-    private bool _benefitsLoaded  = false;
-    private bool _benefitsLoading = false;
-    private List<AllWorkHRIS.Module.Benefits.Domain.Elections.BenefitDeductionElection> _benefitsElections = [];
 
     // Assignment tab
     private bool         _assignmentLoaded   = false;
@@ -894,6 +869,11 @@ else
         _taskCompletedStatusId = LookupCache.GetId(LookupTables.OnboardingTaskStatus, "COMPLETED");
         _taskWaivedStatusId    = LookupCache.GetId(LookupTables.OnboardingTaskStatus, "WAIVED");
 
+        _allTabs = _coreTabs
+            .Concat(TabContributors.Select(c => new TabEntry(c.Label, c.SortOrder, c.ComponentType)))
+            .OrderBy(t => t.SortOrder)
+            .ToList();
+
         _loading = true;
         try
         {
@@ -919,7 +899,7 @@ else
         finally { _loading = false; }
     }
 
-    public void Dispose() => SessionState.Unlock();
+    public void Dispose() { }
 
     private async Task SwitchTabAsync(string tab)
     {
@@ -930,7 +910,6 @@ else
             case "Leave"      when !_leaveLoaded:       await LoadLeaveAsync();       break;
             case "Documents"  when !_documentsLoaded:   await LoadDocumentsAsync();   break;
             case "Onboarding" when !_onboardingLoaded:  await LoadOnboardingAsync();  break;
-            case "Benefits"   when !_benefitsLoaded:    await LoadBenefitsAsync();    break;
             case "Community"  when !_communityLoaded:   await LoadCommunityAsync();   break;
         }
     }
@@ -995,19 +974,6 @@ else
             _communityLoaded   = true;
         }
         finally { _communityLoading = false; }
-    }
-
-    private async Task LoadBenefitsAsync()
-    {
-        _benefitsLoading = true;
-        try
-        {
-            var asOf = DateOnly.FromDateTime(DateTime.Today);
-            _benefitsElections = (await BenefitElectionRepo.GetActiveByEmploymentIdAsync(EmploymentId, asOf)).ToList();
-            _benefitsLoaded = true;
-        }
-        catch { _benefitsLoaded = true; }
-        finally { _benefitsLoading = false; }
     }
 
     private async Task SaveCommunityPhotoAsync()

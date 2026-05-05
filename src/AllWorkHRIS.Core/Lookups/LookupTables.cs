@@ -33,6 +33,11 @@ public static class LookupTables
     public const string JobStatus              = "lkp_job_status";
     public const string PositionStatus         = "lkp_position_status";
 
+    // Time & Attendance
+    public const string TimeEntryStatus = "lkp_time_entry_status";
+    public const string TimeCategory    = "lkp_time_category";
+    public const string EntryMethod     = "lkp_entry_method";
+
     // Payroll
     public const string ResultClass              = "lkp_result_class";
     public const string RunType                  = "lkp_run_type";
