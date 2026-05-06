@@ -1,0 +1,149 @@
+@inject TimeAttendanceQueryService QueryService
+
+@if (_loading)
+{
+    <p class="loading-text">Loading…</p>
+}
+else if (_periods.Count == 0)
+{
+    <p class="placeholder-text">No time entries on record for this employee.</p>
+}
+else
+{
+    <div style="display:flex;align-items:center;gap:.75rem;margin-bottom:1.25rem;">
+        <label class="detail-label" style="margin:0;">Period</label>
+        <select class="form-input" style="width:280px;" value="@_selectedPeriodId"
+                @onchange="OnPeriodChanged">
+            @foreach (var p in _periods)
+            {
+                <option value="@p.PeriodId">@p.Label</option>
+            }
+        </select>
+    </div>
+
+    @if (_entriesLoading)
+    {
+        <p class="loading-text">Loading entries…</p>
+    }
+    else if (_entries.Count == 0)
+    {
+        <p class="placeholder-text">No entries for this period.</p>
+    }
+    else
+    {
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Category</th>
+                    <th>Hours</th>
+                    <th>Time</th>
+                    <th>Status</th>
+                    <th>Notes</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var e in _entries)
+                {
+                    <tr>
+                        <td>@e.WorkDate.ToString("ddd MMM d")</td>
+                        <td><span class="category-chip">@e.TimeCategoryCode</span></td>
+                        <td>@e.Duration.ToString("F2")</td>
+                        <td>
+                            @if (e.StartTime.HasValue && e.EndTime.HasValue)
+                            { @($"{e.StartTime.Value:HH:mm}–{e.EndTime.Value:HH:mm}") }
+                            else { @("—") }
+                        </td>
+                        <td>
+                            <span class="status-badge status-@e.StatusCode.ToLower()">
+                                @e.StatusCode
+                            </span>
+                        </td>
+                        <td class="note-cell">
+                            @(e.RejectionReason is not null
+                                ? $"Rejected: {e.RejectionReason}"
+                                : e.Notes ?? "")
+                        </td>
+                    </tr>
+                }
+            </tbody>
+            <tfoot>
+                <tr>
+                    <td colspan="2" style="font-weight:600;color:var(--aw-navy);">Total</td>
+                    <td style="font-weight:600;color:var(--aw-navy);">@_entries.Sum(e => e.Duration).ToString("F2")</td>
+                    <td colspan="3"></td>
+                </tr>
+            </tfoot>
+        </table>
+    }
+}
+
+@code {
+    [Parameter] public Guid EmploymentId { get; set; }
+
+    private bool _loading        = true;
+    private bool _entriesLoading = false;
+    private Guid _selectedPeriodId;
+    private List<TaPeriodOption>  _periods = [];
+    private List<TimeEntryRow>    _entries = [];
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true;
+        try
+        {
+            _periods = (await QueryService.GetPeriodsWithEntriesForEmploymentAsync(EmploymentId)).ToList();
+            if (_periods.Count > 0)
+            {
+                _selectedPeriodId = _periods[0].PeriodId;
+                await LoadEntriesAsync();
+            }
+        }
+        finally { _loading = false; }
+    }
+
+    private async Task OnPeriodChanged(ChangeEventArgs e)
+    {
+        if (!Guid.TryParse(e.Value?.ToString(), out var id)) return;
+        _selectedPeriodId = id;
+        await LoadEntriesAsync();
+    }
+
+    private async Task LoadEntriesAsync()
+    {
+        _entriesLoading = true;
+        try
+        {
+            _entries = (await QueryService.GetEntriesForEmploymentAsync(EmploymentId, _selectedPeriodId)).ToList();
+        }
+        finally { _entriesLoading = false; }
+    }
+}
+
+<style>
+    .category-chip {
+        font-size: .7rem;
+        font-weight: 600;
+        padding: 2px 6px;
+        border-radius: 999px;
+        background: #e0f2fe;
+        color: #0369a1;
+        white-space: nowrap;
+    }
+
+    .note-cell {
+        max-width: 260px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: var(--font-size-sm);
+        color: #6b7280;
+    }
+
+    .status-submitted { background: #dbeafe; color: #1e3a8a; }
+    .status-approved  { background: #dcfce7; color: #14532d; }
+    .status-rejected  { background: #fee2e2; color: #7f1d1d; }
+    .status-locked    { background: #e0e7ff; color: #3730a3; }
+    .status-draft     { background: #f3f4f6; color: #6b7280; }
+    .status-corrected { background: #fef9c3; color: #713f12; }
+</style>

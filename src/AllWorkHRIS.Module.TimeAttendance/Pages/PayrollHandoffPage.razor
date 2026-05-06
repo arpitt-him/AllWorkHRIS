@@ -1,0 +1,396 @@
+@page "/ta/handoff"
+@layout TimeAttendanceShell
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = "TimeAdmin")]
+@using Microsoft.AspNetCore.Authorization
+@inject IHrisSessionState          SessionState
+@inject TimeAttendanceQueryService QueryService
+@inject IPayrollHandoffService     HandoffService
+
+<PageTitle>Payroll Handoff — AllWork HRIS</PageTitle>
+
+<div class="page-container">
+
+    <div class="page-header">
+        <h2 class="page-title">Payroll Handoff</h2>
+    </div>
+
+    <p style="color:#6b7280;font-size:.875rem;margin-bottom:var(--space-5,1.25rem);">
+        Lock approved time entries and deliver them to the payroll pipeline.
+        Once a period is handed off, its entries cannot be edited.
+    </p>
+
+    @if (_loading)
+    {
+        <div class="empty-state">Loading…</div>
+    }
+    else if (!_periods.Any())
+    {
+        <div class="empty-state">No periods available for handoff.</div>
+    }
+    else
+    {
+        <div class="card">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Period</th>
+                        <th>Pay Date</th>
+                        <th style="text-align:right;">Approved</th>
+                        <th style="text-align:right;">Locked</th>
+                        <th style="text-align:right;">Total Hours</th>
+                        <th>Status</th>
+                        <th>First Locked</th>
+                        <th style="width:220px;"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var row in _periods)
+                    {
+                        var isRunning  = _runningPeriodId == row.PeriodId;
+                        var isDone     = _completedPeriods.Contains(row.PeriodId);
+                        var isExpanded = _expandedPeriods.Contains(row.PeriodId);
+                        var canPreview = row.ApprovedEntries > 0;
+                        <tr class="data-row">
+                            <td><strong>@row.PeriodLabel</strong></td>
+                            <td>@row.PayDate.ToString("MMM d, yyyy")</td>
+                            <td style="text-align:right;">@row.ApprovedEntries</td>
+                            <td style="text-align:right;">@row.LockedEntries</td>
+                            <td style="text-align:right;">@row.TotalHours.ToString("0.##")</td>
+                            <td>
+                                @if (isDone)
+                                {
+                                    <span class="badge badge--success">Handed Off</span>
+                                }
+                                else if (isRunning)
+                                {
+                                    <span class="badge badge--info">Processing…</span>
+                                }
+                                else if (row.LockedEntries > 0 && row.ApprovedEntries == 0)
+                                {
+                                    <span class="badge badge--success">Complete</span>
+                                }
+                                else if (row.ApprovedEntries > 0)
+                                {
+                                    <span class="badge badge--warning">Pending (@row.ApprovedEntries ready)</span>
+                                }
+                                else
+                                {
+                                    <span class="badge badge--neutral">No approved entries</span>
+                                }
+                            </td>
+                            <td style="font-size:.8rem;color:#6b7280;">
+                                @(row.FirstLockAt.HasValue
+                                    ? row.FirstLockAt.Value.ToLocalTime().ToString("MMM d, yyyy h:mm tt")
+                                    : "—")
+                            </td>
+                            <td>
+                                @if (isRunning)
+                                {
+                                    <div class="handoff-progress">
+                                        <div class="handoff-progress__bar"
+                                             style="width:@(_progressPct)%;"></div>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <span style="display:flex;gap:.4rem;align-items:center;">
+                                        @if (canPreview)
+                                        {
+                                            <button class="btn btn--ghost btn--sm"
+                                                    @onclick="() => TogglePreviewAsync(row.PeriodId)">
+                                                @(isExpanded ? "Close" : "View")
+                                            </button>
+                                        }
+                                        @if (!isDone && row.ApprovedEntries > 0)
+                                        {
+                                            @if (_confirmHandoffId == row.PeriodId)
+                                            {
+                                                <button class="btn btn--primary btn--sm"
+                                                        @onclick="() => RunHandoffAsync(row.PeriodId, (int)row.ApprovedEntries)">
+                                                    Confirm
+                                                </button>
+                                                <button class="btn btn--ghost btn--sm"
+                                                        @onclick="() => _confirmHandoffId = null">
+                                                    Cancel
+                                                </button>
+                                            }
+                                            else
+                                            {
+                                                <button class="btn btn--secondary btn--sm"
+                                                        @onclick="() => _confirmHandoffId = row.PeriodId">
+                                                    Run Handoff
+                                                </button>
+                                            }
+                                        }
+                                    </span>
+                                }
+                            </td>
+                        </tr>
+
+                        @* Inline result row after handoff completes *@
+                        @if (_handoffResults.TryGetValue(row.PeriodId, out var result))
+                        {
+                            <tr class="handoff-result-row">
+                                <td colspan="8">
+                                    @if (result.IsError)
+                                    {
+                                        <span class="alert alert--error" style="display:inline-block;">
+                                            Handoff failed: @result.Message
+                                        </span>
+                                    }
+                                    else
+                                    {
+                                        <span class="alert alert--success" style="display:inline-block;">
+                                            Handoff complete — @result.Message
+                                        </span>
+                                    }
+                                </td>
+                            </tr>
+                        }
+
+                        @* Expandable entry preview *@
+                        @if (isExpanded)
+                        {
+                            <tr class="preview-row">
+                                <td colspan="8">
+                                    @if (_previewCache.TryGetValue(row.PeriodId, out var entries))
+                                    {
+                                        @if (!entries.Any())
+                                        {
+                                            <p class="preview-empty">No approved entries found.</p>
+                                        }
+                                        else
+                                        {
+                                            <table class="preview-table">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Employee</th>
+                                                        <th>Work Date</th>
+                                                        <th>Category</th>
+                                                        <th style="text-align:right;">Hours</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    @foreach (var e in entries)
+                                                    {
+                                                        <tr>
+                                                            <td>@e.EmployeeName <span class="preview-emp-num">#@e.EmployeeNumber</span></td>
+                                                            <td>@e.WorkDate.ToString("MMM d, yyyy")</td>
+                                                            <td><span class="badge badge--category">@e.TimeCategory</span></td>
+                                                            <td style="text-align:right;">@e.Duration.ToString("0.##")</td>
+                                                        </tr>
+                                                    }
+                                                </tbody>
+                                                <tfoot>
+                                                    <tr>
+                                                        <td colspan="3" style="text-align:right;font-weight:600;">Total</td>
+                                                        <td style="text-align:right;font-weight:600;">@entries.Sum(e => e.Duration).ToString("0.##")</td>
+                                                    </tr>
+                                                </tfoot>
+                                            </table>
+                                        }
+                                    }
+                                    else
+                                    {
+                                        <p class="preview-empty">Loading…</p>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+
+</div>
+
+@code {
+
+    private IReadOnlyList<HandoffPeriodRow> _periods = [];
+    private bool _loading = true;
+
+    private Guid? _confirmHandoffId;
+    private Guid? _runningPeriodId;
+    private int   _progressPct;
+
+    private readonly HashSet<Guid>                                        _completedPeriods = [];
+    private readonly Dictionary<Guid, HandoffResultMsg>                  _handoffResults   = new();
+    private readonly HashSet<Guid>                                        _expandedPeriods  = [];
+    private readonly Dictionary<Guid, IReadOnlyList<HandoffPreviewEntry>> _previewCache     = new();
+
+    private sealed record HandoffResultMsg(bool IsError, string Message);
+
+    protected override async Task OnInitializedAsync()
+    {
+        var entityId = SessionState.SelectedLegalEntityId;
+        if (entityId.HasValue)
+            await LoadAsync(entityId.Value);
+
+        _loading = false;
+    }
+
+    private async Task LoadAsync(Guid entityId)
+    {
+        _periods = await QueryService.GetHandoffSummariesAsync(entityId);
+    }
+
+    private async Task TogglePreviewAsync(Guid periodId)
+    {
+        if (!_expandedPeriods.Add(periodId))
+        {
+            _expandedPeriods.Remove(periodId);
+            return;
+        }
+
+        if (!_previewCache.ContainsKey(periodId))
+            _previewCache[periodId] = await QueryService.GetApprovedEntriesForHandoffAsync(periodId);
+    }
+
+    private async Task RunHandoffAsync(Guid periodId, int approvedCount)
+    {
+        _confirmHandoffId = null;
+        _runningPeriodId  = periodId;
+        _progressPct      = 0;
+        _handoffResults.Remove(periodId);
+        StateHasChanged();
+
+        try
+        {
+            var progressStep = approvedCount > 0 ? 80 / approvedCount : 80;
+
+            var progressTask = Task.Run(async () =>
+            {
+                while (_progressPct < 80)
+                {
+                    await Task.Delay(200);
+                    _progressPct = Math.Min(_progressPct + progressStep, 80);
+                    await InvokeAsync(StateHasChanged);
+                }
+            });
+
+            var payrollRunId = Guid.NewGuid();
+            var result = await HandoffService.ExecuteHandoffAsync(periodId, payrollRunId);
+
+            await progressTask.WaitAsync(TimeSpan.FromSeconds(5));
+            _progressPct = 100;
+            StateHasChanged();
+
+            await Task.Delay(600);
+
+            _completedPeriods.Add(periodId);
+            _handoffResults[periodId] = new HandoffResultMsg(
+                IsError: result.Failed > 0,
+                Message: result.Failed == 0
+                    ? $"{result.Delivered} entries locked, {result.TotalHours:0.##} hours delivered."
+                    : $"{result.Delivered} delivered, {result.Failed} failed.");
+        }
+        catch (Exception ex)
+        {
+            _handoffResults[periodId] = new HandoffResultMsg(true, ex.Message);
+        }
+        finally
+        {
+            _runningPeriodId = null;
+            _progressPct     = 0;
+
+            var entityId = SessionState.SelectedLegalEntityId;
+            if (entityId.HasValue)
+                await LoadAsync(entityId.Value);
+
+            StateHasChanged();
+        }
+    }
+}
+
+<style>
+    .handoff-progress {
+        width: 100%;
+        height: 8px;
+        background: #e5e7eb;
+        border-radius: 999px;
+        overflow: hidden;
+    }
+
+    .handoff-progress__bar {
+        height: 100%;
+        background: var(--module-ta, #7c3aed);
+        border-radius: 999px;
+        transition: width .2s ease;
+    }
+
+    .handoff-result-row td {
+        padding: .25rem 1rem .75rem;
+        border-top: none;
+    }
+
+    .badge--warning {
+        background: #fef3c7;
+        color: #92400e;
+        border: 1px solid #fde68a;
+    }
+
+    .badge--locked {
+        background: #ede9fe;
+        color: #5b21b6;
+        border: 1px solid #c4b5fd;
+    }
+
+    .preview-row td {
+        padding: 0;
+        border-top: none;
+        background: #faf5ff;
+    }
+
+    .preview-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: .8125rem;
+        margin: 0;
+    }
+
+    .preview-table th {
+        padding: .4rem 1rem;
+        background: #ede9fe;
+        color: #5b21b6;
+        font-weight: 600;
+        text-align: left;
+        border-bottom: 1px solid #c4b5fd;
+    }
+
+    .preview-table td {
+        padding: .35rem 1rem;
+        border-bottom: 1px solid #f3f0ff;
+    }
+
+    .preview-table tfoot td {
+        border-top: 2px solid #c4b5fd;
+        border-bottom: none;
+        background: #ede9fe;
+        padding: .4rem 1rem;
+    }
+
+    .preview-emp-num {
+        font-size: .75rem;
+        color: #9ca3af;
+        margin-left: .25rem;
+    }
+
+    .badge--category {
+        background: #f3f4f6;
+        color: #374151;
+        border: 1px solid #e5e7eb;
+        font-size: .7rem;
+        padding: .1rem .4rem;
+        border-radius: 4px;
+        font-weight: 500;
+    }
+
+    .preview-empty {
+        padding: .75rem 1rem;
+        color: #9ca3af;
+        font-size: .8125rem;
+        margin: 0;
+    }
+</style>

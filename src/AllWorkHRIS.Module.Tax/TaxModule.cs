@@ -1,7 +1,9 @@
 using System.Composition;
 using Autofac;
 using AllWorkHRIS.Core.Composition;
+using AllWorkHRIS.Core.Navigation;
 using AllWorkHRIS.Core.Pipeline;
+using AllWorkHRIS.Module.Tax.Navigation;
 using AllWorkHRIS.Module.Tax.Repositories;
 using AllWorkHRIS.Module.Tax.Services;
 
@@ -32,6 +34,10 @@ public sealed class TaxModule : IPlatformModule
         builder.RegisterType<PayrollPipelineService>()
                .As<IPayrollPipelineService>()
                .InstancePerLifetimeScope();
+
+        builder.RegisterType<TaxNavContributor>()
+               .As<INavContributor>()
+               .SingleInstance();
     }
 
     public IEnumerable<MenuContribution> GetMenuContributions()

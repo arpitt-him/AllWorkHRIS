@@ -1,0 +1,815 @@
+@page "/benefits/codes"
+@layout BenefitsShell
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = "HrisAdmin,BenefitsAdmin")]
+@using Microsoft.AspNetCore.Authorization
+@using AllWorkHRIS.Core.Data
+@using AllWorkHRIS.Module.Benefits.Repositories
+@inject IDeductionRepository              CodeRepo
+@inject IDeductionEmployerMatchRepository MatchRepo
+@inject IDeductionRateTableRepository     RateTableRepo
+@inject IConnectionFactory                ConnectionFactory
+
+<PageTitle>Deduction Codes — AllWork HRIS</PageTitle>
+
+<div class="page-container">
+
+    <div class="page-header">
+        <h2 class="page-title">Deduction Codes</h2>
+        <button class="btn btn-primary" @onclick="ShowAddForm">+ Add Code</button>
+    </div>
+
+    @if (_loading)
+    {
+        <p class="loading-text">Loading…</p>
+    }
+    else if (_error is not null)
+    {
+        <p class="error-text">@_error</p>
+    }
+    else
+    {
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Code</th>
+                    <th>Description</th>
+                    <th>Tax Treatment</th>
+                    <th>Mode</th>
+                    <th>Status</th>
+                    <th>Effective Start</th>
+                    <th>Effective End</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var dc in _codes)
+                {
+                    <tr>
+                        <td><samp>@dc.Code</samp></td>
+                        <td>@dc.Description</td>
+                        <td><span class="badge @TreatmentBadgeClass(dc.TaxTreatment)">@dc.TaxTreatment</span></td>
+                        <td><span class="badge badge-gray">@dc.CalculationMode</span></td>
+                        <td><span class="badge @StatusBadgeClass(dc.Status)">@dc.Status</span></td>
+                        <td>@(dc.EffectiveStartDate.ToString("yyyy-MM-dd"))</td>
+                        <td>@(dc.EffectiveEndDate?.ToString("yyyy-MM-dd") ?? "—")</td>
+                        <td class="action-cell">
+                            <button class="btn btn-sm btn-ghost" @onclick="() => StartEdit(dc)">Edit</button>
+                            <button class="btn btn-sm btn-ghost" @onclick="() => OpenMatchRules(dc)">Match Rules</button>
+                            @if (dc.CalculationMode == CalculationMode.CoverageBased)
+                            {
+                                <button class="btn btn-sm btn-ghost" @onclick="() => OpenRateTable(dc)">Rate Table</button>
+                            }
+                        </td>
+                    </tr>
+                }
+                @if (_codes.Count == 0)
+                {
+                    <tr><td colspan="8" class="empty-state">No deduction codes configured.</td></tr>
+                }
+            </tbody>
+        </table>
+    }
+
+    @* ── Deduction add/edit form ─────────────────────────────────── *@
+    @if (_showForm)
+    {
+        <div class="form-panel">
+            <h3 class="form-panel__title">@(_editCode is null ? "Add Deduction Code" : "Edit Deduction Code")</h3>
+
+            <div class="form-grid">
+                <div class="form-group">
+                    <label class="form-label">Code <span class="required">*</span></label>
+                    <input class="form-input" @bind="_formCode" disabled="@(_editCode is not null)"
+                           placeholder="e.g. HEALTH_PRE" maxlength="30" />
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Tax Treatment <span class="required">*</span></label>
+                    <select class="form-select" @bind="_formTaxTreatment" disabled="@(_editCode is not null)">
+                        <option value="">— select —</option>
+                        <option value="PRE_TAX">PRE_TAX</option>
+                        <option value="POST_TAX">POST_TAX</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Calculation Mode <span class="required">*</span></label>
+                    <select class="form-select" @bind="_formCalculationMode">
+                        <option value="FIXED_PER_PERIOD">FIXED_PER_PERIOD</option>
+                        <option value="FIXED_ANNUAL">FIXED_ANNUAL</option>
+                        <option value="FIXED_MONTHLY">FIXED_MONTHLY</option>
+                        <option value="PCT_PRE_TAX">PCT_PRE_TAX</option>
+                        <option value="PCT_POST_TAX">PCT_POST_TAX</option>
+                        <option value="COVERAGE_BASED">COVERAGE_BASED</option>
+                    </select>
+                </div>
+                <div class="form-group form-group--full">
+                    <label class="form-label">Description <span class="required">*</span></label>
+                    <input class="form-input" @bind="_formDescription" maxlength="200" />
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Effective Start <span class="required">*</span></label>
+                    <input class="form-input" type="date" @bind="_formEffectiveStart" />
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Effective End</label>
+                    <input class="form-input" type="date" @bind="_formEffectiveEnd" />
+                </div>
+                @if (_editCode is not null)
+                {
+                    <div class="form-group">
+                        <label class="form-label">Status</label>
+                        <select class="form-select" @bind="_formStatus">
+                            <option value="ACTIVE">ACTIVE</option>
+                            <option value="INACTIVE">INACTIVE</option>
+                        </select>
+                    </div>
+                }
+            </div>
+
+            @if (_formError is not null)
+            {
+                <p class="form-error">@_formError</p>
+            }
+
+            <div class="form-actions">
+                <button class="btn btn-primary" @onclick="SaveCode" disabled="@_saving">
+                    @(_saving ? "Saving…" : "Save")
+                </button>
+                <button class="btn btn-ghost" @onclick="CancelForm">Cancel</button>
+            </div>
+        </div>
+    }
+
+    @* ── Rate table panel ───────────────────────────────────────── *@
+    @if (_rateTableDeduction is not null)
+    {
+        <div class="form-panel">
+            <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:1rem;">
+                <h3 class="form-panel__title" style="margin:0;">
+                    Rate Tables — <samp>@_rateTableDeduction.Code</samp>
+                </h3>
+                <button class="btn btn-sm btn-ghost" @onclick="CloseRateTable">✕ Close</button>
+            </div>
+
+            @if (_rateTableLoading)
+            {
+                <p class="loading-text">Loading…</p>
+            }
+            else
+            {
+                @if (_rateTables.Count > 0)
+                {
+                    <table class="data-table" style="margin-bottom:1rem;">
+                        <thead>
+                            <tr>
+                                <th>Effective From</th>
+                                <th>Effective To</th>
+                                <th>Description</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var tbl in _rateTables)
+                            {
+                                <tr>
+                                    <td>@tbl.EffectiveFrom.ToString("yyyy-MM-dd")</td>
+                                    <td>@(tbl.EffectiveTo?.ToString("yyyy-MM-dd") ?? "—")</td>
+                                    <td>@(tbl.Description ?? "—")</td>
+                                    <td>
+                                        <button class="btn btn-sm btn-ghost"
+                                                @onclick="() => ToggleTableEntries(tbl.RateTableId)">
+                                            @(_expandedTableId == tbl.RateTableId ? "Hide" : "Rates")
+                                        </button>
+                                    </td>
+                                </tr>
+                                @if (_expandedTableId == tbl.RateTableId
+                                     && _tableEntries.TryGetValue(tbl.RateTableId, out var entries))
+                                {
+                                    <tr>
+                                        <td colspan="4" style="padding:.5rem 1.25rem;background:#f9fafb;">
+                                            <table style="width:auto;border-collapse:collapse;font-size:.875rem;">
+                                                <thead>
+                                                    <tr>
+                                                        <th style="text-align:left;padding:.3rem .75rem .3rem 0;
+                                                                   color:#6b7280;font-weight:600;">Tier</th>
+                                                        <th style="text-align:right;padding:.3rem .75rem;
+                                                                   color:#6b7280;font-weight:600;">EE Rate</th>
+                                                        <th style="text-align:right;padding:.3rem 0 .3rem .75rem;
+                                                                   color:#6b7280;font-weight:600;">ER Rate</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    @foreach (var e in entries)
+                                                    {
+                                                        <tr>
+                                                            <td style="padding:.25rem .75rem .25rem 0;">
+                                                                <samp>@e.TierCode</samp>
+                                                            </td>
+                                                            <td style="padding:.25rem .75rem;text-align:right;">
+                                                                $@e.EmployeeRate.ToString("N2")
+                                                            </td>
+                                                            <td style="padding:.25rem 0 .25rem .75rem;text-align:right;">
+                                                                @(e.EmployerRate.HasValue ? $"${e.EmployerRate.Value:N2}" : "—")
+                                                            </td>
+                                                        </tr>
+                                                    }
+                                                </tbody>
+                                            </table>
+                                        </td>
+                                    </tr>
+                                }
+                            }
+                        </tbody>
+                    </table>
+                }
+                else if (!_showRateTableForm)
+                {
+                    <p class="empty-state" style="margin-bottom:1rem;">No rate tables configured for this deduction.</p>
+                }
+
+                @if (!_showRateTableForm)
+                {
+                    <button class="btn btn-secondary btn-sm" @onclick="ShowAddRateTableForm">+ Add Rate Table</button>
+                }
+                else
+                {
+                    <h4 style="margin-bottom:.75rem;">Add Rate Table</h4>
+
+                    <div class="form-grid" style="margin-bottom:1.25rem;">
+                        <div class="form-group">
+                            <label class="form-label">Effective From <span class="required">*</span></label>
+                            <input class="form-input" type="date" @bind="_rateFormFrom" />
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Effective To</label>
+                            <input class="form-input" type="date" @bind="_rateFormTo" />
+                        </div>
+                        <div class="form-group form-group--full">
+                            <label class="form-label">Description</label>
+                            <input class="form-input" @bind="_rateFormDescription"
+                                   placeholder="e.g. 2026 Plan Year" maxlength="200" />
+                        </div>
+                    </div>
+
+                    <h5 style="margin-bottom:.5rem;font-size:.9rem;">Per-Period Rates by Coverage Tier</h5>
+                    <table class="data-table" style="margin-bottom:1rem;max-width:520px;">
+                        <thead>
+                            <tr>
+                                <th>Tier</th>
+                                <th>EE Rate ($/period) <span class="required">*</span></th>
+                                <th>ER Rate ($/period)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var tier in _rateFormTiers)
+                            {
+                                <tr>
+                                    <td>
+                                        <samp>@tier.TierCode</samp>
+                                        <span style="color:#6b7280;font-size:.82rem;margin-left:.4rem;">@tier.TierLabel</span>
+                                    </td>
+                                    <td>
+                                        <input class="form-input" type="number" step="0.01" min="0"
+                                               style="max-width:110px;"
+                                               @bind="tier.EmployeeRate" placeholder="0.00" />
+                                    </td>
+                                    <td>
+                                        <input class="form-input" type="number" step="0.01" min="0"
+                                               style="max-width:110px;"
+                                               @bind="tier.EmployerRate" placeholder="0.00" />
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+
+                    @if (_rateFormError is not null)
+                    {
+                        <p class="form-error">@_rateFormError</p>
+                    }
+
+                    <div class="form-actions">
+                        <button class="btn btn-primary" @onclick="SaveRateTable" disabled="@_rateFormSaving">
+                            @(_rateFormSaving ? "Saving…" : "Save Rate Table")
+                        </button>
+                        <button class="btn btn-ghost" @onclick="CancelRateTableForm">Cancel</button>
+                    </div>
+                }
+            }
+        </div>
+    }
+
+    @* ── Employer match rules panel ──────────────────────────────── *@
+    @if (_matchRulesDeduction is not null)
+    {
+        <div class="form-panel">
+            <div class="form-panel__header" style="display:flex;justify-content:space-between;align-items:baseline;">
+                <h3 class="form-panel__title">
+                    Employer Match Rules — <samp>@_matchRulesDeduction.Code</samp>
+                </h3>
+                <button class="btn btn-sm btn-ghost" @onclick="CloseMatchRules">✕ Close</button>
+            </div>
+
+            @if (_matchRulesLoading)
+            {
+                <p class="loading-text">Loading…</p>
+            }
+            else
+            {
+                @if (_matchRules.Count > 0)
+                {
+                    <table class="data-table" style="margin-bottom:1rem;">
+                        <thead>
+                            <tr>
+                                <th>Match %</th>
+                                <th>Cap % of Gross</th>
+                                <th>Annual Cap ($)</th>
+                                <th>Type</th>
+                                <th>Effective From</th>
+                                <th>Effective To</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var rule in _matchRules)
+                            {
+                                <tr>
+                                    <td>@(rule.MatchRate * 100m)%</td>
+                                    <td>@(rule.MatchCapPctOfGross.HasValue ? $"{rule.MatchCapPctOfGross.Value * 100m:N2}%" : "—")</td>
+                                    <td>@(rule.MatchCapAnnualAmount?.ToString("N2") ?? "—")</td>
+                                    <td><span class="badge badge-gray">@rule.MatchType</span></td>
+                                    <td>@rule.EffectiveFrom.ToString("yyyy-MM-dd")</td>
+                                    <td>@(rule.EffectiveTo?.ToString("yyyy-MM-dd") ?? "—")</td>
+                                    <td>
+                                        <button class="btn btn-sm btn-ghost"
+                                                @onclick="() => StartEditMatch(rule)">Edit</button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+                else if (!_showMatchForm)
+                {
+                    <p class="empty-state" style="margin-bottom:1rem;">No match rules configured for this deduction.</p>
+                }
+
+                @if (!_showMatchForm)
+                {
+                    <button class="btn btn-secondary btn-sm" @onclick="ShowAddMatchForm">+ Add Match Rule</button>
+                }
+                else
+                {
+                    <h4 style="margin-bottom:.75rem;">@(_editMatch is null ? "Add Match Rule" : "Edit Match Rule")</h4>
+
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label class="form-label">Match % <span class="required">*</span></label>
+                            <input class="form-input" type="number" step="0.01" min="0" max="500"
+                                   @bind="_matchFormRatePct" placeholder="e.g. 50" />
+                            <small class="hint-text">Employer matches this % of the employee's contribution (e.g. 50 for 50%)</small>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Match Type <span class="required">*</span></label>
+                            <select class="form-select" @bind="_matchFormType">
+                                <option value="PER_PERIOD">Per Period</option>
+                                <option value="ANNUAL_TRUE_UP">Annual True-Up</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Cap — % of Gross</label>
+                            <input class="form-input" type="number" step="0.01" min="0" max="100"
+                                   @bind="_matchFormCapPct" placeholder="e.g. 3" />
+                            <small class="hint-text">Match applies only to up to this % of gross (e.g. 3 for 3%)</small>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Cap — Annual Amount ($)</label>
+                            <input class="form-input" type="number" step="0.01" min="0"
+                                   @bind="_matchFormCapAnnual" placeholder="e.g. 3000" />
+                            <small class="hint-text">Hard annual ceiling in dollars — takes precedence over % cap</small>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Effective From <span class="required">*</span></label>
+                            <input class="form-input" type="date" @bind="_matchFormFrom" />
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Effective To</label>
+                            <input class="form-input" type="date" @bind="_matchFormTo" />
+                        </div>
+                    </div>
+
+                    @if (_matchFormError is not null)
+                    {
+                        <p class="form-error">@_matchFormError</p>
+                    }
+
+                    <div class="form-actions">
+                        <button class="btn btn-primary" @onclick="SaveMatchRule" disabled="@_matchSaving">
+                            @(_matchSaving ? "Saving…" : "Save")
+                        </button>
+                        <button class="btn btn-ghost" @onclick="CancelMatchForm">Cancel</button>
+                    </div>
+                }
+            }
+        </div>
+    }
+
+</div>
+
+@code {
+    // ── Deduction list ───────────────────────────────────────────────
+    private List<Deduction> _codes   = [];
+    private bool            _loading = true;
+    private string?         _error;
+
+    // ── Deduction add/edit form ──────────────────────────────────────
+    private bool       _showForm;
+    private Deduction? _editCode;
+    private string     _formCode              = string.Empty;
+    private string     _formDescription       = string.Empty;
+    private string     _formTaxTreatment      = string.Empty;
+    private string     _formCalculationMode   = "FIXED_PER_PERIOD";
+    private string     _formStatus            = "ACTIVE";
+    private DateOnly?  _formEffectiveStart;
+    private DateOnly?  _formEffectiveEnd;
+    private string?    _formError;
+    private bool       _saving;
+
+    // ── Rate table panel ─────────────────────────────────────────────
+    private Deduction?                                  _rateTableDeduction;
+    private List<DeductionRateTable>                    _rateTables       = [];
+    private bool                                        _rateTableLoading;
+    private Guid?                                       _expandedTableId;
+    private Dictionary<Guid, List<DeductionRateEntry>>  _tableEntries     = new();
+
+    private bool            _showRateTableForm;
+    private DateOnly?       _rateFormFrom;
+    private DateOnly?       _rateFormTo;
+    private string          _rateFormDescription = string.Empty;
+    private List<RateTierRow> _rateFormTiers     = [];
+    private string?         _rateFormError;
+    private bool            _rateFormSaving;
+
+    private sealed class RateTierRow
+    {
+        public string   TierCode     { get; init; } = string.Empty;
+        public string   TierLabel    { get; init; } = string.Empty;
+        public decimal? EmployeeRate { get; set; }
+        public decimal? EmployerRate { get; set; }
+    }
+
+    private static readonly (string Code, string Label)[] CoverageTierDefs =
+    [
+        ("EE_ONLY",  "Employee Only"),
+        ("EE_SPOUSE","Emp + Spouse"),
+        ("EE_CHILD", "Emp + Child(ren)"),
+        ("FAMILY",   "Family")
+    ];
+
+    // ── Match rules panel ────────────────────────────────────────────
+    private Deduction?                  _matchRulesDeduction;
+    private List<DeductionEmployerMatch> _matchRules        = [];
+    private bool                         _matchRulesLoading = false;
+
+    private bool                   _showMatchForm;
+    private DeductionEmployerMatch? _editMatch;
+    private decimal?  _matchFormRatePct;
+    private decimal?  _matchFormCapPct;
+    private decimal?  _matchFormCapAnnual;
+    private string    _matchFormType  = "PER_PERIOD";
+    private DateOnly? _matchFormFrom;
+    private DateOnly? _matchFormTo;
+    private string?   _matchFormError;
+    private bool      _matchSaving;
+
+    // ── Lifecycle ────────────────────────────────────────────────────
+
+    protected override async Task OnInitializedAsync()
+    {
+        try   { _codes = (await CodeRepo.GetAllCodesAsync()).ToList(); }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    // ── Deduction form ───────────────────────────────────────────────
+
+    private void ShowAddForm()
+    {
+        _editCode = null;
+        _formCode = _formDescription = _formTaxTreatment = string.Empty;
+        _formCalculationMode = "FIXED_PER_PERIOD";
+        _formStatus          = "ACTIVE";
+        _formEffectiveStart  = DateOnly.FromDateTime(DateTime.Today);
+        _formEffectiveEnd    = null;
+        _formError = null;
+        _showForm  = true;
+        CloseMatchRules();
+    }
+
+    private void StartEdit(Deduction code)
+    {
+        _editCode            = code;
+        _formCode            = code.Code;
+        _formDescription     = code.Description;
+        _formTaxTreatment    = code.TaxTreatment;
+        _formCalculationMode = code.CalculationMode;
+        _formStatus          = code.Status;
+        _formEffectiveStart  = code.EffectiveStartDate;
+        _formEffectiveEnd    = code.EffectiveEndDate;
+        _formError = null;
+        _showForm  = true;
+        CloseMatchRules();
+    }
+
+    private async Task SaveCode()
+    {
+        if (string.IsNullOrWhiteSpace(_formCode))         { _formError = "Code is required."; return; }
+        if (string.IsNullOrWhiteSpace(_formDescription))  { _formError = "Description is required."; return; }
+        if (string.IsNullOrWhiteSpace(_formTaxTreatment)) { _formError = "Tax Treatment is required."; return; }
+        if (_formEffectiveStart is null) { _formError = "Effective Start is required."; return; }
+
+        var startDate = _formEffectiveStart.Value;
+        var endDate   = _formEffectiveEnd;
+        if (endDate.HasValue && endDate.Value < startDate)
+        { _formError = "Effective End must be on or after Effective Start."; return; }
+
+        _saving = true; _formError = null;
+        try
+        {
+            var now = DateTimeOffset.UtcNow;
+            if (_editCode is null)
+            {
+                var newCode = new Deduction
+                {
+                    DeductionId        = Guid.NewGuid(),
+                    Code               = _formCode.Trim().ToUpperInvariant(),
+                    Description        = _formDescription.Trim(),
+                    TaxTreatment       = _formTaxTreatment,
+                    CalculationMode    = _formCalculationMode,
+                    Status             = "ACTIVE",
+                    EffectiveStartDate = startDate,
+                    EffectiveEndDate   = endDate,
+                    CreatedAt          = now,
+                    UpdatedAt          = now
+                };
+                await CodeRepo.InsertAsync(newCode);
+            }
+            else
+            {
+                var updated = _editCode with
+                {
+                    Description     = _formDescription.Trim(),
+                    CalculationMode = _formCalculationMode,
+                    Status          = _formStatus,
+                    EffectiveEndDate = endDate,
+                    UpdatedAt       = now
+                };
+                await CodeRepo.UpdateAsync(updated);
+            }
+
+            _showForm = false;
+            _codes = (await CodeRepo.GetAllCodesAsync()).ToList();
+        }
+        catch (Exception ex) { _formError = ex.Message; }
+        finally { _saving = false; }
+    }
+
+    private void CancelForm() => _showForm = false;
+
+    // ── Rate table panel ────────────────────────────────────────────
+
+    private async Task OpenRateTable(Deduction deduction)
+    {
+        _showForm            = false;
+        _matchRulesDeduction = null;
+        _matchRules          = [];
+        _showMatchForm       = false;
+        _rateTableDeduction  = deduction;
+        _showRateTableForm   = false;
+        _expandedTableId     = null;
+        _tableEntries        = new();
+        _rateFormError       = null;
+        _rateTableLoading    = true;
+        try
+        {
+            _rateTables = (await RateTableRepo.GetAllByDeductionIdAsync(deduction.DeductionId)).ToList();
+            if (_rateTables.Count > 0)
+                await ToggleTableEntries(_rateTables[0].RateTableId);
+        }
+        catch (Exception ex) { _rateFormError = ex.Message; }
+        finally { _rateTableLoading = false; }
+    }
+
+    private void CloseRateTable()
+    {
+        _rateTableDeduction = null;
+        _rateTables         = [];
+        _tableEntries       = new();
+        _expandedTableId    = null;
+        _showRateTableForm  = false;
+        _rateFormError      = null;
+    }
+
+    private async Task ToggleTableEntries(Guid tableId)
+    {
+        if (_expandedTableId == tableId) { _expandedTableId = null; return; }
+        _expandedTableId = tableId;
+        if (!_tableEntries.ContainsKey(tableId))
+            _tableEntries[tableId] = (await RateTableRepo.GetEntriesAsync(tableId)).ToList();
+    }
+
+    private void ShowAddRateTableForm()
+    {
+        _rateFormFrom        = DateOnly.FromDateTime(DateTime.Today);
+        _rateFormTo          = null;
+        _rateFormDescription = string.Empty;
+        _rateFormTiers       = CoverageTierDefs
+            .Select(t => new RateTierRow { TierCode = t.Code, TierLabel = t.Label })
+            .ToList();
+        _rateFormError     = null;
+        _showRateTableForm = true;
+    }
+
+    private void CancelRateTableForm() { _showRateTableForm = false; _rateFormError = null; }
+
+    private async Task SaveRateTable()
+    {
+        if (_rateTableDeduction is null) return;
+        if (_rateFormFrom is null) { _rateFormError = "Effective From is required."; return; }
+        if (_rateFormTo.HasValue && _rateFormTo.Value < _rateFormFrom.Value)
+        { _rateFormError = "Effective To must be on or after Effective From."; return; }
+        var bad = _rateFormTiers.FirstOrDefault(t => t.EmployeeRate is null or < 0);
+        if (bad is not null) { _rateFormError = $"EE rate for {bad.TierCode} is required and must be ≥ 0."; return; }
+
+        _rateFormSaving = true; _rateFormError = null;
+        try
+        {
+            var tableId = Guid.NewGuid();
+            var table   = new DeductionRateTable
+            {
+                RateTableId   = tableId,
+                DeductionId   = _rateTableDeduction.DeductionId,
+                RateType      = "COVERAGE_TIER",
+                EffectiveFrom = _rateFormFrom.Value,
+                EffectiveTo   = _rateFormTo,
+                Description   = string.IsNullOrWhiteSpace(_rateFormDescription) ? null : _rateFormDescription.Trim(),
+                CreatedAt     = DateTimeOffset.UtcNow
+            };
+            var entries = _rateFormTiers.Select(t => new DeductionRateEntry
+            {
+                RateEntryId  = Guid.NewGuid(),
+                RateTableId  = tableId,
+                TierCode     = t.TierCode,
+                EmployeeRate = t.EmployeeRate ?? 0m,
+                EmployerRate = t.EmployerRate is > 0 ? t.EmployerRate : null
+            });
+
+            using var uow = new UnitOfWork(ConnectionFactory);
+            try
+            {
+                await RateTableRepo.InsertTableAsync(table, uow);
+                await RateTableRepo.ReplaceEntriesAsync(tableId, entries, uow);
+                uow.Commit();
+            }
+            catch { uow.Rollback(); throw; }
+
+            _showRateTableForm = false;
+            _tableEntries.Clear();
+            _expandedTableId = null;
+            _rateTables = (await RateTableRepo.GetAllByDeductionIdAsync(_rateTableDeduction.DeductionId)).ToList();
+            if (_rateTables.Count > 0)
+                await ToggleTableEntries(_rateTables[0].RateTableId);
+        }
+        catch (Exception ex) { _rateFormError = ex.Message; }
+        finally { _rateFormSaving = false; }
+    }
+
+    // ── Match rules panel ────────────────────────────────────────────
+
+    private async Task OpenMatchRules(Deduction deduction)
+    {
+        _showForm           = false;
+        CloseRateTable();
+        _matchRulesDeduction = deduction;
+        _showMatchForm       = false;
+        _editMatch           = null;
+        _matchFormError      = null;
+        _matchRulesLoading   = true;
+        try
+        {
+            _matchRules = (await MatchRepo.GetAllByDeductionIdAsync(deduction.DeductionId)).ToList();
+        }
+        catch (Exception ex) { _matchFormError = ex.Message; }
+        finally { _matchRulesLoading = false; }
+    }
+
+    private void CloseMatchRules()
+    {
+        _matchRulesDeduction = null;
+        _matchRules          = [];
+        _showMatchForm       = false;
+        _editMatch           = null;
+    }
+
+    private void ShowAddMatchForm()
+    {
+        _editMatch          = null;
+        _matchFormRatePct   = null;
+        _matchFormCapPct    = null;
+        _matchFormCapAnnual = null;
+        _matchFormType      = "PER_PERIOD";
+        _matchFormFrom      = DateOnly.FromDateTime(DateTime.Today);
+        _matchFormTo        = null;
+        _matchFormError     = null;
+        _showMatchForm      = true;
+    }
+
+    private void StartEditMatch(DeductionEmployerMatch rule)
+    {
+        _editMatch          = rule;
+        _matchFormRatePct   = rule.MatchRate * 100m;
+        _matchFormCapPct    = rule.MatchCapPctOfGross.HasValue ? rule.MatchCapPctOfGross.Value * 100m : null;
+        _matchFormCapAnnual = rule.MatchCapAnnualAmount;
+        _matchFormType      = rule.MatchType;
+        _matchFormFrom      = rule.EffectiveFrom;
+        _matchFormTo        = rule.EffectiveTo;
+        _matchFormError     = null;
+        _showMatchForm      = true;
+    }
+
+    private async Task SaveMatchRule()
+    {
+        if (_matchRulesDeduction is null) return;
+
+        if (_matchFormRatePct is null or <= 0)
+        { _matchFormError = "Match % is required and must be greater than 0."; return; }
+        if (_matchFormFrom is null)
+        { _matchFormError = "Effective From is required."; return; }
+        if (_matchFormTo.HasValue && _matchFormTo.Value < _matchFormFrom.Value)
+        { _matchFormError = "Effective To must be on or after Effective From."; return; }
+        if (_matchFormCapPct.HasValue && (_matchFormCapPct.Value <= 0 || _matchFormCapPct.Value > 100))
+        { _matchFormError = "Cap % of Gross must be between 0 and 100."; return; }
+        if (_matchFormCapAnnual.HasValue && _matchFormCapAnnual.Value <= 0)
+        { _matchFormError = "Annual Cap must be greater than 0."; return; }
+
+        var matchRate    = Math.Round(_matchFormRatePct.Value / 100m, 6);
+        var capPctOfGross = _matchFormCapPct.HasValue
+            ? Math.Round(_matchFormCapPct.Value / 100m, 6)
+            : (decimal?)null;
+
+        _matchSaving = true; _matchFormError = null;
+        try
+        {
+            var now = DateTimeOffset.UtcNow;
+            if (_editMatch is null)
+            {
+                var newRule = new DeductionEmployerMatch
+                {
+                    MatchId              = Guid.NewGuid(),
+                    DeductionId          = _matchRulesDeduction.DeductionId,
+                    MatchRate            = matchRate,
+                    MatchCapPctOfGross   = capPctOfGross,
+                    MatchCapAnnualAmount = _matchFormCapAnnual,
+                    MatchType            = _matchFormType,
+                    EffectiveFrom        = _matchFormFrom.Value,
+                    EffectiveTo          = _matchFormTo,
+                    CreatedAt            = now
+                };
+                await MatchRepo.InsertAsync(newRule);
+            }
+            else
+            {
+                var updated = _editMatch with
+                {
+                    MatchRate            = matchRate,
+                    MatchCapPctOfGross   = capPctOfGross,
+                    MatchCapAnnualAmount = _matchFormCapAnnual,
+                    MatchType            = _matchFormType,
+                    EffectiveTo          = _matchFormTo
+                };
+                await MatchRepo.UpdateAsync(updated);
+            }
+
+            _showMatchForm = false;
+            _editMatch     = null;
+            _matchRules    = (await MatchRepo.GetAllByDeductionIdAsync(_matchRulesDeduction.DeductionId)).ToList();
+        }
+        catch (Exception ex) { _matchFormError = ex.Message; }
+        finally { _matchSaving = false; }
+    }
+
+    private void CancelMatchForm()
+    {
+        _showMatchForm  = false;
+        _editMatch      = null;
+        _matchFormError = null;
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────
+
+    private static string TreatmentBadgeClass(string t) =>
+        t == "PRE_TAX" ? "badge-blue" : "badge-orange";
+
+    private static string StatusBadgeClass(string s) =>
+        s == "ACTIVE" ? "badge-green" : "badge-gray";
+}

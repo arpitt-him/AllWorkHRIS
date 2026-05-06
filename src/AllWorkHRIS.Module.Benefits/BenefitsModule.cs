@@ -6,10 +6,14 @@ using AllWorkHRIS.Core.Events;
 using AllWorkHRIS.Core.Navigation;
 using AllWorkHRIS.Core.Pipeline;
 using AllWorkHRIS.Module.Benefits.Events;
+using AllWorkHRIS.Module.Benefits.Jobs;
 using AllWorkHRIS.Module.Benefits.Repositories;
 using AllWorkHRIS.Module.Benefits.Services;
 using AllWorkHRIS.Module.Benefits.Steps;
 using AllWorkHRIS.Module.Benefits.Steps.Calculators;
+using AllWorkHRIS.Module.Benefits.TabContributors;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
 namespace AllWorkHRIS.Module.Benefits;
 
@@ -76,6 +80,14 @@ public sealed class BenefitsModule : IPlatformModule
                .As<BenefitsEventSubscriber>()
                .As<IEventSubscriber>()
                .InstancePerLifetimeScope();
+
+        builder.RegisterType<BenefitsTabContributor>()
+               .As<IEmployeeTabContributor>()
+               .SingleInstance();
+
+        builder.RegisterType<BenefitElectionActivationJob>()
+               .As<IHostedService>()
+               .SingleInstance();
     }
 
     public IEnumerable<MenuContribution> GetMenuContributions()

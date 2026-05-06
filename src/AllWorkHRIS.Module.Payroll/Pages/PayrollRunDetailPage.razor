@@ -1,0 +1,439 @@
+@page "/payroll/runs/{RunId:guid}"
+@layout PayrollShell
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = "PayrollOperator,PayrollAdmin")]
+@implements IDisposable
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@inject IPayrollRunService              RunService
+@inject IPayrollContextRepository       ContextRepo
+@inject IEmployeePayrollResultRepository ResultRepo
+@inject IPersonNameLookup               PersonService
+@inject IRunProgressNotifier            ProgressNotifier
+@inject NavigationManager               Nav
+@inject AuthenticationStateProvider     AuthState
+
+<PageTitle>Payroll Run Detail — AllWork HRIS</PageTitle>
+
+<div class="page-container">
+
+    @if (_loading)
+    {
+        <p class="loading-state">Loading…</p>
+    }
+    else if (_run is null)
+    {
+        <div class="alert-error" style="margin-bottom:1rem;">Run not found.</div>
+        <a href="/payroll/runs" class="btn-link">← Back to Runs</a>
+    }
+    else
+    {
+        <div class="page-header">
+            <div>
+                <a href="/payroll/runs" class="btn-link" style="font-size:var(--font-size-sm)">← Payroll Runs</a>
+                <h2 class="page-title" style="margin-top:var(--space-1)">
+                    @(_run.RunDescription ?? $"Run {_run.RunId.ToString()[..8].ToUpper()}")
+                </h2>
+            </div>
+            <span class="badge @GetStatusBadgeClass(_run.RunStatusId)" style="font-size:var(--font-size-base);">
+                @GetStatusLabel(_run.RunStatusId)
+            </span>
+        </div>
+
+        @if (_errorMessage is not null)
+        {
+            <div class="alert-error" style="margin-bottom:1rem;">@_errorMessage</div>
+        }
+
+        @* Tab bar *@
+        <div class="tab-bar">
+            <button class="tab-item @(_activeTab == "summary"  ? "active" : "")" @onclick='() => _activeTab = "summary"'>Summary</button>
+            <button class="tab-item @(_activeTab == "register" ? "active" : "")" @onclick="SwitchToRegisterAsync">Pay Register</button>
+        </div>
+
+        @* ── Summary tab ─────────────────────────────────────────────── *@
+        @if (_activeTab == "summary")
+        {
+            <div class="panel-card" style="margin-bottom:1.5rem;">
+                <h3 class="panel-title">Run Details</h3>
+                <div class="detail-grid">
+                    <div class="detail-field">
+                        <span class="detail-label">Run ID</span>
+                        <span class="detail-value" style="font-family:monospace;font-size:var(--font-size-sm)">@_run.RunId.ToString()[..8].ToUpper()</span>
+                    </div>
+                    <div class="detail-field">
+                        <span class="detail-label">Payroll Context</span>
+                        <span class="detail-value">@(_context?.PayrollContextName ?? _run.PayrollContextId.ToString()[..8])</span>
+                    </div>
+                    <div class="detail-field">
+                        <span class="detail-label">Period</span>
+                        <span class="detail-value">@GetPeriodLabel()</span>
+                    </div>
+                    <div class="detail-field">
+                        <span class="detail-label">Pay Date</span>
+                        <span class="detail-value">@_run.PayDate.ToString("yyyy-MM-dd")</span>
+                    </div>
+                    <div class="detail-field">
+                        <span class="detail-label">Run Type</span>
+                        <span class="detail-value">@GetRunTypeLabel(_run.RunTypeId)</span>
+                    </div>
+                    <div class="detail-field">
+                        <span class="detail-label">Started</span>
+                        <span class="detail-value">@(_run.RunStartTimestamp?.ToString("yyyy-MM-dd HH:mm") ?? "—")</span>
+                    </div>
+                    <div class="detail-field">
+                        <span class="detail-label">Completed</span>
+                        <span class="detail-value">@(_run.RunEndTimestamp?.ToString("yyyy-MM-dd HH:mm") ?? "—")</span>
+                    </div>
+                </div>
+            </div>
+
+            @* Progress panel — only when calculating *@
+            @if (_run.RunStatusId == 3)
+            {
+                var progress = ProgressNotifier.GetProgress(_run.RunId);
+                <div class="panel-card" style="margin-bottom:1.5rem;">
+                    <h3 class="panel-title">Calculation Progress</h3>
+                    @if (progress is not null)
+                    {
+                        <div style="margin-bottom:var(--space-3)">
+                            <div class="progress-bar-track" style="height:8px;">
+                                <div class="progress-bar-fill" style="width:@progress.PercentComplete%"></div>
+                            </div>
+                        </div>
+                        <div style="display:flex;gap:var(--space-6);font-size:var(--font-size-sm);color:#6B7280;">
+                            <span>@progress.Processed processed</span>
+                            <span>@progress.Failed failed</span>
+                            <span>@progress.Total total</span>
+                            <span>@progress.PercentComplete%</span>
+                        </div>
+                        <p style="margin:var(--space-2) 0 0;font-size:var(--font-size-sm);color:#6B7280;">@progress.StatusMessage</p>
+                    }
+                    else
+                    {
+                        <p style="font-size:var(--font-size-sm);color:#6B7280;">Waiting for progress data…</p>
+                    }
+                </div>
+            }
+
+            @* Totals summary — only when calculated or later *@
+            @if (_run.RunStatusId >= 4 && _results.Count > 0)
+            {
+                <div class="panel-card" style="margin-bottom:1.5rem;">
+                    <h3 class="panel-title">Run Totals</h3>
+                    <div class="detail-grid">
+                        <div class="detail-field">
+                            <span class="detail-label">Employees</span>
+                            <span class="detail-value">@_results.Count</span>
+                        </div>
+                        <div class="detail-field">
+                            <span class="detail-label">Gross Pay</span>
+                            <span class="detail-value">@_results.Sum(r => r.GrossPayAmount).ToString("N2")</span>
+                        </div>
+                        <div class="detail-field">
+                            <span class="detail-label">Total Deductions</span>
+                            <span class="detail-value">@_results.Sum(r => r.TotalDeductionsAmount).ToString("N2")</span>
+                        </div>
+                        <div class="detail-field">
+                            <span class="detail-label">Employee Tax</span>
+                            <span class="detail-value">@_results.Sum(r => r.TotalEmployeeTaxAmount).ToString("N2")</span>
+                        </div>
+                        <div class="detail-field">
+                            <span class="detail-label">Employer Contribution</span>
+                            <span class="detail-value">@_results.Sum(r => r.TotalEmployerContributionAmount).ToString("N2")</span>
+                        </div>
+                        <div class="detail-field">
+                            <span class="detail-label">Net Pay</span>
+                            <span class="detail-value" style="color:var(--aw-teal);font-weight:var(--font-weight-semibold)">@_results.Sum(r => r.NetPayAmount).ToString("N2")</span>
+                        </div>
+                    </div>
+                </div>
+            }
+
+            @* Actions *@
+            <AuthorizeView Roles="PayrollAdmin">
+                <Authorized>
+                    <div class="panel-card">
+                        <h3 class="panel-title">Actions</h3>
+                        <div class="form-actions">
+                            @if (_run.RunStatusId == 4)
+                            {
+                                <button class="btn-primary" @onclick="ApproveAsync" disabled="@_submitting">
+                                    @(_submitting ? "Working…" : "Approve")
+                                </button>
+                            }
+                            @if (_run.RunStatusId == 6)
+                            {
+                                <button class="btn-primary" @onclick="ReleaseAsync" disabled="@_submitting">
+                                    @(_submitting ? "Working…" : "Release")
+                                </button>
+                            }
+                            @if (_run.RunStatusId is 1 or 4)
+                            {
+                                <button class="btn-danger" style="border:1px solid var(--color-danger);border-radius:var(--radius-md);padding:var(--space-2) var(--space-4);"
+                                        @onclick="CancelAsync" disabled="@_submitting">
+                                    Cancel Run
+                                </button>
+                            }
+                            @if (_run.RunStatusId is not (1 or 4 or 6))
+                            {
+                                <span style="font-size:var(--font-size-sm);color:#6B7280;">No actions available for this status.</span>
+                            }
+                        </div>
+                    </div>
+                </Authorized>
+            </AuthorizeView>
+        }
+
+        @* ── Pay Register tab ─────────────────────────────────────────── *@
+        @if (_activeTab == "register")
+        {
+            @if (_registerLoading)
+            {
+                <p class="loading-state">Loading pay register…</p>
+            }
+            else if (_results.Count == 0)
+            {
+                <p class="empty-state">No employee results available yet.</p>
+            }
+            else
+            {
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Employee</th>
+                            <th>Pay Period</th>
+                            <th style="text-align:right">Gross Pay</th>
+                            <th style="text-align:right">Deductions</th>
+                            <th style="text-align:right">Emp Tax</th>
+                            <th style="text-align:right">Er Contrib</th>
+                            <th style="text-align:right">Net Pay</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var r in _results.OrderBy(r => GetEmployeeName(r.EmploymentId)))
+                        {
+                            <tr>
+                                <td>@GetEmployeeName(r.EmploymentId)</td>
+                                <td>@r.PayPeriodStartDate.ToString("MM/dd")–@r.PayPeriodEndDate.ToString("MM/dd")</td>
+                                <td style="text-align:right">@r.GrossPayAmount.ToString("N2")</td>
+                                <td style="text-align:right">@r.TotalDeductionsAmount.ToString("N2")</td>
+                                <td style="text-align:right">@r.TotalEmployeeTaxAmount.ToString("N2")</td>
+                                <td style="text-align:right">@r.TotalEmployerContributionAmount.ToString("N2")</td>
+                                <td style="text-align:right;font-weight:var(--font-weight-semibold)">@r.NetPayAmount.ToString("N2")</td>
+                                <td><span class="badge @GetResultStatusClass(r.ResultStatusId)">@GetResultStatusLabel(r.ResultStatusId)</span></td>
+                            </tr>
+                        }
+                    </tbody>
+                    <tfoot>
+                        <tr style="background:#F9FAFB;font-weight:var(--font-weight-semibold)">
+                            <td colspan="2">Totals (@_results.Count employees)</td>
+                            <td style="text-align:right">@_results.Sum(r => r.GrossPayAmount).ToString("N2")</td>
+                            <td style="text-align:right">@_results.Sum(r => r.TotalDeductionsAmount).ToString("N2")</td>
+                            <td style="text-align:right">@_results.Sum(r => r.TotalEmployeeTaxAmount).ToString("N2")</td>
+                            <td style="text-align:right">@_results.Sum(r => r.TotalEmployerContributionAmount).ToString("N2")</td>
+                            <td style="text-align:right">@_results.Sum(r => r.NetPayAmount).ToString("N2")</td>
+                            <td></td>
+                        </tr>
+                    </tfoot>
+                </table>
+            }
+        }
+    }
+
+</div>
+
+@code {
+    [Parameter] public Guid RunId { get; set; }
+
+    private PayrollRun?            _run;
+    private PayrollContext?        _context;
+    private PayrollPeriod?         _period;
+    private List<EmployeePayrollResult> _results = [];
+    private Dictionary<Guid, string>   _names   = new();
+
+    private bool    _loading        = true;
+    private bool    _registerLoading;
+    private bool    _submitting;
+    private string? _errorMessage;
+    private string  _activeTab      = "summary";
+    private Guid    _currentUserId;
+
+    private PeriodicTimer?           _pollTimer;
+    private CancellationTokenSource? _pollCts;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        var sub  = auth.User.FindFirst("sub")?.Value;
+        _currentUserId = Guid.TryParse(sub, out var g) ? g : Guid.Empty;
+
+        await LoadRunAsync();
+    }
+
+    private async Task LoadRunAsync()
+    {
+        _loading = true;
+        _run = await RunService.GetRunByIdAsync(RunId);
+        if (_run is not null)
+        {
+            _context = await ContextRepo.GetByIdAsync(_run.PayrollContextId);
+            _period  = await ContextRepo.GetPeriodByIdAsync(_run.PeriodId);
+
+            if (_run.RunStatusId >= 4)
+                await LoadResultsAsync();
+
+            if (_run.RunStatusId == 3)
+                StartPolling();
+        }
+        _loading = false;
+    }
+
+    private async Task LoadResultsAsync()
+    {
+        var results = await ResultRepo.GetByRunIdAsync(RunId);
+        _results = [.. results];
+
+        if (_results.Count > 0)
+        {
+            var ids = _results.Select(r => r.EmploymentId).Distinct();
+            _names  = await PersonService.GetNamesByEmploymentIdsAsync(ids);
+        }
+    }
+
+    private async Task SwitchToRegisterAsync()
+    {
+        _activeTab = "register";
+        if (_results.Count == 0 && _run?.RunStatusId >= 4)
+        {
+            _registerLoading = true;
+            await LoadResultsAsync();
+            _registerLoading = false;
+        }
+    }
+
+    private async Task ApproveAsync()
+    {
+        _submitting   = true;
+        _errorMessage = null;
+        try
+        {
+            await RunService.ApproveRunAsync(new ApprovePayrollRunCommand
+                { RunId = RunId, ApprovedBy = _currentUserId });
+            await LoadRunAsync();
+        }
+        catch (Exception ex) { _errorMessage = ex.Message; }
+        finally { _submitting = false; }
+    }
+
+    private async Task ReleaseAsync()
+    {
+        _submitting   = true;
+        _errorMessage = null;
+        try
+        {
+            await RunService.ReleaseRunAsync(new ReleasePayrollRunCommand
+                { RunId = RunId, ReleasedBy = _currentUserId });
+            await LoadRunAsync();
+        }
+        catch (Exception ex) { _errorMessage = ex.Message; }
+        finally { _submitting = false; }
+    }
+
+    private async Task CancelAsync()
+    {
+        _submitting   = true;
+        _errorMessage = null;
+        try
+        {
+            await RunService.CancelRunAsync(new CancelPayrollRunCommand
+                { RunId = RunId, CancelledBy = _currentUserId, Reason = "Cancelled via detail page" });
+            await LoadRunAsync();
+        }
+        catch (Exception ex) { _errorMessage = ex.Message; }
+        finally { _submitting = false; }
+    }
+
+    private void StartPolling()
+    {
+        if (_pollCts is not null) return;
+        _pollCts = new CancellationTokenSource();
+        _ = PollAsync(_pollCts.Token);
+    }
+
+    private async Task PollAsync(CancellationToken ct)
+    {
+        _pollTimer = new PeriodicTimer(TimeSpan.FromSeconds(2));
+        try
+        {
+            while (await _pollTimer.WaitForNextTickAsync(ct))
+            {
+                _run = await RunService.GetRunByIdAsync(RunId);
+                await InvokeAsync(StateHasChanged);
+                if (_run?.RunStatusId != 3)
+                {
+                    if (_run?.RunStatusId >= 4)
+                        await LoadResultsAsync();
+                    _pollCts?.Cancel();
+                    break;
+                }
+            }
+        }
+        catch (OperationCanceledException) { }
+        finally { _pollTimer?.Dispose(); _pollTimer = null; }
+    }
+
+    public void Dispose()
+    {
+        _pollCts?.Cancel();
+        _pollTimer?.Dispose();
+    }
+
+    private string GetEmployeeName(Guid employmentId)
+        => _names.TryGetValue(employmentId, out var n) ? n : employmentId.ToString()[..8];
+
+    private string GetPeriodLabel() =>
+        _period is null
+            ? _run!.PeriodId.ToString()[..8]
+            : $"{_period.PeriodYear} P{_period.PeriodNumber} ({_period.PeriodStartDate:MM/dd}–{_period.PeriodEndDate:MM/dd})";
+
+    private static string GetRunTypeLabel(int id) => id switch
+    {
+        1 => "Regular",    2 => "Supplemental", 3 => "Adjustment",
+        4 => "Correction", 5 => "Reprocessing",  6 => "Simulation",
+        _ => id.ToString()
+    };
+
+    private static string GetStatusLabel(int id) => id switch
+    {
+        1 => "Draft",       2 => "Open",         3 => "Calculating",
+        4 => "Calculated",  5 => "Under Review",  6 => "Approved",
+        7 => "Releasing",   8 => "Released",      9 => "Closed",
+        10 => "Failed",     11 => "Cancelled",
+        _  => id.ToString()
+    };
+
+    private static string GetStatusBadgeClass(int id) => id switch
+    {
+        3 or 7  => "badge-info",
+        4       => "badge-teal",
+        6 or 8  => "badge-success",
+        5       => "badge-warning",
+        10      => "badge-error",
+        _       => "badge-neutral"
+    };
+
+    private static string GetResultStatusLabel(int id) => id switch
+    {
+        1  => "Calculating", 2 => "Calculated",
+        10 => "Failed",      _ => id.ToString()
+    };
+
+    private static string GetResultStatusClass(int id) => id switch
+    {
+        2  => "badge-teal",
+        10 => "badge-error",
+        _  => "badge-neutral"
+    };
+}

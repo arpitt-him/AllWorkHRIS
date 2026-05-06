@@ -25,7 +25,6 @@ using AllWorkHRIS.Host.Hris.Repositories;
 using AllWorkHRIS.Host.Hris.Services;
 using AllWorkHRIS.Host.Platform.Audit;
 using AllWorkHRIS.Host.TimeAttendance;
-using AllWorkHRIS.Module.TimeAttendance.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -187,6 +186,16 @@ builder.Host.ConfigureContainer<ContainerBuilder>(autofacBuilder =>
                   .As<IOrgStructureService>()
                   .InstancePerLifetimeScope();
 
+    autofacBuilder.RegisterType<EmploymentLookupAdapter>()
+                  .As<AllWorkHRIS.Core.Queries.IEmploymentLookup>()
+                  .InstancePerLifetimeScope();
+    autofacBuilder.RegisterType<PersonNameLookupAdapter>()
+                  .As<AllWorkHRIS.Core.Queries.IPersonNameLookup>()
+                  .InstancePerLifetimeScope();
+    autofacBuilder.RegisterType<OrgUnitLookupAdapter>()
+                  .As<AllWorkHRIS.Core.Queries.IOrgUnitLookup>()
+                  .InstancePerLifetimeScope();
+
     autofacBuilder.RegisterType<JobService>()
                   .As<IJobService>()
                   .InstancePerLifetimeScope();
@@ -266,10 +275,6 @@ builder.Host.ConfigureContainer<ContainerBuilder>(autofacBuilder =>
                   .As<AllWorkHRIS.Core.Navigation.INavContributor>()
                   .SingleInstance();
 
-    autofacBuilder.RegisterType<AllWorkHRIS.Host.Config.Navigation.TaxNavContributor>()
-                  .As<AllWorkHRIS.Core.Navigation.INavContributor>()
-                  .SingleInstance();
-
     autofacBuilder.RegisterType<AllWorkHRIS.Host.Config.Navigation.SystemAdminNavContributor>()
                   .As<AllWorkHRIS.Core.Navigation.INavContributor>()
                   .SingleInstance();
@@ -278,23 +283,10 @@ builder.Host.ConfigureContainer<ContainerBuilder>(autofacBuilder =>
                   .As<AllWorkHRIS.Core.Navigation.INavContributor>()
                   .SingleInstance();
 
-    // Employee tab contributors
-    autofacBuilder.RegisterType<AllWorkHRIS.Host.Hris.TabContributors.BenefitsTabContributor>()
-                  .As<AllWorkHRIS.Core.Composition.IEmployeeTabContributor>()
-                  .SingleInstance();
-    autofacBuilder.RegisterType<AllWorkHRIS.Host.Hris.TabContributors.TimeTabContributor>()
-                  .As<AllWorkHRIS.Core.Composition.IEmployeeTabContributor>()
-                  .SingleInstance();
-
     // Fallback no-op for optional Core abstractions — modules override via last-registration-wins
     autofacBuilder.RegisterType<NullPayrollContextLookup>()
                   .As<IPayrollContextLookup>()
                   .SingleInstance();
-
-    // T&A query service (UI-layer aggregation queries)
-    autofacBuilder.RegisterType<TimeAttendanceQueryService>()
-                  .AsSelf()
-                  .InstancePerLifetimeScope();
 
     // T&A notifier — Host implementation routes to IWorkQueueService
     autofacBuilder.RegisterType<WorkQueueTimeApprovalNotifier>()
@@ -337,7 +329,7 @@ builder.Host.ConfigureContainer<ContainerBuilder>(autofacBuilder =>
 // 5. Session state — scoped to Blazor circuit so entity lock survives
 //    page-to-page navigation within a single user session.
 // ---------------------------------------------------------------------------
-builder.Services.AddScoped<AllWorkHRIS.Host.Hris.Services.IHrisSessionState,
+builder.Services.AddScoped<AllWorkHRIS.Host.SharedUI.IHrisSessionState,
                             AllWorkHRIS.Host.Hris.Services.HrisSessionState>();
 
 // ---------------------------------------------------------------------------
@@ -423,7 +415,6 @@ builder.Services.AddCascadingAuthenticationState();
 // ---------------------------------------------------------------------------
 builder.Services.AddHostedService<LeaveStatusTransitionJob>();
 builder.Services.AddHostedService<DocumentExpirationCheckJob>();
-builder.Services.AddHostedService<BenefitElectionActivationJob>();
 
 // ---------------------------------------------------------------------------
 // 10. Build
@@ -546,7 +537,8 @@ app.MapGet("/account/logout", async (HttpContext ctx) =>
 // ---------------------------------------------------------------------------
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
-    .AddInteractiveServerRenderMode();
+    .AddInteractiveServerRenderMode()
+    .AddAdditionalAssemblies(platformModules.Select(m => m.GetType().Assembly).Distinct().ToArray());
 
 app.Run();
 

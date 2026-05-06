@@ -1,6 +1,9 @@
-<Router AppAssembly="typeof(Program).Assembly">
+@inject IReadOnlyList<IPlatformModule> PlatformModules
+
+<Router AppAssembly="typeof(Program).Assembly"
+        AdditionalAssemblies="@PlatformModules.Select(m => m.GetType().Assembly).Distinct().ToArray()">
     <Found Context="routeData">
-        <AuthorizeRouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)">
+        <AuthorizeRouteView RouteData="routeData" DefaultLayout="typeof(AllWorkHRIS.Host.SharedUI.MainLayout)">
             <NotAuthorized>
                 <RedirectToLogin />
             </NotAuthorized>

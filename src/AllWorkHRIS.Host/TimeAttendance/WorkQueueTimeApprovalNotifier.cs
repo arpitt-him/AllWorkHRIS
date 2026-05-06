@@ -1,5 +1,5 @@
+using AllWorkHRIS.Core.Composition;
 using AllWorkHRIS.Host.Hris.Services;
-using AllWorkHRIS.Module.TimeAttendance.Services;
 
 namespace AllWorkHRIS.Host.TimeAttendance;
 

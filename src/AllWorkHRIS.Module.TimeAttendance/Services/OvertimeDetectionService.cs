@@ -1,4 +1,5 @@
 using Dapper;
+using AllWorkHRIS.Core.Composition;
 using AllWorkHRIS.Core.Data;
 using AllWorkHRIS.Core.Lookups;
 using AllWorkHRIS.Module.TimeAttendance.Domain;

@@ -1,18 +1,6 @@
 namespace AllWorkHRIS.Host.Hris.Services;
 
-public interface IHrisSessionState
-{
-    Guid?   SelectedLegalEntityId   { get; }
-    string? SelectedLegalEntityName { get; }
-    bool    HasEntity               { get; }
-    bool    IsLocked                { get; }
-    void    SetEntity(Guid entityId, string entityName);
-    void    Lock();
-    void    Unlock();
-    event Action? OnChanged;
-}
-
-public sealed class HrisSessionState : IHrisSessionState
+public sealed class HrisSessionState : AllWorkHRIS.Host.SharedUI.IHrisSessionState
 {
     private Guid?   _entityId;
     private string? _entityName;

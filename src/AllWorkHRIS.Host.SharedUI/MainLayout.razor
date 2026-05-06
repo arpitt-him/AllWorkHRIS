@@ -1,0 +1,203 @@
+@* AllWorkHRIS.Host.SharedUI/MainLayout.razor *@
+@inherits LayoutComponentBase
+@inject IEnumerable<INavContributor> NavContributors
+@inject IHrisSessionState            SessionState
+@inject NavigationManager            Nav
+@inject AuthenticationStateProvider  AuthStateProvider
+@implements IDisposable
+
+<div class="shell-container">
+    <nav class="shell-sidebar">
+        <div class="shell-brand">
+            <span class="shell-brand-name">@AppDisplayName</span>
+        </div>
+
+        @if (_isSystemAdmin)
+        {
+            <div class="shell-nav-main">
+                <a class="nav-switch-client" href="/">⬅ Back to Clients</a>
+                @foreach (var seg in _adminSections)
+                {
+                    <div class="nav-group">
+                        <div class="nav-item nav-parent">
+                            <span class="nav-label">@seg.Label</span>
+                        </div>
+                        @foreach (var item in seg.Items.Where(i => ItemVisible(i)))
+                        {
+                            <NavLink class="nav-item nav-child" href="@item.Href" Match="NavLinkMatch.Prefix">
+                                <span class="nav-label">@item.Label</span>
+                            </NavLink>
+                        }
+                    </div>
+                }
+            </div>
+        }
+        else if (_isOpsAdmin)
+        {
+            <div class="shell-nav-main">
+                @foreach (var seg in _opsSections)
+                {
+                    <div class="nav-group">
+                        <div class="nav-item nav-parent">
+                            <span class="nav-label">@seg.Label</span>
+                        </div>
+                        @foreach (var item in seg.Items.Where(i => ItemVisible(i)))
+                        {
+                            <NavLink class="nav-item nav-child" href="@item.Href" Match="NavLinkMatch.Prefix">
+                                <span class="nav-label">@item.Label</span>
+                            </NavLink>
+                        }
+                    </div>
+                }
+            </div>
+        }
+        else if (SessionState.IsLocked)
+        {
+            <div class="shell-nav-main">
+                <button class="nav-switch-client" @onclick="SwitchClient">⬅ Switch Client</button>
+                @if (SessionState.SelectedLegalEntityName is not null)
+                {
+                    <div class="nav-entity-label">@SessionState.SelectedLegalEntityName</div>
+                }
+                @foreach (var seg in _entitySections)
+                {
+                    <div class="nav-group">
+                        <div class="nav-item nav-parent">
+                            <span class="nav-label">@seg.Label</span>
+                            @if (seg.BadgeLabel is not null)
+                            {
+                                <span class="nav-badge" style="background-color: @seg.AccentColor">
+                                    @seg.BadgeLabel
+                                </span>
+                            }
+                        </div>
+                        @foreach (var item in seg.Items.Where(i => ItemVisible(i)))
+                        {
+                            <NavLink class="nav-item nav-child" href="@item.Href" Match="NavLinkMatch.Prefix">
+                                <span class="nav-label">@item.Label</span>
+                            </NavLink>
+                        }
+                    </div>
+                }
+            </div>
+        }
+        else
+        {
+            <div class="shell-nav-main">
+                <NavLink class="nav-item" href="/" Match="NavLinkMatch.All">
+                    <span class="nav-label">Dashboard</span>
+                </NavLink>
+            </div>
+        }
+    </nav>
+
+    <div class="shell-main">
+        <TopBar />
+        <div class="shell-content">
+            <ErrorBoundary>
+                <ChildContent>@Body</ChildContent>
+                <ErrorContent Context="ex">
+                    <div class="error-display">
+                        <h3>An error occurred</h3>
+                        <p>@ex.Message</p>
+                    </div>
+                </ErrorContent>
+            </ErrorBoundary>
+        </div>
+    </div>
+</div>
+
+@code {
+    private string AppDisplayName =>
+        Environment.GetEnvironmentVariable("APP_DISPLAY_NAME") ?? "AllWorkHRIS";
+
+    private bool   _isSystemAdmin;
+    private bool   _isOpsAdmin;
+    private List<string> _userRoles = [];
+
+    private List<NavSection> _entitySections = [];
+    private List<NavSection> _adminSections  = [];
+    private List<NavSection> _opsSections    = [];
+
+    private IDisposable? _locationHandler;
+
+    private static readonly string[] ExemptRoutes =
+        ["/", "/admin", "/ops", "/about", "/error"];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState  = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user       = authState.User;
+        _userRoles     = user.GetRoles().ToList();
+        _isSystemAdmin = user.HasAnyRole("SystemAdmin");
+        _isOpsAdmin    = user.HasAnyRole("OperationsAdmin");
+
+        _entitySections = NavContributors
+            .Where(c => c.Target == NavTarget.EntityNav)
+            .Select(c => c.GetSection(_userRoles))
+            .OfType<NavSection>()
+            .OrderBy(s => s.Order)
+            .ToList();
+
+        _adminSections = NavContributors
+            .Where(c => c.Target == NavTarget.AdminNav)
+            .Select(c => c.GetSection(_userRoles))
+            .OfType<NavSection>()
+            .OrderBy(s => s.Order)
+            .ToList();
+
+        _opsSections = NavContributors
+            .Where(c => c.Target == NavTarget.OpsNav)
+            .Select(c => c.GetSection(_userRoles))
+            .OfType<NavSection>()
+            .OrderBy(s => s.Order)
+            .ToList();
+
+        SessionState.OnChanged += StateHasChanged;
+    }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (!firstRender) return;
+        _locationHandler = Nav.RegisterLocationChangingHandler(OnLocationChanging);
+        GuardEntityContext(Nav.Uri);
+    }
+
+    private ValueTask OnLocationChanging(LocationChangingContext ctx)
+    {
+        GuardEntityContext(ctx.TargetLocation);
+        return ValueTask.CompletedTask;
+    }
+
+    private void GuardEntityContext(string uri)
+    {
+        if (_isSystemAdmin || _isOpsAdmin) return;
+        if (SessionState.IsLocked)         return;
+
+        var path = new Uri(uri, UriKind.RelativeOrAbsolute).IsAbsoluteUri
+            ? new Uri(uri).AbsolutePath
+            : uri.Split('?')[0];
+
+        if (ExemptRoutes.Any(r => path.Equals(r, StringComparison.OrdinalIgnoreCase))) return;
+
+        Nav.NavigateTo($"/?returnUrl={Uri.EscapeDataString(uri)}");
+    }
+
+    private bool ItemVisible(NavSectionItem item)
+    {
+        if (item.RequiredRole is null) return true;
+        return _userRoles.Contains(item.RequiredRole);
+    }
+
+    private void SwitchClient()
+    {
+        SessionState.Unlock();
+        Nav.NavigateTo("/");
+    }
+
+    public void Dispose()
+    {
+        SessionState.OnChanged -= StateHasChanged;
+        _locationHandler?.Dispose();
+    }
+}

@@ -5,8 +5,10 @@ using AllWorkHRIS.Core.Dashboard;
 using AllWorkHRIS.Core.Events;
 using AllWorkHRIS.Core.Navigation;
 using AllWorkHRIS.Module.TimeAttendance.Events;
+using AllWorkHRIS.Module.TimeAttendance.Queries;
 using AllWorkHRIS.Module.TimeAttendance.Repositories;
 using AllWorkHRIS.Module.TimeAttendance.Services;
+using AllWorkHRIS.Module.TimeAttendance.TabContributors;
 
 namespace AllWorkHRIS.Module.TimeAttendance;
 
@@ -43,7 +45,14 @@ public sealed class TimeAttendanceModule : IPlatformModule
                .As<ITimeImportService>()
                .InstancePerLifetimeScope();
 
-        // Null notifier — overridden by Host with WorkQueueTimeApprovalNotifier
+        builder.RegisterType<TimeAttendanceQueryService>()
+               .AsSelf()
+               .InstancePerLifetimeScope();
+
+        builder.RegisterType<TimeTabContributor>()
+               .As<IEmployeeTabContributor>()
+               .SingleInstance();
+
         builder.RegisterType<NullTimeApprovalNotifier>()
                .As<ITimeApprovalNotifier>()
                .SingleInstance()

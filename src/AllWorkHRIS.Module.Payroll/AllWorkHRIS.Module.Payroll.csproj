@@ -1,7 +1,18 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\AllWorkHRIS.Core\AllWorkHRIS.Core.csproj" />
+    <ProjectReference Include="..\AllWorkHRIS.Host.SharedUI\AllWorkHRIS.Host.SharedUI.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -11,12 +22,6 @@
     <PackageReference Include="Npgsql" Version="10.0.2" />
     <PackageReference Include="System.Composition" Version="9.0.0" />
   </ItemGroup>
-
-  <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-  </PropertyGroup>
 
   <Target Name="CopyToHostModules" AfterTargets="Build">
     <PropertyGroup>

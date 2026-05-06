@@ -1,0 +1,51 @@
+@* AllWorkHRIS.Host.SharedUI/NavMenu.razor *@
+@inject AuthenticationStateProvider AuthStateProvider
+
+@if (_user is not null)
+{
+    @foreach (var parent in TopLevelItems.Where(p => ChildrenOf(p.Label).Any()))
+    {
+        <div class="nav-group">
+            <div class="nav-item nav-parent">
+                <span class="nav-label">@parent.Label</span>
+                @if (parent.BadgeLabel is not null)
+                {
+                    <span class="nav-badge" style="background-color: @parent.AccentColor">
+                        @parent.BadgeLabel
+                    </span>
+                }
+            </div>
+            @foreach (var child in ChildrenOf(parent.Label))
+            {
+                <NavLink class="nav-item nav-child" href="@child.Href" Match="NavLinkMatch.Prefix">
+                    <span class="nav-label">@child.Label</span>
+                </NavLink>
+            }
+        </div>
+    }
+}
+
+@code {
+    [Parameter] public IReadOnlyList<MenuContribution> Items { get; set; } = [];
+
+    private ClaimsPrincipal? _user;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        _user = authState.User;
+    }
+
+    private IEnumerable<MenuContribution> TopLevelItems =>
+        Items.Where(i => i.ParentLabel is null);
+
+    private IEnumerable<MenuContribution> ChildrenOf(string parentLabel) =>
+        Items.Where(i => i.ParentLabel == parentLabel && IsAuthorized(i));
+
+    private bool IsAuthorized(MenuContribution item)
+    {
+        if (item.RequiredRole is null) return true;
+        var required = item.RequiredRole.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        return required.Any(r => _user?.Claims.Any(c => c.Type == "roles" && c.Value == r) ?? false);
+    }
+}

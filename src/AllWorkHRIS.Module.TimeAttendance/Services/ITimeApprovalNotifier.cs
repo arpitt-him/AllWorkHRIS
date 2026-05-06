@@ -1,16 +1,6 @@
-namespace AllWorkHRIS.Module.TimeAttendance.Services;
+using AllWorkHRIS.Core.Composition;
 
-/// <summary>
-/// Decouples T&A module from Host's IWorkQueueService.
-/// Implemented by the Host; a no-op NullTimeApprovalNotifier is registered by default.
-/// Pattern: same as IPayrollContextLookup / NullPayrollContextLookup.
-/// </summary>
-public interface ITimeApprovalNotifier
-{
-    Task NotifyTimeApprovalAsync(Guid timeEntryId, Guid employmentId);
-    Task NotifyOvertimeWarningAsync(Guid employmentId, DateOnly weekStart, decimal overtimeHours);
-    Task NotifyRetroCalculationReviewAsync(Guid correctionId, Guid employmentId, Guid periodId);
-}
+namespace AllWorkHRIS.Module.TimeAttendance.Services;
 
 public sealed class NullTimeApprovalNotifier : ITimeApprovalNotifier
 {
