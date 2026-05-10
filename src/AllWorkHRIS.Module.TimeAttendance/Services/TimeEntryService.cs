@@ -12,6 +12,7 @@ public sealed class TimeEntryService : ITimeEntryService
 {
     private readonly ITimeEntryRepository      _repository;
     private readonly IOvertimeDetectionService _overtimeService;
+    private readonly IWorkScheduleRepository   _workSchedules;
     private readonly IConnectionFactory        _connectionFactory;
     private readonly ILookupCache              _lookupCache;
     private readonly ITimeApprovalNotifier     _notifier;
@@ -20,6 +21,7 @@ public sealed class TimeEntryService : ITimeEntryService
     public TimeEntryService(
         ITimeEntryRepository       repository,
         IOvertimeDetectionService  overtimeService,
+        IWorkScheduleRepository    workSchedules,
         IConnectionFactory         connectionFactory,
         ILookupCache               lookupCache,
         ITimeApprovalNotifier      notifier,
@@ -27,6 +29,7 @@ public sealed class TimeEntryService : ITimeEntryService
     {
         _repository        = repository;
         _overtimeService   = overtimeService;
+        _workSchedules     = workSchedules;
         _connectionFactory = connectionFactory;
         _lookupCache       = lookupCache;
         _notifier          = notifier;
@@ -104,7 +107,9 @@ public sealed class TimeEntryService : ITimeEntryService
         }
 
         // Overtime detection runs after approval in its own transaction
-        var weekStart = GetWorkweekStart(entry.WorkDate);
+        var anchor    = await _workSchedules.ResolveWorkweekAnchorAsync(entry.PayrollPeriodId, entry.EmploymentId);
+        var diff      = ((int)entry.WorkDate.DayOfWeek - anchor + 7) % 7;
+        var weekStart = entry.WorkDate.AddDays(-diff);
         using var otUow = new UnitOfWork(_connectionFactory);
         try
         {
@@ -201,11 +206,4 @@ public sealed class TimeEntryService : ITimeEntryService
     public Task<IEnumerable<TimeEntry>> GetPeriodEntriesAsync(Guid employmentId, Guid payrollPeriodId)
         => _repository.GetByEmploymentAndPeriodAsync(employmentId, payrollPeriodId);
 
-    private static DateOnly GetWorkweekStart(DateOnly workDate)
-    {
-        // FLSA workweek starts Monday by default
-        var dayOfWeek    = (int)workDate.DayOfWeek;
-        var daysToMonday = dayOfWeek == 0 ? 6 : dayOfWeek - 1;
-        return workDate.AddDays(-daysToMonday);
-    }
 }

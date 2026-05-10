@@ -49,6 +49,34 @@ public sealed class WorkScheduleRepository : IWorkScheduleRepository
             new { WorkScheduleId = workScheduleId });
     }
 
+    public async Task<int> ResolveWorkweekAnchorAsync(Guid payrollPeriodId, Guid employmentId)
+    {
+        using var conn = _connectionFactory.CreateConnection();
+
+        // Level 1 — pay calendar anchor: derive from payroll period start date
+        var periodStart = await conn.ExecuteScalarAsync<DateOnly?>(
+            "SELECT period_start_date FROM payroll_period WHERE period_id = @PeriodId",
+            new { PeriodId = payrollPeriodId });
+
+        if (periodStart.HasValue)
+            return (int)periodStart.Value.DayOfWeek;
+
+        // Level 2 — entity work_schedule fallback (HRIS-only deployments)
+        var legalEntityId = await conn.ExecuteScalarAsync<Guid?>(
+            "SELECT legal_entity_id FROM employment WHERE employment_id = @EmploymentId",
+            new { EmploymentId = employmentId });
+
+        if (legalEntityId.HasValue)
+        {
+            var schedule = await GetActiveForEntityAsync(legalEntityId.Value, DateOnly.FromDateTime(DateTime.UtcNow));
+            if (schedule is not null)
+                return schedule.WorkweekStartDay;
+        }
+
+        // Level 3 — Monday safe default
+        return 1;
+    }
+
     public async Task<Guid> InsertAsync(WorkSchedule schedule, IUnitOfWork uow)
     {
         const string sql = """
