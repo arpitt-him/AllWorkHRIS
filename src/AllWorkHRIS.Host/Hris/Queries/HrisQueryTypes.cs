@@ -11,16 +11,17 @@ public sealed record PagedResult<T>
 
 public sealed record EmployeeListQuery
 {
-    public int       Page          { get; init; } = 1;
-    public int       PageSize      { get; init; } = 20;
-    public Guid?     LegalEntityId { get; init; }
-    public string?   SearchTerm    { get; init; }
-    public string?   Status        { get; init; }
-    public Guid?     DepartmentId  { get; init; }
-    public DateOnly? StartDateFrom { get; init; }
-    public DateOnly? StartDateTo   { get; init; }
-    public string?   SortColumn    { get; init; } = "legal_last_name";
-    public bool      SortAscending { get; init; } = true;
+    public int       Page           { get; init; } = 1;
+    public int       PageSize       { get; init; } = 20;
+    public Guid?     LegalEntityId  { get; init; }
+    public string?   SearchTerm     { get; init; }
+    public string?   Status         { get; init; }
+    public string?   EmploymentType { get; init; }
+    public Guid?     DepartmentId   { get; init; }
+    public DateOnly? StartDateFrom  { get; init; }
+    public DateOnly? StartDateTo    { get; init; }
+    public string?   SortColumn     { get; init; } = "legal_last_name";
+    public bool      SortAscending  { get; init; } = true;
 }
 
 public sealed record EmploymentListItem

@@ -5,6 +5,7 @@
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Components.Authorization
 @inject IPayrollContextRepository   ContextRepo
+@inject IPayrollProfileRepository   ProfileRepo
 @inject IAuditService               AuditService
 @inject ILookupCache                LookupCache
 @inject ITemporalContext            TemporalContext
@@ -40,7 +41,7 @@
                 {
                     <button class="btn-secondary"
                             style="border:1px solid var(--color-danger);color:var(--color-danger);border-radius:var(--radius-md);padding:var(--space-2) var(--space-4);font-size:var(--font-size-sm)"
-                            @onclick="() => _showDeleteConfirm = true">
+                            @onclick="ShowDeleteConfirmAsync">
                         Delete Context
                     </button>
                 }
@@ -53,10 +54,16 @@
             <div class="panel-card" style="margin-bottom:1.5rem;border:1px solid #FECACA;">
                 <h3 class="panel-title" style="color:var(--color-danger)">Delete Context?</h3>
                 <p style="font-size:var(--font-size-sm);color:#374151;margin:0 0 var(--space-3)">
-                    This will permanently delete <strong>@_context.PayrollContextName</strong> and all of its
-                    calendar periods. This cannot be undone. Contexts with payroll runs or closed/locked
-                    periods cannot be deleted.
+                    This will permanently delete <strong>@_context.PayrollContextName</strong>, all of its
+                    calendar periods, and all payroll enrollments for this context. This cannot be undone.
+                    Contexts with payroll runs cannot be deleted.
                 </p>
+                @if (_deleteEnrolledCount > 0)
+                {
+                    <p style="font-size:var(--font-size-sm);color:var(--color-danger);font-weight:600;margin:0 0 var(--space-3)">
+                        ⚠ @_deleteEnrolledCount enrolled @(_deleteEnrolledCount == 1 ? "employee" : "employees") will be removed from payroll.
+                    </p>
+                }
                 @if (_deleteError is not null)
                 {
                     <div class="alert-error" style="margin-bottom:var(--space-3)">@_deleteError</div>
@@ -68,7 +75,7 @@
                             disabled="@_submitting">
                         @(_submitting ? "Deleting…" : "Yes, delete this context")
                     </button>
-                    <button class="btn-secondary" @onclick="() => { _showDeleteConfirm = false; _deleteError = null; }">Cancel</button>
+                    <button class="btn-secondary" @onclick="() => { _showDeleteConfirm = false; _deleteError = null; _deleteEnrolledCount = 0; }">Cancel</button>
                 </div>
             </div>
         }
@@ -385,6 +392,7 @@
     private bool    _showGenerateForm;
     private bool    _showClearConfirm;
     private bool    _showDeleteConfirm;
+    private int     _deleteEnrolledCount;
     private string? _generateError;
     private string? _clearResultMessage;
     private bool    _clearHadError;
@@ -474,6 +482,13 @@
     {
         _showClearConfirm   = false;
         _clearResultMessage = null;
+    }
+
+    private async Task ShowDeleteConfirmAsync()
+    {
+        _deleteEnrolledCount = await ProfileRepo.CountActiveByContextAsync(ContextId);
+        _deleteError         = null;
+        _showDeleteConfirm   = true;
     }
 
     private async Task DeleteContextAsync()

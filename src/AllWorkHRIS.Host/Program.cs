@@ -137,6 +137,10 @@ builder.Host.ConfigureContainer<ContainerBuilder>(autofacBuilder =>
                   .As<IPersonAddressRepository>()
                   .InstancePerLifetimeScope();
 
+    autofacBuilder.RegisterType<PersonChangeRequestRepository>()
+                  .As<IPersonChangeRequestRepository>()
+                  .InstancePerLifetimeScope();
+
     autofacBuilder.RegisterType<EmploymentRepository>()
                   .As<IEmploymentRepository>()
                   .InstancePerLifetimeScope();
@@ -381,7 +385,7 @@ builder.Services.AddAuthentication(options =>
     options.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
     options.DefaultChallengeScheme = OpenIdConnectDefaults.AuthenticationScheme;
 })
-.AddCookie()
+.AddCookie(options => { options.AccessDeniedPath = "/access-denied"; })
 .AddOpenIdConnect(options =>
 {
     options.Authority    = Environment.GetEnvironmentVariable("AUTH_AUTHORITY");

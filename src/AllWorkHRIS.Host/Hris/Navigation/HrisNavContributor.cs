@@ -5,7 +5,7 @@ namespace AllWorkHRIS.Host.Hris.Navigation;
 
 public sealed class HrisNavContributor : INavContributor
 {
-    private static readonly string[] _roles = ["HrisViewer", "HrisAdmin", "Manager"];
+    private static readonly string[] _roles = ["HrisViewer", "HrisAdmin", "HrisOperator", "Manager"];
 
     public NavTarget Target => NavTarget.EntityNav;
 

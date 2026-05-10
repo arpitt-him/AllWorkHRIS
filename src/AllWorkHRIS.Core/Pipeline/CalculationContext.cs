@@ -44,6 +44,12 @@ public sealed record CalculationContext
     public ImmutableDictionary<string, decimal> EmployerStepResults { get; init; }
         = ImmutableDictionary<string, decimal>.Empty;
 
+    // Step codes that apply to BOTH employee and employer — must appear in both outputs.
+    // Needed because EmployerStepResults also appears in StepResults for cross-step reads,
+    // so the pipeline cannot distinguish Both from Employer-only by inspecting dictionaries alone.
+    public ImmutableHashSet<string> BothStepCodes { get; init; }
+        = ImmutableHashSet<string>.Empty;
+
     // YTD accumulator balances for cap enforcement
     public ImmutableDictionary<string, decimal> YtdBalances { get; init; }
         = ImmutableDictionary<string, decimal>.Empty;
@@ -86,6 +92,20 @@ public sealed record CalculationContext
         {
             StepResults         = StepResults.SetItem(stepCode, amount),
             EmployerStepResults = EmployerStepResults.SetItem(stepCode, amount),
+            EmployerCost        = EmployerCost + amount
+        };
+
+    // Used for steps that apply to BOTH employee and employer (e.g. Social Security, Medicare).
+    // Reduces NetPay (EE withheld) AND increases EmployerCost (ER share), and tracks the code
+    // in BothStepCodes so the pipeline includes it in both the EE and ER output dictionaries.
+    public CalculationContext WithBothStepResult(string stepCode, decimal amount)
+        => this with
+        {
+            StepResults         = StepResults.SetItem(stepCode, amount),
+            EmployerStepResults = EmployerStepResults.SetItem(stepCode, amount),
+            BothStepCodes       = BothStepCodes.Add(stepCode),
+            ComputedTax         = ComputedTax + amount,
+            NetPay              = NetPay - amount,
             EmployerCost        = EmployerCost + amount
         };
 }

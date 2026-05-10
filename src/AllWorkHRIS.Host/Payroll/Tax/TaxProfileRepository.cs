@@ -83,6 +83,7 @@ public interface ITaxProfileRepository
     Task<IReadOnlyList<MissingElectionRow>> GetEmployeesMissingElectionsAsync(Guid legalEntityId, DateOnly operativeDate, int page, int pageSize);
     Task<TaxProfileRow?>                   GetActiveProfileAsync(Guid employmentId, string jurisdictionCode, DateOnly asOfDate);
     Task                                   SaveProfileAsync(Guid employmentId, string jurisdictionCode, TaxProfileSaveModel model, string createdBy, DateOnly effectiveFrom);
+    Task                                   AssignJurisdictionsAsync(Guid legalEntityId, IEnumerable<string> jurisdictionCodes);
 }
 
 // ============================================================
@@ -452,6 +453,24 @@ public sealed class TaxProfileRepository : ITaxProfileRepository
             }, tx);
 
         tx.Commit();
+    }
+
+    public async Task AssignJurisdictionsAsync(Guid legalEntityId, IEnumerable<string> jurisdictionCodes)
+    {
+        var codes = jurisdictionCodes.ToList();
+        if (codes.Count == 0) return;
+
+        const string lookupSql = """
+            SELECT jurisdiction_id FROM tax_jurisdiction
+            WHERE  jurisdiction_code IN @Codes AND is_active = TRUE
+            """;
+        using var conn = _db.CreateConnection();
+        var ids = (await conn.QueryAsync<int>(lookupSql, new { Codes = codes })).ToList();
+
+        foreach (var id in ids)
+            await conn.ExecuteAsync(
+                "INSERT INTO legal_entity_jurisdiction (legal_entity_id, jurisdiction_id) VALUES (@LegalEntityId, @JurisdictionId)",
+                new { LegalEntityId = legalEntityId, JurisdictionId = id });
     }
 
     private async Task<int> ResolveJurisdictionIdAsync(string jurisdictionCode)

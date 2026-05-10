@@ -6,11 +6,13 @@
 @using Microsoft.AspNetCore.Components.Authorization
 @using System.Security.Claims
 @using System.Text
+@using AllWorkHRIS.Core.Temporal
 @using AllWorkHRIS.Module.TimeAttendance.Domain
 @inject ITimeImportService        ImportService
 @inject IHrisSessionState         SessionState
 @inject AuthenticationStateProvider AuthState
 @inject IJSRuntime                JS
+@inject ITemporalContext          TemporalContext
 
 <PageTitle>Import Time Entries — AllWork HRIS</PageTitle>
 
@@ -217,7 +219,11 @@
 
             using var ms = new MemoryStream(bytes);
             _result     = await ImportService.ImportAsync(ms, importedBy, SessionState.SelectedLegalEntityId);
-            _importedAt = DateTimeOffset.Now;
+            var operativeDate = TemporalContext.GetOperativeDate();
+            _importedAt = new DateTimeOffset(
+                operativeDate.Year, operativeDate.Month, operativeDate.Day,
+                DateTime.Now.Hour, DateTime.Now.Minute, DateTime.Now.Second,
+                DateTimeOffset.Now.Offset);
             _step       = Step.Done;
         }
         catch (Exception ex) { _fileError = ex.Message; }

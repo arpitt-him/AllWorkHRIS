@@ -56,7 +56,13 @@ public sealed class DeductionRateTableRepository : IDeductionRateTableRepository
             SELECT {EntryColumns}
             FROM   deduction_rate_entry
             WHERE  rate_table_id = @RateTableId
-            ORDER  BY tier_code NULLS LAST, band_min NULLS LAST
+            ORDER  BY CASE tier_code
+                          WHEN 'EE_ONLY'   THEN 1
+                          WHEN 'EE_SPOUSE' THEN 2
+                          WHEN 'EE_CHILD'  THEN 3
+                          WHEN 'FAMILY'    THEN 4
+                          ELSE 5
+                      END, band_min NULLS LAST
             """;
         return await conn.QueryAsync<DeductionRateEntry>(sql, new { RateTableId = rateTableId });
     }
@@ -94,6 +100,17 @@ public sealed class DeductionRateTableRepository : IDeductionRateTableRepository
 
         foreach (var entry in entries)
             await InsertEntryAsync(entry, uow);
+    }
+
+    public async Task CloseOpenTablesAsync(Guid deductionId, DateOnly closingDate, IUnitOfWork uow)
+    {
+        const string sql = """
+            UPDATE deduction_rate_table
+            SET    effective_to = @ClosingDate
+            WHERE  deduction_id  = @DeductionId
+              AND  effective_to IS NULL
+            """;
+        await uow.Connection.ExecuteAsync(sql, new { DeductionId = deductionId, ClosingDate = closingDate }, uow.Transaction);
     }
 
     public async Task<Guid> InsertTableAsync(DeductionRateTable table)

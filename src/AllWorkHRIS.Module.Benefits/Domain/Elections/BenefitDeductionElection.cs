@@ -14,6 +14,7 @@ public sealed record BenefitDeductionElection
     public decimal          EmployeeAmount              { get; init; }
     public decimal?         EmployerContributionAmount  { get; init; }
     public decimal?         ContributionPct             { get; init; }
+    public decimal?         EmployerContributionPct     { get; init; }
     public string?          CoverageTier                { get; init; }
     public decimal?         AnnualCoverageAmount        { get; init; }
     public decimal?         AnnualElectionAmount        { get; init; }
@@ -47,6 +48,7 @@ public sealed record BenefitDeductionElection
             EmployeeAmount             = cmd.EmployeeAmount ?? 0,
             EmployerContributionAmount = cmd.EmployerContributionAmount,
             ContributionPct            = cmd.ContributionPct,
+            EmployerContributionPct    = cmd.EmployerContributionPct,
             CoverageTier               = cmd.CoverageTier,
             AnnualCoverageAmount       = cmd.AnnualCoverageAmount,
             EffectiveStartDate         = cmd.EffectiveStartDate,
@@ -76,6 +78,7 @@ public sealed record BenefitDeductionElection
             EmployeeAmount             = cmd.EmployeeAmount,
             EmployerContributionAmount = cmd.EmployerContributionAmount,
             ContributionPct            = prior.ContributionPct,
+            EmployerContributionPct    = prior.EmployerContributionPct,
             CoverageTier               = prior.CoverageTier,
             AnnualCoverageAmount       = prior.AnnualCoverageAmount,
             EffectiveStartDate         = cmd.EffectiveStartDate,
@@ -110,6 +113,7 @@ public sealed record BenefitDeductionElection
             EmployeeAmount             = cmd.EmployeeAmount             ?? prior.EmployeeAmount,
             EmployerContributionAmount = cmd.EmployerContributionAmount ?? prior.EmployerContributionAmount,
             ContributionPct            = cmd.ContributionPct            ?? prior.ContributionPct,
+            EmployerContributionPct    = cmd.EmployerContributionPct    ?? prior.EmployerContributionPct,
             CoverageTier               = cmd.CoverageTier               ?? prior.CoverageTier,
             AnnualCoverageAmount       = cmd.AnnualCoverageAmount       ?? prior.AnnualCoverageAmount,
             EffectiveStartDate         = cmd.AmendmentDate,
@@ -144,6 +148,7 @@ public sealed record BenefitDeductionElection
             EmployeeAmount             = cmd.EmployeeAmount             ?? prior.EmployeeAmount,
             EmployerContributionAmount = cmd.EmployerContributionAmount ?? prior.EmployerContributionAmount,
             ContributionPct            = cmd.ContributionPct            ?? prior.ContributionPct,
+            EmployerContributionPct    = cmd.EmployerContributionPct    ?? prior.EmployerContributionPct,
             CoverageTier               = cmd.CoverageTier               ?? prior.CoverageTier,
             AnnualCoverageAmount       = cmd.AnnualCoverageAmount       ?? prior.AnnualCoverageAmount,
             EffectiveStartDate         = start,

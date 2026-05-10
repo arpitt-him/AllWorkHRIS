@@ -23,7 +23,7 @@ public sealed class SystemAdminNavContributor : INavContributor
                 new("Tax Rates & Brackets",  "/config/tax/reference"),
                 new("Calculation Steps",     "/config/tax/steps"),
                 new("Tax Review",            "/config/tax/review"),
-                new("Form Definitions",      "/config/tax/forms"),
+                new("Form Definitions",      "/config/tax/form-fields"),
                 new("Preview Sandbox",       "/config/tax/preview"),
                 new("System Settings",       "/about"),
             ]);

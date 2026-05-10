@@ -212,7 +212,9 @@ public sealed class PayrollRunJob : BackgroundService
                     PeriodId                = run.PeriodId,
                     PayDate                 = run.PayDate,
                     AnnualEquivalent        = annualEquivalent,
-                    PeriodsPerYear          = periodsPerYear
+                    PeriodsPerYear          = periodsPerYear,
+                    PayPeriodStart          = period.PeriodStartDate,
+                    PayPeriodEnd            = period.PeriodEndDate
                 };
 
                 var output = await engine.CalculateAsync(input, ct);
@@ -227,6 +229,19 @@ public sealed class PayrollRunJob : BackgroundService
                         output.TotalEmployerContribAmount,
                         output.NetPay);
                     await resultRepo.UpdateStatusAsync(resultId, 2); // CALCULATED
+
+                    if (output.NetPayFloorApplied)
+                    {
+                        await runRepo.InsertRunExceptionAsync(new PayrollRunException
+                        {
+                            RunExceptionId   = Guid.NewGuid(),
+                            RunId            = runId,
+                            EmploymentId     = employmentId,
+                            ExceptionCode    = "NET_PAY_FLOOR_APPLIED",
+                            ExceptionMessage = $"Net pay floored to $0.00; {output.NetPayFloorExcess:F4} in deductions could not be collected due to insufficient earnings.",
+                            CreatedTimestamp = DateTimeOffset.UtcNow
+                        });
+                    }
 
                     await accumulator.ApplyAsync(
                         employeeResult with

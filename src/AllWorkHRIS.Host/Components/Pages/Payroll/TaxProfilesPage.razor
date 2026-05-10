@@ -588,7 +588,9 @@
         _filteredEmployees = _allEmployees
             .Where(e =>
                 e.LegalFirstName.Contains(_searchText, StringComparison.OrdinalIgnoreCase) ||
-                e.LegalLastName.Contains(_searchText, StringComparison.OrdinalIgnoreCase))
+                e.LegalLastName.Contains(_searchText, StringComparison.OrdinalIgnoreCase) ||
+                ($"{e.LegalFirstName} {e.LegalLastName}").Contains(_searchText, StringComparison.OrdinalIgnoreCase) ||
+                ($"{e.LegalLastName}, {e.LegalFirstName}").Contains(_searchText, StringComparison.OrdinalIgnoreCase))
             .ToList();
     }
 

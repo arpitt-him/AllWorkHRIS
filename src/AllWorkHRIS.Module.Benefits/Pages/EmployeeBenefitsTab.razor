@@ -16,7 +16,7 @@ else
             <tr>
                 <th>Code</th>
                 <th>Treatment</th>
-                <th>Emp Amount</th>
+                <th>Emp Election</th>
                 <th>ER Amount</th>
                 <th>Effective Start</th>
                 <th>Effective End</th>
@@ -29,8 +29,8 @@ else
                 <tr>
                     <td><samp>@e.DeductionCode</samp></td>
                     <td><span class="badge @(e.TaxTreatment == "PRE_TAX" ? "badge-blue" : "badge-orange")">@e.TaxTreatment</span></td>
-                    <td>@e.EmployeeAmount.ToString("N2")</td>
-                    <td>@(e.EmployerContributionAmount?.ToString("N2") ?? "—")</td>
+                    <td>@EmpAmountDisplay(e)</td>
+                    <td>@ErAmountDisplay(e)</td>
                     <td>@e.EffectiveStartDate.ToString("yyyy-MM-dd")</td>
                     <td>@(e.EffectiveEndDate?.ToString("yyyy-MM-dd") ?? "—")</td>
                     <td><span class="badge badge-green">@e.Status</span></td>
@@ -45,6 +45,18 @@ else
 
     private bool _loading = true;
     private List<BenefitDeductionElection> _elections = [];
+
+    private static string EmpAmountDisplay(BenefitDeductionElection e) => e.CalculationMode switch
+    {
+        "COVERAGE_BASED"                    => e.CoverageTier ?? "—",
+        _ when e.ContributionPct.HasValue   => $"{e.ContributionPct * 100:0.##}%",
+        _                                   => e.EmployeeAmount.ToString("N2")
+    };
+
+    private static string ErAmountDisplay(BenefitDeductionElection e) =>
+        e.EmployerContributionPct.HasValue
+            ? $"{e.EmployerContributionPct * 100:0.##}%"
+            : e.EmployerContributionAmount?.ToString("N2") ?? "—";
 
     protected override async Task OnParametersSetAsync()
     {

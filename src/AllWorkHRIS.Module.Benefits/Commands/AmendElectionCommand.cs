@@ -11,6 +11,7 @@ public sealed record AmendElectionCommand
     public decimal?          EmployeeAmount             { get; init; }
     public decimal?          EmployerContributionAmount { get; init; }
     public decimal?          ContributionPct            { get; init; }
+    public decimal?          EmployerContributionPct    { get; init; }
     public string?           CoverageTier               { get; init; }
     public decimal?          AnnualCoverageAmount       { get; init; }
 

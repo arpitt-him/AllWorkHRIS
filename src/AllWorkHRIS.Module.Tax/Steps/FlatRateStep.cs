@@ -50,9 +50,12 @@ public sealed class FlatRateStep : ICalculationStep
         }
 
         var amount = Math.Max(0, raw);
-        var next   = AppliesTo == StepAppliesTo.Employer
-            ? ctx.WithEmployerStepResult(StepCode, amount)
-            : ctx.WithStepResult(StepCode, amount);
+        var next = AppliesTo switch
+        {
+            StepAppliesTo.Employer => ctx.WithEmployerStepResult(StepCode, amount),
+            StepAppliesTo.Both     => ctx.WithBothStepResult(StepCode, amount),
+            _                      => ctx.WithStepResult(StepCode, amount)
+        };
 
         return Task.FromResult(next);
     }

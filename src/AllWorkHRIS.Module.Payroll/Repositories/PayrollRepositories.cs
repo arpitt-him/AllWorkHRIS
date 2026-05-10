@@ -820,7 +820,10 @@ public sealed class PayrollContextRepository : IPayrollContextRepository
     {
         using var conn = _connectionFactory.CreateConnection();
 
-        // Block if any run has ever been submitted against this context
+        // Block if any run has ever been initiated against this context.
+        // This is the sole guard: a run record means the context was used for live payroll
+        // and must be preserved. Period status is not a reliable signal — mid-year contexts
+        // auto-close all historical periods at generation time before any payroll runs.
         const string checkRuns = """
             SELECT COUNT(1) FROM payroll_run
             WHERE payroll_context_id = @Id
@@ -828,16 +831,11 @@ public sealed class PayrollContextRepository : IPayrollContextRepository
         if (await conn.ExecuteScalarAsync<int>(checkRuns, new { Id = payrollContextId }) > 0)
             return "This context has associated payroll runs and cannot be deleted.";
 
-        // Block if any period is in a closed or locked state
-        const string checkPeriods = """
-            SELECT COUNT(1) FROM payroll_period
-            WHERE payroll_context_id = @Id
-              AND calendar_status IN ('CLOSED', 'LOCKED')
-            """;
-        if (await conn.ExecuteScalarAsync<int>(checkPeriods, new { Id = payrollContextId }) > 0)
-            return "This context has closed or locked calendar periods and cannot be deleted.";
+        // Safe to delete — remove enrollments, open periods, then the context record
+        await conn.ExecuteAsync(
+            "DELETE FROM payroll_profile WHERE payroll_context_id = @Id",
+            new { Id = payrollContextId });
 
-        // Safe to delete — remove open periods then the context record
         await conn.ExecuteAsync(
             "DELETE FROM payroll_period WHERE payroll_context_id = @Id",
             new { Id = payrollContextId });
@@ -1187,6 +1185,17 @@ public sealed class PayrollProfileRepository : IPayrollProfileRepository
             """;
         using var conn = _connectionFactory.CreateConnection();
         return (await conn.QueryAsync<Guid>(sql, new { PayrollContextId = payrollContextId })).ToList();
+    }
+
+    public async Task<int> CountActiveByContextAsync(Guid payrollContextId)
+    {
+        const string sql = """
+            SELECT COUNT(1) FROM payroll_profile
+            WHERE payroll_context_id = @PayrollContextId
+              AND enrollment_status  = 'ACTIVE'
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        return (int)await conn.ExecuteScalarAsync<long>(sql, new { PayrollContextId = payrollContextId });
     }
 
     public async Task<IReadOnlyList<Guid>> GetActiveBlockedEmploymentIdsByContextAsync(Guid payrollContextId)

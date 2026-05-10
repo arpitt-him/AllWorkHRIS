@@ -46,8 +46,10 @@
                         <th>Type</th>
                         <th>Tax ID</th>
                         <th>State of Inc.</th>
+                        <th>Country</th>
                         <th>Effective Start</th>
                         <th>Status</th>
+                        <th></th>
                     </tr>
                 </thead>
                 <tbody>
@@ -59,11 +61,19 @@
                             <td>@EntityTypeLabel(e.LegalEntityTypeId)</td>
                             <td class="mono">@(e.TaxRegistrationNumber ?? "—")</td>
                             <td>@(e.StateOfIncorporation ?? "—")</td>
+                            <td class="mono">@(e.CountryCode ?? "—")</td>
                             <td>@e.EffectiveStartDate.ToString("yyyy-MM-dd")</td>
                             <td>
                                 <span class="status-badge status-@StatusCode(e.OrgStatusId)">
                                     @StatusLabel(e.OrgStatusId)
                                 </span>
+                            </td>
+                            <td>
+                                <AuthorizeView Roles="SystemAdmin">
+                                    <Authorized>
+                                        <button class="btn-link" @onclick="() => OpenEditPanel(e)">Edit</button>
+                                    </Authorized>
+                                </AuthorizeView>
                             </td>
                         </tr>
                     }
@@ -115,6 +125,11 @@
                     <input type="text" class="form-input" @bind="_stateOfInc"
                            placeholder="e.g. DE" maxlength="10" />
                 </div>
+                <div class="form-field">
+                    <label class="form-label">Country Code (ISO 2-letter) <span class="required">*</span></label>
+                    <input type="text" class="form-input" @bind="_countryCode"
+                           placeholder="e.g. US" maxlength="2" style="text-transform:uppercase" />
+                </div>
             </div>
 
             @if (_error is not null)
@@ -132,21 +147,88 @@
     </div>
 }
 
+@if (_showEditPanel && _editingEntity is not null)
+{
+    <div class="panel-overlay" @onclick="CloseEditPanel">
+        <div class="panel-content" @onclick:stopPropagation>
+            <h3 class="panel-title">Edit Legal Entity</h3>
+
+            <div class="panel-form">
+                <div class="form-field">
+                    <label class="form-label">Name <span class="required">*</span></label>
+                    <input type="text" class="form-input" @bind="_editName" maxlength="200" />
+                </div>
+                <div class="form-field">
+                    <label class="form-label">Code <span class="required">*</span></label>
+                    <input type="text" class="form-input" @bind="_editCode" maxlength="20" style="text-transform:uppercase" />
+                </div>
+                <div class="form-field">
+                    <label class="form-label">Legal Entity Type</label>
+                    <select class="form-input" @bind="_editEntityTypeId">
+                        <option value="">Select type…</option>
+                        @foreach (var t in LookupCache.GetAll(LookupTables.LegalEntityType))
+                        {
+                            <option value="@t.Id">@t.Label</option>
+                        }
+                    </select>
+                </div>
+                <div class="form-field">
+                    <label class="form-label">Tax Registration Number (EIN)</label>
+                    <input type="text" class="form-input" @bind="_editTaxId" placeholder="e.g. 12-3456789" maxlength="50" />
+                </div>
+                <div class="form-field">
+                    <label class="form-label">State of Incorporation</label>
+                    <input type="text" class="form-input" @bind="_editStateOfInc" placeholder="e.g. DE" maxlength="10" />
+                </div>
+                <div class="form-field">
+                    <label class="form-label">Country Code (ISO 2-letter) <span class="required">*</span></label>
+                    <input type="text" class="form-input" @bind="_editCountryCode" placeholder="e.g. US" maxlength="2" style="text-transform:uppercase" />
+                </div>
+            </div>
+
+            @if (_editError is not null)
+            {
+                <p class="form-error">@_editError</p>
+            }
+
+            <div class="panel-actions">
+                <button class="btn-primary" @onclick="SaveEditAsync" disabled="@_saving">
+                    @(_saving ? "Saving…" : "Save Changes")
+                </button>
+                <button class="btn-secondary" @onclick="CloseEditPanel">Cancel</button>
+            </div>
+        </div>
+    </div>
+}
+
 @code {
     [CascadingParameter] private Task<AuthenticationState> AuthStateTask { get; set; } = default!;
 
     private bool          _loading = true;
     private List<OrgUnit> _entities = [];
 
+    // Add panel
     private bool     _showPanel    = false;
     private string   _name         = "";
     private string   _code         = "";
     private DateTime _effectiveDt;
     private string   _entityTypeId = "";
     private string   _taxId        = "";
-    private string   _stateOfInc  = "";
+    private string   _stateOfInc   = "";
+    private string   _countryCode  = "";
     private string?  _error;
-    private bool     _saving      = false;
+    private bool     _saving       = false;
+
+    // Edit panel
+    private bool     _showEditPanel  = false;
+    private OrgUnit? _editingEntity;
+    private string   _editName        = "";
+    private string   _editCode        = "";
+    private string   _editEntityTypeId = "";
+    private string   _editTaxId       = "";
+    private string   _editStateOfInc  = "";
+    private string   _editCountryCode = "";
+    private string?  _editError;
 
     protected override async Task OnInitializedAsync()
     {
@@ -167,7 +249,7 @@
 
     private void OpenAddPanel()
     {
-        _name = _code = _entityTypeId = _taxId = _stateOfInc = "";
+        _name = _code = _entityTypeId = _taxId = _stateOfInc = _countryCode = "";
         _effectiveDt = TemporalContext.GetOperativeDate();
         _error = null;
         _showPanel = true;
@@ -178,8 +260,9 @@
     private async Task SaveAsync()
     {
         _error = null;
-        if (string.IsNullOrWhiteSpace(_name)) { _error = "Name is required."; return; }
-        if (string.IsNullOrWhiteSpace(_code)) { _error = "Code is required."; return; }
+        if (string.IsNullOrWhiteSpace(_name))        { _error = "Name is required."; return; }
+        if (string.IsNullOrWhiteSpace(_code))        { _error = "Code is required."; return; }
+        if (string.IsNullOrWhiteSpace(_countryCode)) { _error = "Country code is required."; return; }
 
         _saving = true;
         try
@@ -190,12 +273,15 @@
 
             var command = new CreateOrgUnitCommand
             {
-                OrgUnitTypeCode   = "LEGAL_ENTITY",
-                OrgUnitCode       = _code.Trim().ToUpper(),
-                OrgUnitName       = _name.Trim(),
-                LegalEntityTypeId = int.TryParse(_entityTypeId, out var tid) ? tid : null,
-                EffectiveStartDate = DateOnly.FromDateTime(_effectiveDt),
-                InitiatedBy        = actorId
+                OrgUnitTypeCode       = "LEGAL_ENTITY",
+                OrgUnitCode           = _code.Trim().ToUpper(),
+                OrgUnitName           = _name.Trim(),
+                LegalEntityTypeId     = int.TryParse(_entityTypeId, out var tid) ? tid : null,
+                TaxRegistrationNumber = _taxId,
+                StateOfIncorporation  = _stateOfInc,
+                CountryCode           = _countryCode,
+                EffectiveStartDate    = DateOnly.FromDateTime(_effectiveDt),
+                InitiatedBy           = actorId
             };
 
             await OrgStructureService.CreateOrgUnitAsync(command);
@@ -203,6 +289,57 @@
             await LoadAsync();
         }
         catch (Exception ex) { _error = ex.Message; }
+        finally { _saving = false; }
+    }
+
+    private void OpenEditPanel(OrgUnit entity)
+    {
+        _editingEntity    = entity;
+        _editName         = entity.OrgUnitName;
+        _editCode         = entity.OrgUnitCode;
+        _editEntityTypeId = entity.LegalEntityTypeId?.ToString() ?? "";
+        _editTaxId        = entity.TaxRegistrationNumber ?? "";
+        _editStateOfInc   = entity.StateOfIncorporation  ?? "";
+        _editCountryCode  = entity.CountryCode            ?? "";
+        _editError        = null;
+        _showEditPanel    = true;
+    }
+
+    private void CloseEditPanel() { _showEditPanel = false; _editingEntity = null; }
+
+    private async Task SaveEditAsync()
+    {
+        _editError = null;
+        if (_editingEntity is null) return;
+        if (string.IsNullOrWhiteSpace(_editName))        { _editError = "Name is required."; return; }
+        if (string.IsNullOrWhiteSpace(_editCode))        { _editError = "Code is required."; return; }
+        if (string.IsNullOrWhiteSpace(_editCountryCode)) { _editError = "Country code is required."; return; }
+
+        _saving = true;
+        try
+        {
+            var state   = await AuthStateTask;
+            var sub     = state.User.FindFirst("sub")?.Value;
+            var actorId = Guid.TryParse(sub, out var g) ? g : Guid.Empty;
+
+            var command = new UpdateOrgUnitCommand
+            {
+                OrgUnitId             = _editingEntity.OrgUnitId,
+                OrgUnitCode           = _editCode,
+                OrgUnitName           = _editName,
+                LegalEntityTypeId     = int.TryParse(_editEntityTypeId, out var tid) ? tid : null,
+                TaxRegistrationNumber = _editTaxId,
+                StateOfIncorporation  = _editStateOfInc,
+                CountryCode           = _editCountryCode,
+                UpdatedBy             = actorId
+            };
+
+            await OrgStructureService.UpdateOrgUnitAsync(command);
+            _showEditPanel = false;
+            _editingEntity = null;
+            await LoadAsync();
+        }
+        catch (Exception ex) { _editError = ex.Message; }
         finally { _saving = false; }
     }
 

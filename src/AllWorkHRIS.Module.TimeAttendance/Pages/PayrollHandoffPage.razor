@@ -50,7 +50,7 @@
                         var isRunning  = _runningPeriodId == row.PeriodId;
                         var isDone     = _completedPeriods.Contains(row.PeriodId);
                         var isExpanded = _expandedPeriods.Contains(row.PeriodId);
-                        var canPreview = row.ApprovedEntries > 0;
+                        var canPreview = row.TotalEntries > 0;
                         <tr class="data-row">
                             <td><strong>@row.PeriodLabel</strong></td>
                             <td>@row.PayDate.ToString("MMM d, yyyy")</td>
@@ -97,10 +97,11 @@
                                     <span style="display:flex;gap:.4rem;align-items:center;">
                                         @if (canPreview)
                                         {
-                                            <button class="btn btn--ghost btn--sm"
-                                                    @onclick="() => TogglePreviewAsync(row.PeriodId)">
+                                            <a href="" class="btn-link"
+                                               @onclick="() => TogglePreviewAsync(row.PeriodId)"
+                                               @onclick:preventDefault>
                                                 @(isExpanded ? "Close" : "View")
-                                            </button>
+                                            </a>
                                         }
                                         @if (!isDone && row.ApprovedEntries > 0)
                                         {
@@ -168,6 +169,7 @@
                                                         <th>Employee</th>
                                                         <th>Work Date</th>
                                                         <th>Category</th>
+                                                        <th>Status</th>
                                                         <th style="text-align:right;">Hours</th>
                                                     </tr>
                                                 </thead>
@@ -178,13 +180,14 @@
                                                             <td>@e.EmployeeName <span class="preview-emp-num">#@e.EmployeeNumber</span></td>
                                                             <td>@e.WorkDate.ToString("MMM d, yyyy")</td>
                                                             <td><span class="badge badge--category">@e.TimeCategory</span></td>
+                                                            <td><span class="badge badge--entry-status badge--entry-@e.StatusCode.ToLower()">@e.StatusCode</span></td>
                                                             <td style="text-align:right;">@e.Duration.ToString("0.##")</td>
                                                         </tr>
                                                     }
                                                 </tbody>
                                                 <tfoot>
                                                     <tr>
-                                                        <td colspan="3" style="text-align:right;font-weight:600;">Total</td>
+                                                        <td colspan="4" style="text-align:right;font-weight:600;">Total</td>
                                                         <td style="text-align:right;font-weight:600;">@entries.Sum(e => e.Duration).ToString("0.##")</td>
                                                     </tr>
                                                 </tfoot>
@@ -245,7 +248,7 @@
         }
 
         if (!_previewCache.ContainsKey(periodId))
-            _previewCache[periodId] = await QueryService.GetApprovedEntriesForHandoffAsync(periodId);
+            _previewCache[periodId] = await QueryService.GetEntriesForPeriodAsync(periodId);
     }
 
     private async Task RunHandoffAsync(Guid periodId, int approvedCount)
@@ -258,7 +261,7 @@
 
         try
         {
-            var progressStep = approvedCount > 0 ? 80 / approvedCount : 80;
+            var progressStep = Math.Max(4, approvedCount > 0 ? 80 / approvedCount : 80);
 
             var progressTask = Task.Run(async () =>
             {
@@ -386,6 +389,18 @@
         border-radius: 4px;
         font-weight: 500;
     }
+
+    .badge--entry-status {
+        font-size: .7rem;
+        padding: .1rem .4rem;
+        border-radius: 4px;
+        font-weight: 500;
+    }
+    .badge--entry-draft     { background: #f3f4f6; color: #6b7280; border: 1px solid #e5e7eb; }
+    .badge--entry-submitted { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
+    .badge--entry-approved  { background: #d1fae5; color: #065f46; border: 1px solid #6ee7b7; }
+    .badge--entry-locked    { background: #ede9fe; color: #5b21b6; border: 1px solid #c4b5fd; }
+    .badge--entry-rejected  { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
 
     .preview-empty {
         padding: .75rem 1rem;

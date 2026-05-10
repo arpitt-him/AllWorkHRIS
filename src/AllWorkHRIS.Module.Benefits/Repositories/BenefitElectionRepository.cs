@@ -19,7 +19,7 @@ public sealed class BenefitElectionRepository : IBenefitElectionRepository
                d.code             AS deduction_code,
                d.calculation_mode AS calculation_mode,
                e.tax_treatment, e.employee_amount, e.employer_contribution_amount,
-               e.contribution_pct, e.coverage_tier,
+               e.contribution_pct, e.employer_contribution_pct, e.coverage_tier,
                e.annual_coverage_amount, e.annual_election_amount, e.monthly_election_amount,
                e.effective_start_date, e.effective_end_date,
                e.status, e.source, e.created_by, e.created_at, e.updated_at,
@@ -245,7 +245,7 @@ public sealed class BenefitElectionRepository : IBenefitElectionRepository
             INSERT INTO benefit_deduction_election
                 (election_id, employment_id, deduction_id, tax_treatment,
                  employee_amount, employer_contribution_amount,
-                 contribution_pct, coverage_tier,
+                 contribution_pct, employer_contribution_pct, coverage_tier,
                  annual_coverage_amount, annual_election_amount, monthly_election_amount,
                  effective_start_date, effective_end_date,
                  status, source, created_by, created_at, updated_at,
@@ -254,7 +254,7 @@ public sealed class BenefitElectionRepository : IBenefitElectionRepository
             VALUES
                 (@ElectionId, @EmploymentId, @DeductionId, @TaxTreatment,
                  @EmployeeAmount, @EmployerContributionAmount,
-                 @ContributionPct, @CoverageTier,
+                 @ContributionPct, @EmployerContributionPct, @CoverageTier,
                  @AnnualCoverageAmount, @AnnualElectionAmount, @MonthlyElectionAmount,
                  @EffectiveStartDate, @EffectiveEndDate,
                  @Status, @Source, @CreatedBy, @CreatedAt, @UpdatedAt,

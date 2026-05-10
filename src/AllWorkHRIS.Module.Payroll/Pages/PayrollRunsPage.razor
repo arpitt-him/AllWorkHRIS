@@ -46,10 +46,9 @@
         </div>
     </div>
 
-    @* Context selector — shown when more than one context exists for this entity *@
-    @if (_contexts.Count > 1)
-    {
-        <div class="filter-row">
+    <div class="filter-row">
+        @if (_contexts.Count > 1)
+        {
             <label class="filter-label">Payroll Context</label>
             <select class="filter-select" value="@_selectedContextId"
                     @onchange="OnContextChangedAsync">
@@ -58,8 +57,15 @@
                     <option value="@ctx.PayrollContextId">@ctx.PayrollContextName</option>
                 }
             </select>
-        </div>
-    }
+        }
+        <label class="filter-label">Status</label>
+        <select class="filter-select" @bind="_statusFilter">
+            <option value="ACTIVE">Active</option>
+            <option value="ALL">All</option>
+            <option value="RELEASED">Released</option>
+            <option value="CANCELLED">Cancelled</option>
+        </select>
+    </div>
 
     @* New Run Form *@
     @if (_showNewRunForm)
@@ -149,9 +155,9 @@
     {
         <p class="loading-state">Loading…</p>
     }
-    else if (_runs.Count == 0)
+    else if (_filteredRuns.Count == 0)
     {
-        <p class="empty-state">No payroll runs found for this context.</p>
+        <p class="empty-state">No payroll runs match the selected filter.</p>
     }
     else
     {
@@ -167,7 +173,7 @@
                 </tr>
             </thead>
             <tbody>
-                @foreach (var run in _runs.OrderByDescending(r => r.CreationTimestamp))
+                @foreach (var run in _filteredRuns.OrderByDescending(r => r.CreationTimestamp))
                 {
                     var progress = ProgressNotifier.GetProgress(run.RunId);
                     <tr>
@@ -238,6 +244,18 @@
     private PeriodicTimer?                   _pollTimer;
     private CancellationTokenSource?         _pollCts;
     private Guid                             _currentUserId;
+    private string                           _statusFilter  = "ACTIVE";
+
+    // Terminal statuses excluded from the "Active" filter view
+    private static readonly HashSet<int> TerminalStatuses = [8, 9, 11]; // Released, Closed, Cancelled
+
+    private List<PayrollRun> _filteredRuns => _statusFilter switch
+    {
+        "ACTIVE"    => _runs.Where(r => !TerminalStatuses.Contains(r.RunStatusId)).ToList(),
+        "RELEASED"  => _runs.Where(r => r.RunStatusId == 8).ToList(),
+        "CANCELLED" => _runs.Where(r => r.RunStatusId == 11).ToList(),
+        _           => _runs
+    };
 
     private int       _openRunCount         => _runs.Count(r => r.RunStatusId is >= 1 and <= 7);
     private int       _pendingApprovalCount => _runs.Count(r => r.RunStatusId == 4);

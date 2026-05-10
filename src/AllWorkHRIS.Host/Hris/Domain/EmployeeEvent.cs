@@ -76,4 +76,36 @@ public sealed record EmployeeEvent
             CreationTimestamp = DateTimeOffset.UtcNow
         };
     }
+
+    public static EmployeeEvent CreateTransfer(
+        Guid employmentId, TransferEmployeeCommand command, ILookupCache lookupCache)
+    {
+        return new EmployeeEvent
+        {
+            EventId           = Guid.NewGuid(),
+            EmploymentId      = employmentId,
+            EventTypeId       = lookupCache.GetId(LookupTables.EmployeeEventType, "TRANSFER"),
+            EffectiveDate     = command.EffectiveDate,
+            EventReason       = command.ReasonCode,
+            Notes             = command.Notes,
+            InitiatedBy       = command.InitiatedBy,
+            CreationTimestamp = DateTimeOffset.UtcNow
+        };
+    }
+
+    public static EmployeeEvent CreateManagerChange(
+        Guid employmentId, ChangeManagerCommand command, ILookupCache lookupCache)
+    {
+        return new EmployeeEvent
+        {
+            EventId           = Guid.NewGuid(),
+            EmploymentId      = employmentId,
+            EventTypeId       = lookupCache.GetId(LookupTables.EmployeeEventType, "MANAGER_CHANGE"),
+            EffectiveDate     = command.EffectiveDate,
+            EventReason       = "MANAGER_CHANGE",
+            Notes             = command.Notes,
+            InitiatedBy       = command.InitiatedBy,
+            CreationTimestamp = DateTimeOffset.UtcNow
+        };
+    }
 }

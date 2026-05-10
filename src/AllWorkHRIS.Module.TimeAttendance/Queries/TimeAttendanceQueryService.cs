@@ -40,6 +40,7 @@ public sealed record HandoffPeriodRow(
     Guid      PeriodId,
     string    PeriodLabel,
     DateOnly  PayDate,
+    long      TotalEntries,
     long      ApprovedEntries,
     long      LockedEntries,
     decimal   TotalHours,
@@ -52,7 +53,8 @@ public sealed record HandoffPreviewEntry(
     string   EmployeeNumber,
     DateOnly WorkDate,
     string   TimeCategory,
-    decimal  Duration);
+    decimal  Duration,
+    string   StatusCode);
 
 // ── Query service ────────────────────────────────────────────────────────────
 
@@ -78,6 +80,34 @@ public sealed class TimeAttendanceQueryService
             JOIN   payroll_context pc ON pc.payroll_context_id = pp.payroll_context_id
             WHERE  pc.legal_entity_id = @LegalEntityId
               AND  pp.calendar_status NOT IN ('CLOSED','FINALIZED')
+            ORDER  BY pp.period_start_date DESC
+            """,
+            new { LegalEntityId = legalEntityId });
+
+        return rows.Select(r => new TaPeriodOption(
+            PeriodId:  (Guid)r.period_id,
+            Label:     $"{r.period_year} P{r.period_number} ({((DateOnly)r.period_start_date):MMM d} – {((DateOnly)r.period_end_date):MMM d})",
+            StartDate: (DateOnly)r.period_start_date,
+            EndDate:   (DateOnly)r.period_end_date,
+            PayDate:   (DateOnly)r.pay_date))
+            .ToList();
+    }
+
+    public async Task<IReadOnlyList<TaPeriodOption>> GetClosedPeriodsForEntityAsync(Guid legalEntityId)
+    {
+        using var conn = _connectionFactory.CreateConnection();
+        var rows = await conn.QueryAsync<dynamic>(
+            """
+            SELECT pp.period_id,
+                   pp.period_start_date,
+                   pp.period_end_date,
+                   pp.pay_date,
+                   pp.period_year,
+                   pp.period_number
+            FROM   payroll_period pp
+            JOIN   payroll_context pc ON pc.payroll_context_id = pp.payroll_context_id
+            WHERE  pc.legal_entity_id = @LegalEntityId
+              AND  pp.calendar_status IN ('CLOSED','FINALIZED')
             ORDER  BY pp.period_start_date DESC
             """,
             new { LegalEntityId = legalEntityId });
@@ -132,9 +162,9 @@ public sealed class TimeAttendanceQueryService
                 p.legal_first_name || ' ' || p.legal_last_name AS employee_name,
                 e.employee_number,
                 te.payroll_period_id AS period_id,
-                SUM(te.duration) AS total_hours,
-                SUM(CASE WHEN c.code = 'REGULAR'  THEN te.duration ELSE 0 END) AS regular_hours,
-                SUM(CASE WHEN c.code = 'OVERTIME' THEN te.duration ELSE 0 END) AS overtime_hours,
+                SUM(CASE WHEN s.code != 'REJECTED' THEN te.duration ELSE 0 END) AS total_hours,
+                SUM(CASE WHEN c.code = 'REGULAR'  AND s.code != 'REJECTED' THEN te.duration ELSE 0 END) AS regular_hours,
+                SUM(CASE WHEN c.code = 'OVERTIME' AND s.code != 'REJECTED' THEN te.duration ELSE 0 END) AS overtime_hours,
                 COUNT(CASE WHEN s.code = 'SUBMITTED' THEN 1 END) AS submitted_count,
                 COUNT(CASE WHEN s.code = 'APPROVED'  THEN 1 END) AS approved_count,
                 COUNT(CASE WHEN s.code = 'REJECTED'  THEN 1 END) AS rejected_count
@@ -189,10 +219,11 @@ public sealed class TimeAttendanceQueryService
                 pp.period_id,
                 pp.period_year || ' P' || pp.period_number AS period_label,
                 pp.pay_date,
-                COUNT(CASE WHEN s.code = 'APPROVED' THEN 1 END) AS approved_entries,
-                COUNT(CASE WHEN s.code = 'LOCKED'   THEN 1 END) AS locked_entries,
-                COALESCE(SUM(CASE WHEN s.code = 'LOCKED' THEN te.duration END), 0) AS total_hours,
-                MIN(CASE WHEN s.code = 'LOCKED' THEN te.updated_at END) AS first_lock_at
+                COUNT(te.time_entry_id)                                              AS total_entries,
+                COUNT(CASE WHEN s.code = 'APPROVED' THEN 1 END)                     AS approved_entries,
+                COUNT(CASE WHEN s.code = 'LOCKED'   THEN 1 END)                     AS locked_entries,
+                COALESCE(SUM(CASE WHEN s.code = 'LOCKED' THEN te.duration END), 0)  AS total_hours,
+                MIN(CASE WHEN s.code = 'LOCKED' THEN te.updated_at END)             AS first_lock_at
             FROM   payroll_period pp
             JOIN   payroll_context pc ON pc.payroll_context_id = pp.payroll_context_id
             LEFT   JOIN time_entry te ON te.payroll_period_id = pp.period_id
@@ -250,7 +281,7 @@ public sealed class TimeAttendanceQueryService
         return ((int)(long)row.pending_approval, (int)(long)row.overtime_alerts, (int)(long)row.cutoff_risk);
     }
 
-    public async Task<IReadOnlyList<HandoffPreviewEntry>> GetApprovedEntriesForHandoffAsync(Guid periodId)
+    public async Task<IReadOnlyList<HandoffPreviewEntry>> GetEntriesForPeriodAsync(Guid periodId)
     {
         using var conn = _connectionFactory.CreateConnection();
         return (await conn.QueryAsync<HandoffPreviewEntry>(
@@ -259,14 +290,14 @@ public sealed class TimeAttendanceQueryService
                    e.employee_number,
                    te.work_date,
                    c.code  AS time_category,
-                   te.duration
+                   te.duration,
+                   s.code  AS status_code
             FROM   time_entry te
             JOIN   lkp_time_entry_status s ON s.id = te.status_id
             JOIN   lkp_time_category     c ON c.id = te.time_category_id
             JOIN   employment            e ON e.employment_id = te.employment_id
             JOIN   person                p ON p.person_id     = e.person_id
             WHERE  te.payroll_period_id = @PeriodId
-              AND  s.code = 'APPROVED'
             ORDER  BY p.legal_last_name, p.legal_first_name, te.work_date
             """,
             new { PeriodId = periodId })).ToList();

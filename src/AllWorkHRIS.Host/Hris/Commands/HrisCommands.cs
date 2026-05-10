@@ -107,14 +107,51 @@ public sealed record TransferEmployeeCommand
 public sealed record UpdatePersonCommand
 {
     public required Guid     PersonId             { get; init; }
+    public required string   LegalFirstName       { get; init; } = default!;
+    public string?           LegalMiddleName      { get; init; }
+    public required string   LegalLastName        { get; init; } = default!;
+    public string?           NameSuffix           { get; init; }
+    public required DateOnly DateOfBirth          { get; init; }
     public string?           PreferredName        { get; init; }
     public string?           Gender               { get; init; }
     public string?           Pronouns             { get; init; }
     public string?           MaritalStatus        { get; init; }
-    public string?           LanguagePreference   { get; init; }
-    public string?           VeteranStatus        { get; init; }
-    public string?           DisabilityStatus     { get; init; }
-    public required Guid     InitiatedBy          { get; init; }
+    public string?           LanguagePreference      { get; init; }
+    public string?           VeteranStatus           { get; init; }
+    public string?           DisabilityStatus        { get; init; }
+    public string?           NationalIdentifier      { get; init; }
+    public string?           NationalIdentifierType  { get; init; }
+    public required Guid     InitiatedBy             { get; init; }
+}
+
+public sealed record SubmitPersonChangeRequestCommand
+{
+    public required Guid   PersonId           { get; init; }
+    public required string ChangeType         { get; init; }
+    public required string CurrentValueJson   { get; init; }
+    public required string RequestedValueJson { get; init; }
+    public required Guid   RequestedBy        { get; init; }
+}
+
+public sealed record ReviewPersonChangeRequestCommand
+{
+    public required Guid    PersonChangeRequestId { get; init; }
+    public required Guid    ReviewedBy            { get; init; }
+    public string?          RejectionNotes        { get; init; }
+}
+
+public sealed record UpdatePersonAddressCommand
+{
+    public required Guid    PersonAddressId  { get; init; }
+    public required string  AddressLine1     { get; init; } = default!;
+    public string?          AddressLine2     { get; init; }
+    public required string  City             { get; init; } = default!;
+    public required string  StateCode        { get; init; } = default!;
+    public required string  PostalCode       { get; init; } = default!;
+    public required string  CountryCode      { get; init; } = default!;
+    public string?          PhonePrimary     { get; init; }
+    public string?          PhoneSecondary   { get; init; }
+    public string?          EmailPersonal    { get; init; }
 }
 
 public sealed record ChangeManagerCommand
@@ -197,14 +234,29 @@ public sealed record ArchiveDocumentCommand
 
 public sealed record CreateOrgUnitCommand
 {
-    public required string   OrgUnitTypeCode    { get; init; }
-    public required string   OrgUnitCode        { get; init; }
-    public required string   OrgUnitName        { get; init; }
-    public Guid?             ParentOrgUnitId    { get; init; }
-    public Guid?             LegalEntityId      { get; init; }
-    public int?              LegalEntityTypeId  { get; init; }
-    public required DateOnly EffectiveStartDate { get; init; }
-    public required Guid     InitiatedBy        { get; init; }
+    public required string   OrgUnitTypeCode        { get; init; }
+    public required string   OrgUnitCode            { get; init; }
+    public required string   OrgUnitName            { get; init; }
+    public Guid?             ParentOrgUnitId        { get; init; }
+    public Guid?             LegalEntityId          { get; init; }
+    public int?              LegalEntityTypeId      { get; init; }
+    public string?           TaxRegistrationNumber  { get; init; }
+    public string?           StateOfIncorporation   { get; init; }
+    public string?           CountryCode            { get; init; }
+    public required DateOnly EffectiveStartDate     { get; init; }
+    public required Guid     InitiatedBy            { get; init; }
+}
+
+public sealed record UpdateOrgUnitCommand
+{
+    public required Guid     OrgUnitId              { get; init; }
+    public required string   OrgUnitCode            { get; init; }
+    public required string   OrgUnitName            { get; init; }
+    public int?              LegalEntityTypeId      { get; init; }
+    public string?           TaxRegistrationNumber  { get; init; }
+    public string?           StateOfIncorporation   { get; init; }
+    public string?           CountryCode            { get; init; }
+    public required Guid     UpdatedBy              { get; init; }
 }
 
 // ============================================================

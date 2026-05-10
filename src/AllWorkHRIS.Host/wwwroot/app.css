@@ -612,9 +612,12 @@ html, body {
     padding: var(--space-3) var(--space-4);
     border-bottom: 1px solid #F3F4F6;
     color: var(--aw-navy);
+    vertical-align: top;
 }
 
 .data-table tr:last-child td { border-bottom: none; }
+.data-table th.num-col,
+.data-table th.text-right { text-align: right; }
 
 .action-cell { white-space: nowrap; }
 .table-link  { color: var(--aw-teal); font-weight: var(--font-weight-medium); text-decoration: none; }

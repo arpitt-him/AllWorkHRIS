@@ -6,6 +6,7 @@ using AllWorkHRIS.Host.Hris.Commands;
 using AllWorkHRIS.Host.Hris.Domain;
 using AllWorkHRIS.Host.Hris.Queries;
 using AllWorkHRIS.Host.Hris.Repositories;
+using AllWorkHRIS.Host.Payroll.Tax;
 
 namespace AllWorkHRIS.Host.Hris.Services;
 
@@ -32,6 +33,8 @@ public interface IEmploymentService
     Task<HireResult>  HireEmployeeAsync(HireEmployeeCommand command);
     Task<HireResult>  RehireEmployeeAsync(RehireEmployeeCommand command, Guid personId);
     Task              TerminateEmployeeAsync(TerminateEmployeeCommand command);
+    Task              TransferAsync(TransferEmployeeCommand command);
+    Task              ChangeManagerAsync(ChangeManagerCommand command);
     Task<Employment?> GetByIdAsync(Guid employmentId);
     Task<Employment?> GetActiveEmploymentAsync(Guid employmentId, DateOnly? asOf = null);
     Task<PagedResult<EmploymentListItem>>   GetPagedListAsync(EmployeeListQuery query);
@@ -330,6 +333,66 @@ public sealed class EmploymentService : IEmploymentService
         });
     }
 
+    public async Task TransferAsync(TransferEmployeeCommand command)
+    {
+        var current = await _assignmentRepository.GetActiveByEmploymentIdAsync(command.EmploymentId)
+            ?? throw new DomainException("No active assignment found for this employment.");
+
+        var now = DateTimeOffset.UtcNow;
+        var newAssignment = new Assignment
+        {
+            AssignmentId        = Guid.NewGuid(),
+            EmploymentId        = command.EmploymentId,
+            JobId               = command.NewJobId ?? current.JobId,
+            PositionId          = command.NewPositionId ?? current.PositionId,
+            DepartmentId        = command.NewDepartmentId,
+            LocationId          = command.NewLocationId,
+            PayrollContextId    = current.PayrollContextId,
+            AssignmentTypeId    = _primaryAssignmentTypeId,
+            AssignmentStatusId  = _activeAssignmentStatusId,
+            AssignmentStartDate = command.EffectiveDate,
+            CreatedBy           = command.InitiatedBy,
+            CreationTimestamp   = now,
+            LastUpdatedBy       = command.InitiatedBy,
+            LastUpdateTimestamp = now
+        };
+
+        using var uow = new UnitOfWork(_connectionFactory);
+        try
+        {
+            await _assignmentRepository.CloseAsync(current.AssignmentId, command.EffectiveDate.AddDays(-1), uow);
+            await _assignmentRepository.InsertAsync(newAssignment, uow);
+            await _employmentRepository.UpdateDepartmentAndLocationAsync(
+                command.EmploymentId, command.NewDepartmentId, command.NewLocationId, command.InitiatedBy, uow);
+            var transferEvent = EmployeeEvent.CreateTransfer(command.EmploymentId, command, _lookupCache);
+            await _eventRepository.InsertAsync(transferEvent, uow);
+            uow.Commit();
+        }
+        catch
+        {
+            uow.Rollback();
+            throw;
+        }
+    }
+
+    public async Task ChangeManagerAsync(ChangeManagerCommand command)
+    {
+        using var uow = new UnitOfWork(_connectionFactory);
+        try
+        {
+            await _employmentRepository.UpdateManagerAsync(
+                command.EmploymentId, command.NewManagerEmploymentId, command.InitiatedBy, uow);
+            var managerEvent = EmployeeEvent.CreateManagerChange(command.EmploymentId, command, _lookupCache);
+            await _eventRepository.InsertAsync(managerEvent, uow);
+            uow.Commit();
+        }
+        catch
+        {
+            uow.Rollback();
+            throw;
+        }
+    }
+
     public async Task<Employment?> GetByIdAsync(Guid employmentId)
         => await _employmentRepository.GetByIdAsync(employmentId);
 
@@ -388,19 +451,31 @@ public interface IPersonService
     Task<Dictionary<Guid, string>> GetNamesByEmploymentIdsAsync(IEnumerable<Guid> employmentIds);
     Task<Dictionary<Guid, string>> GetNamesByPersonIdsAsync(IEnumerable<Guid> personIds);
     Task                           UpdatePersonAsync(UpdatePersonCommand command);
+    Task<PersonAddress?>           GetPrimaryAddressAsync(Guid personId, DateOnly asOf);
+    Task                           UpdateAddressAsync(UpdatePersonAddressCommand command);
+    Task<Guid>                     SubmitChangeRequestAsync(SubmitPersonChangeRequestCommand command);
+    Task<IReadOnlyList<PersonChangeRequest>> GetPendingChangeRequestsAsync(Guid personId);
+    Task                           ApproveChangeRequestAsync(ReviewPersonChangeRequestCommand command);
+    Task                           RejectChangeRequestAsync(ReviewPersonChangeRequestCommand command);
 }
 
 public sealed class PersonService : IPersonService
 {
-    private readonly IConnectionFactory _connectionFactory;
-    private readonly IPersonRepository  _personRepository;
+    private readonly IConnectionFactory              _connectionFactory;
+    private readonly IPersonRepository               _personRepository;
+    private readonly IPersonAddressRepository        _addressRepository;
+    private readonly IPersonChangeRequestRepository  _changeRequestRepository;
 
     public PersonService(
-        IConnectionFactory connectionFactory,
-        IPersonRepository  personRepository)
+        IConnectionFactory             connectionFactory,
+        IPersonRepository              personRepository,
+        IPersonAddressRepository       addressRepository,
+        IPersonChangeRequestRepository changeRequestRepository)
     {
-        _connectionFactory = connectionFactory;
-        _personRepository  = personRepository;
+        _connectionFactory       = connectionFactory;
+        _personRepository        = personRepository;
+        _addressRepository       = addressRepository;
+        _changeRequestRepository = changeRequestRepository;
     }
 
     public async Task<Person?> GetByIdAsync(Guid personId)
@@ -422,21 +497,152 @@ public sealed class PersonService : IPersonService
 
         var updated = person with
         {
-            PreferredName       = command.PreferredName      ?? person.PreferredName,
-            Gender              = command.Gender             ?? person.Gender,
-            Pronouns            = command.Pronouns           ?? person.Pronouns,
-            MaritalStatus       = command.MaritalStatus      ?? person.MaritalStatus,
-            LanguagePreference  = command.LanguagePreference ?? person.LanguagePreference,
-            VeteranStatus       = command.VeteranStatus      ?? person.VeteranStatus,
-            DisabilityStatus    = command.DisabilityStatus   ?? person.DisabilityStatus,
-            LastUpdateTimestamp = DateTimeOffset.UtcNow,
-            LastUpdatedBy       = command.InitiatedBy.ToString()
+            LegalFirstName         = command.LegalFirstName,
+            LegalMiddleName        = command.LegalMiddleName,
+            LegalLastName          = command.LegalLastName,
+            NameSuffix             = command.NameSuffix,
+            DateOfBirth            = command.DateOfBirth,
+            NationalIdentifier     = command.NationalIdentifier     ?? person.NationalIdentifier,
+            NationalIdentifierType = command.NationalIdentifierType ?? person.NationalIdentifierType,
+            PreferredName          = command.PreferredName,
+            Gender                 = command.Gender,
+            Pronouns               = command.Pronouns,
+            MaritalStatus          = command.MaritalStatus,
+            LanguagePreference     = command.LanguagePreference,
+            VeteranStatus          = command.VeteranStatus,
+            DisabilityStatus       = command.DisabilityStatus,
+            LastUpdateTimestamp    = DateTimeOffset.UtcNow,
+            LastUpdatedBy          = command.InitiatedBy.ToString()
         };
 
         using var uow = new UnitOfWork(_connectionFactory);
         try
         {
             await _personRepository.UpdateAsync(updated, uow);
+            uow.Commit();
+        }
+        catch
+        {
+            uow.Rollback();
+            throw;
+        }
+    }
+
+    public Task<IReadOnlyList<PersonChangeRequest>> GetPendingChangeRequestsAsync(Guid personId)
+        => _changeRequestRepository.GetPendingByPersonIdAsync(personId);
+
+    public async Task<Guid> SubmitChangeRequestAsync(SubmitPersonChangeRequestCommand command)
+    {
+        var request = new PersonChangeRequest
+        {
+            PersonChangeRequestId = Guid.NewGuid(),
+            PersonId              = command.PersonId,
+            ChangeType            = command.ChangeType,
+            CurrentValueJson      = command.CurrentValueJson,
+            RequestedValueJson    = command.RequestedValueJson,
+            RequestedBy           = command.RequestedBy,
+            RequestedAt           = DateTimeOffset.UtcNow,
+            Status                = PersonChangeStatus.Pending,
+        };
+        using var uow = new UnitOfWork(_connectionFactory);
+        try
+        {
+            var id = await _changeRequestRepository.InsertAsync(request, uow);
+            uow.Commit();
+            return id;
+        }
+        catch { uow.Rollback(); throw; }
+    }
+
+    public async Task ApproveChangeRequestAsync(ReviewPersonChangeRequestCommand command)
+    {
+        var request = await _changeRequestRepository.GetByIdAsync(command.PersonChangeRequestId)
+            ?? throw new DomainException($"Change request {command.PersonChangeRequestId} not found.");
+
+        var person = await _personRepository.GetByIdAsync(request.PersonId)
+            ?? throw new DomainException($"Person {request.PersonId} not found.");
+
+        using var uow = new UnitOfWork(_connectionFactory);
+        try
+        {
+            ApplyChangeToPersonRecord(request, person, uow);
+            await _changeRequestRepository.ApproveAsync(request.PersonChangeRequestId, command.ReviewedBy, uow);
+            uow.Commit();
+        }
+        catch { uow.Rollback(); throw; }
+    }
+
+    public async Task RejectChangeRequestAsync(ReviewPersonChangeRequestCommand command)
+    {
+        using var uow = new UnitOfWork(_connectionFactory);
+        try
+        {
+            await _changeRequestRepository.RejectAsync(
+                command.PersonChangeRequestId, command.ReviewedBy, command.RejectionNotes, uow);
+            uow.Commit();
+        }
+        catch { uow.Rollback(); throw; }
+    }
+
+    private void ApplyChangeToPersonRecord(PersonChangeRequest request, Person person, IUnitOfWork uow)
+    {
+        var updated = request.ChangeType switch
+        {
+            PersonChangeType.LegalName => ApplyLegalName(request, person),
+            PersonChangeType.DateOfBirth => ApplyDateOfBirth(request, person),
+            PersonChangeType.NationalIdentifier => ApplyNationalIdentifier(request, person),
+            _ => throw new DomainException($"Unknown change type: {request.ChangeType}")
+        };
+        // Fire and forget inside the transaction — same pattern as UpdatePersonAsync
+        _personRepository.UpdateAsync(updated, uow).GetAwaiter().GetResult();
+    }
+
+    private static Person ApplyLegalName(PersonChangeRequest request, Person person)
+    {
+        var doc = System.Text.Json.JsonDocument.Parse(request.RequestedValueJson).RootElement;
+        return person with
+        {
+            LegalFirstName      = doc.GetProperty("legalFirstName").GetString()!,
+            LegalMiddleName     = doc.TryGetProperty("legalMiddleName", out var mn)  ? mn.GetString()  : person.LegalMiddleName,
+            LegalLastName       = doc.GetProperty("legalLastName").GetString()!,
+            NameSuffix          = doc.TryGetProperty("nameSuffix", out var sfx)      ? sfx.GetString() : person.NameSuffix,
+            LastUpdateTimestamp = DateTimeOffset.UtcNow,
+            LastUpdatedBy       = "change_request"
+        };
+    }
+
+    private static Person ApplyDateOfBirth(PersonChangeRequest request, Person person)
+    {
+        var doc = System.Text.Json.JsonDocument.Parse(request.RequestedValueJson).RootElement;
+        return person with
+        {
+            DateOfBirth         = DateOnly.Parse(doc.GetProperty("dateOfBirth").GetString()!),
+            LastUpdateTimestamp = DateTimeOffset.UtcNow,
+            LastUpdatedBy       = "change_request"
+        };
+    }
+
+    private static Person ApplyNationalIdentifier(PersonChangeRequest request, Person person)
+    {
+        var doc = System.Text.Json.JsonDocument.Parse(request.RequestedValueJson).RootElement;
+        return person with
+        {
+            NationalIdentifier     = doc.GetProperty("nationalIdentifier").GetString(),
+            NationalIdentifierType = doc.TryGetProperty("nationalIdentifierType", out var t) ? t.GetString() : person.NationalIdentifierType,
+            LastUpdateTimestamp    = DateTimeOffset.UtcNow,
+            LastUpdatedBy          = "change_request"
+        };
+    }
+
+    public Task<PersonAddress?> GetPrimaryAddressAsync(Guid personId, DateOnly asOf)
+        => _addressRepository.GetPrimaryAsync(personId, asOf);
+
+    public async Task UpdateAddressAsync(UpdatePersonAddressCommand command)
+    {
+        using var uow = new UnitOfWork(_connectionFactory);
+        try
+        {
+            await _addressRepository.UpdateAsync(command, uow);
             uow.Commit();
         }
         catch
@@ -646,13 +852,15 @@ public interface IOrgStructureService
     Task<IEnumerable<OrgUnit>>         GetAllActiveAsync(Guid? legalEntityId = null);
     Task<IEnumerable<OrgUnitEmployee>> GetOrgUnitWorkforceAsync(Guid orgUnitId);
     Task<Guid>                         CreateOrgUnitAsync(CreateOrgUnitCommand command);
+    Task                               UpdateOrgUnitAsync(UpdateOrgUnitCommand command);
 }
 
 public sealed class OrgStructureService : IOrgStructureService
 {
-    private readonly IConnectionFactory  _connectionFactory;
-    private readonly IOrgUnitRepository  _orgUnitRepository;
-    private readonly ILookupCache        _lookupCache;
+    private readonly IConnectionFactory    _connectionFactory;
+    private readonly IOrgUnitRepository    _orgUnitRepository;
+    private readonly ILookupCache          _lookupCache;
+    private readonly ITaxProfileRepository _taxProfileRepository;
 
     private readonly int _legalEntityTypeId;
     private readonly int _divisionTypeId;
@@ -661,13 +869,15 @@ public sealed class OrgStructureService : IOrgStructureService
     private readonly int _activeStatusId;
 
     public OrgStructureService(
-        IConnectionFactory  connectionFactory,
-        IOrgUnitRepository  orgUnitRepository,
-        ILookupCache        lookupCache)
+        IConnectionFactory    connectionFactory,
+        IOrgUnitRepository    orgUnitRepository,
+        ILookupCache          lookupCache,
+        ITaxProfileRepository taxProfileRepository)
     {
-        _connectionFactory  = connectionFactory;
-        _orgUnitRepository  = orgUnitRepository;
-        _lookupCache        = lookupCache;
+        _connectionFactory    = connectionFactory;
+        _orgUnitRepository    = orgUnitRepository;
+        _lookupCache          = lookupCache;
+        _taxProfileRepository = taxProfileRepository;
         _legalEntityTypeId  = lookupCache.GetId(LookupTables.OrgUnitType, "LEGAL_ENTITY");
         _divisionTypeId     = lookupCache.GetId(LookupTables.OrgUnitType, "DIVISION");
         _departmentTypeId   = lookupCache.GetId(LookupTables.OrgUnitType, "DEPARTMENT");
@@ -723,6 +933,8 @@ public sealed class OrgStructureService : IOrgStructureService
         var isLegalEntity = command.OrgUnitTypeCode == "LEGAL_ENTITY";
         if (!isLegalEntity && command.LegalEntityId is null)
             throw new ValidationException("A legal entity context is required for this org unit type.");
+        if (isLegalEntity && string.IsNullOrWhiteSpace(command.CountryCode))
+            throw new ValidationException("Country code is required for legal entities.");
 
         var typeId    = _lookupCache.GetId(LookupTables.OrgUnitType, command.OrgUnitTypeCode);
         var now       = DateTimeOffset.UtcNow;
@@ -730,19 +942,22 @@ public sealed class OrgStructureService : IOrgStructureService
 
         var orgUnit = new OrgUnit
         {
-            OrgUnitId           = newId,
-            OrgUnitTypeId       = typeId,
-            OrgUnitCode         = command.OrgUnitCode.Trim().ToUpper(),
-            OrgUnitName         = command.OrgUnitName.Trim(),
-            ParentOrgUnitId     = command.ParentOrgUnitId,
-            LegalEntityId       = isLegalEntity ? newId : command.LegalEntityId,
-            LegalEntityTypeId   = command.LegalEntityTypeId,
-            OrgStatusId         = _activeStatusId,
-            EffectiveStartDate  = command.EffectiveStartDate,
-            CreatedBy           = command.InitiatedBy,
-            CreationTimestamp   = now,
-            LastUpdatedBy       = command.InitiatedBy,
-            LastUpdateTimestamp = now
+            OrgUnitId               = newId,
+            OrgUnitTypeId           = typeId,
+            OrgUnitCode             = command.OrgUnitCode.Trim().ToUpper(),
+            OrgUnitName             = command.OrgUnitName.Trim(),
+            ParentOrgUnitId         = command.ParentOrgUnitId,
+            LegalEntityId           = isLegalEntity ? newId : command.LegalEntityId,
+            LegalEntityTypeId       = command.LegalEntityTypeId,
+            TaxRegistrationNumber   = string.IsNullOrWhiteSpace(command.TaxRegistrationNumber) ? null : command.TaxRegistrationNumber.Trim(),
+            StateOfIncorporation    = string.IsNullOrWhiteSpace(command.StateOfIncorporation)   ? null : command.StateOfIncorporation.Trim(),
+            CountryCode             = string.IsNullOrWhiteSpace(command.CountryCode)            ? null : command.CountryCode.Trim().ToUpper(),
+            OrgStatusId             = _activeStatusId,
+            EffectiveStartDate      = command.EffectiveStartDate,
+            CreatedBy               = command.InitiatedBy,
+            CreationTimestamp       = now,
+            LastUpdatedBy           = command.InitiatedBy,
+            LastUpdateTimestamp     = now
         };
 
         using var uow = new UnitOfWork(_connectionFactory);
@@ -750,7 +965,63 @@ public sealed class OrgStructureService : IOrgStructureService
         {
             await _orgUnitRepository.InsertAsync(orgUnit, uow);
             uow.Commit();
-            return orgUnit.OrgUnitId;
+        }
+        catch
+        {
+            uow.Rollback();
+            throw;
+        }
+
+        if (isLegalEntity)
+            await _taxProfileRepository.AssignJurisdictionsAsync(
+                orgUnit.OrgUnitId, ResolveStartingJurisdictions(orgUnit.CountryCode, orgUnit.StateOfIncorporation));
+
+        return orgUnit.OrgUnitId;
+    }
+
+    private static IEnumerable<string> ResolveStartingJurisdictions(string? countryCode, string? stateOfIncorporation)
+    {
+        var codes = new List<string>();
+        var federal = countryCode switch
+        {
+            "US" => "US-FED",
+            "CA" => "CA-FED",
+            "BB" => "BB",
+            _    => null
+        };
+        if (federal is not null) codes.Add(federal);
+
+        if (!string.IsNullOrWhiteSpace(stateOfIncorporation) && countryCode is "US" or "CA")
+            codes.Add($"{countryCode}-{stateOfIncorporation.Trim().ToUpper()}");
+
+        return codes;
+    }
+
+    public async Task UpdateOrgUnitAsync(UpdateOrgUnitCommand command)
+    {
+        if (string.IsNullOrWhiteSpace(command.OrgUnitCode))
+            throw new ValidationException("Org unit code is required.");
+        if (string.IsNullOrWhiteSpace(command.OrgUnitName))
+            throw new ValidationException("Org unit name is required.");
+
+        var existing = await GetOrgUnitByIdAsync(command.OrgUnitId);
+        if (existing?.OrgUnitTypeId == _legalEntityTypeId && string.IsNullOrWhiteSpace(command.CountryCode))
+            throw new ValidationException("Country code is required for legal entities.");
+
+        var sanitised = command with
+        {
+            OrgUnitCode           = command.OrgUnitCode.Trim().ToUpper(),
+            OrgUnitName           = command.OrgUnitName.Trim(),
+            TaxRegistrationNumber = string.IsNullOrWhiteSpace(command.TaxRegistrationNumber) ? null : command.TaxRegistrationNumber.Trim(),
+            StateOfIncorporation  = string.IsNullOrWhiteSpace(command.StateOfIncorporation)   ? null : command.StateOfIncorporation.Trim(),
+            CountryCode           = string.IsNullOrWhiteSpace(command.CountryCode)            ? null : command.CountryCode.Trim().ToUpper()
+        };
+
+        using var uow = new UnitOfWork(_connectionFactory);
+        try
+        {
+            await _orgUnitRepository.UpdateAsync(sanitised, uow);
+            uow.Commit();
         }
         catch
         {

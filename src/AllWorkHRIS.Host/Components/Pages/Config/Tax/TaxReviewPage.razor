@@ -1,7 +1,7 @@
 @page "/config/tax/review"
 @layout TaxConfigShell
 @rendermode InteractiveServer
-@attribute [Authorize(Roles = "ComplianceReviewer")]
+@attribute [Authorize(Roles = "TaxAdmin,ComplianceReviewer,PayrollAdmin,SystemAdmin")]
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Components.Authorization
 @using AllWorkHRIS.Host.Config.Tax

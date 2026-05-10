@@ -35,4 +35,8 @@ public sealed record PipelineRequest
     // YTD accumulator balances keyed by step_code — loaded by caller from AccumulatorService
     public IReadOnlyDictionary<string, decimal> YtdBalances { get; init; }
         = new Dictionary<string, decimal>();
+
+    // When true the pipeline skips IBenefitStepProvider injection — used by CalculationEngine
+    // which runs benefit steps itself before invoking the pipeline for each jurisdiction.
+    public bool SkipBenefitSteps { get; init; } = false;
 }

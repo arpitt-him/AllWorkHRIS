@@ -7,6 +7,7 @@ public sealed record CreateElectionCommand
     public decimal?          EmployeeAmount             { get; init; }
     public decimal?          EmployerContributionAmount { get; init; }
     public decimal?          ContributionPct            { get; init; }
+    public decimal?          EmployerContributionPct    { get; init; }
     public string?           CoverageTier               { get; init; }
     public decimal?          AnnualCoverageAmount       { get; init; }
     public required DateOnly EffectiveStartDate         { get; init; }

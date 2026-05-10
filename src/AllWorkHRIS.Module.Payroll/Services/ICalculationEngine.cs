@@ -16,6 +16,11 @@ public sealed record CalculationInput
     // Compensation snapshot — populated by PayrollRunJob before engine is called
     public decimal? AnnualEquivalent { get; init; }
     public int      PeriodsPerYear   { get; init; }
+
+    // Pay period boundaries — passed through to the benefit step provider for proration
+    public DateOnly PayPeriodStart    { get; init; }
+    public DateOnly PayPeriodEnd      { get; init; }
+    public string   PartialPeriodRule { get; init; } = "PRORATE_DAYS";
 }
 
 public sealed record CalculationOutput
@@ -28,6 +33,10 @@ public sealed record CalculationOutput
     public required decimal TotalEmployeeTaxAmount       { get; init; }
     public required decimal TotalEmployerContribAmount   { get; init; }
     public required decimal NetPay                       { get; init; }
+
+    // Set when deductions exceeded available earnings; net pay was floored to $0.
+    public bool    NetPayFloorApplied { get; init; }
+    public decimal NetPayFloorExcess  { get; init; }
 }
 
 public interface ICalculationEngine

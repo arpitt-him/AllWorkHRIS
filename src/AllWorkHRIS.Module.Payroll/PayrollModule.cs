@@ -7,6 +7,7 @@ using AllWorkHRIS.Core.Events;
 using AllWorkHRIS.Core.Navigation;
 using AllWorkHRIS.Module.Payroll.Domain.Events;
 using AllWorkHRIS.Module.Payroll.Jobs;
+using AllWorkHRIS.Module.Payroll.Queries;
 using AllWorkHRIS.Module.Payroll.Repositories;
 using AllWorkHRIS.Module.Payroll.Services;
 using Microsoft.Extensions.Hosting;
@@ -52,6 +53,9 @@ public sealed class PayrollModule : IPlatformModule
         builder.RegisterType<PayrollCompensationSnapshotRepository>()
                .As<IPayrollCompensationSnapshotRepository>()
                .InstancePerLifetimeScope();
+
+        // Query services
+        builder.RegisterType<PayRegisterQueryService>().InstancePerLifetimeScope();
 
         // Services
         builder.RegisterType<PayrollRunService>().As<IPayrollRunService>().InstancePerLifetimeScope();

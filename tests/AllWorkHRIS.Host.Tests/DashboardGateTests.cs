@@ -17,6 +17,7 @@ using AllWorkHRIS.Host.Hris.Navigation;
 using AllWorkHRIS.Host.Hris.Repositories;
 using AllWorkHRIS.Host.Hris.Services;
 using AllWorkHRIS.Host.Config.Navigation;
+using AllWorkHRIS.Host.Payroll.Tax;
 using AllWorkHRIS.Module.Benefits;
 using AllWorkHRIS.Module.Payroll;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -64,7 +65,7 @@ public sealed class DashboardGateTests : IAsyncLifetime
     private IOrgStructureService OrgService()
     {
         var orgRepo = new OrgUnitRepository(_connectionFactory);
-        return new OrgStructureService(_connectionFactory, orgRepo, _lookupCache);
+        return new OrgStructureService(_connectionFactory, orgRepo, _lookupCache, new NullTaxProfileRepository());
     }
 
     // -----------------------------------------------------------------------
@@ -286,4 +287,17 @@ public sealed class DashboardGateTests : IAsyncLifetime
             Assert.NotEmpty(navSection!.Items);
         }
     }
+}
+
+// Stand-in for tests that construct OrgStructureService but never call CreateOrgUnitAsync.
+file sealed class NullTaxProfileRepository : ITaxProfileRepository
+{
+    public Task<IReadOnlyList<TaxJurisdictionRow>>         GetAllJurisdictionsAsync()                                                                                => Task.FromResult<IReadOnlyList<TaxJurisdictionRow>>([]);
+    public Task<IReadOnlyList<TaxJurisdictionRow>>         GetJurisdictionsByLegalEntityAsync(Guid legalEntityId)                                                    => Task.FromResult<IReadOnlyList<TaxJurisdictionRow>>([]);
+    public Task<IReadOnlyList<EmployeeJurisdictionRow>>    GetJurisdictionsByEmployeeAsync(Guid legalEntityId, Guid employmentId, DateOnly operativeDate, int lookAheadDays = 60) => Task.FromResult<IReadOnlyList<EmployeeJurisdictionRow>>([]);
+    public Task<IReadOnlyList<TaxFilingStatusRow>>         GetFilingStatusesAsync(string jurisdictionCode)                                                           => Task.FromResult<IReadOnlyList<TaxFilingStatusRow>>([]);
+    public Task<IReadOnlyList<MissingElectionRow>>         GetEmployeesMissingElectionsAsync(Guid legalEntityId, DateOnly operativeDate, int page, int pageSize)     => Task.FromResult<IReadOnlyList<MissingElectionRow>>([]);
+    public Task<TaxProfileRow?>                            GetActiveProfileAsync(Guid employmentId, string jurisdictionCode, DateOnly asOfDate)                      => Task.FromResult<TaxProfileRow?>(null);
+    public Task                                            SaveProfileAsync(Guid employmentId, string jurisdictionCode, TaxProfileSaveModel model, string createdBy, DateOnly effectiveFrom) => Task.CompletedTask;
+    public Task                                            AssignJurisdictionsAsync(Guid legalEntityId, IEnumerable<string> jurisdictionCodes)                       => Task.CompletedTask;
 }

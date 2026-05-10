@@ -211,7 +211,11 @@ public sealed class BenefitElectionService : IBenefitElectionService
         var election = await _electionRepository.GetByIdAsync(command.ElectionId, ct)
             ?? throw new InvalidOperationException($"Election {command.ElectionId} not found.");
 
-        var endDate = command.EffectiveEndDate ?? DateOnly.FromDateTime(DateTime.UtcNow);
+        var today   = DateOnly.FromDateTime(DateTime.Today);
+        var endDate = command.EffectiveEndDate
+            ?? (election.EffectiveStartDate > today
+                ? election.EffectiveStartDate   // PENDING: close on the day it would have opened
+                : today);
 
         using var uow = new UnitOfWork(_connectionFactory);
         try

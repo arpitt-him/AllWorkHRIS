@@ -16,7 +16,7 @@ public sealed class HrisDashboardContributor : IDashboardContributor
 
     public string                 ModuleName    => "People";
     public string                 AccentColor   => "var(--module-hris, #1d4ed8)";
-    public IReadOnlyList<string>  RequiredRoles => ["HrisViewer", "HrisAdmin", "Manager"];
+    public IReadOnlyList<string>  RequiredRoles => ["HrisViewer", "HrisAdmin", "HrisOperator", "Manager"];
 
     public HrisDashboardContributor(
         IDocumentRepository               documents,

@@ -29,22 +29,19 @@ public sealed class PayrollPipelineService : IPayrollPipelineService
     public async Task<PipelineResult> RunAsync(PipelineRequest request, CancellationToken ct = default)
     {
         _logger.LogInformation(
-            "Pipeline start — employment={EmploymentId} jurisdiction={JurisdictionCode} payDate={PayDate} gross={GrossPayPeriod} filingStatus={FilingStatus}",
-            request.EmploymentId, request.JurisdictionCode, request.PayDate,
-            request.GrossPayPeriod, request.FilingStatusCode ?? "(none)");
+            "Pipeline start — employment={EmploymentId} jurisdiction={JurisdictionCode} payDate={PayDate} gross={GrossPayPeriod}",
+            request.EmploymentId, request.JurisdictionCode, request.PayDate, request.GrossPayPeriod);
 
         try
         {
             var profile = await _formRepo.GetActiveProfileAsync(
                 request.EmploymentId, request.JurisdictionCode, request.PayDate, ct);
 
-            _logger.LogDebug("Profile loaded: {HasProfile} filingStatus={FilingStatus}",
-                profile is not null, profile?.FilingStatusCode ?? "(none)");
-
             var ctx = BuildInitialContext(request, profile);
 
-            _logger.LogDebug("Context built: filingStatus={FilingStatus} exempt={Exempt}",
-                ctx.FilingStatusCode ?? "(none)", ctx.ExemptFlag);
+            _logger.LogInformation(
+                "Profile resolved — profileFound={ProfileFound} filingStatus={FilingStatus} exempt={Exempt}",
+                profile is not null, ctx.FilingStatusCode ?? "(none)", ctx.ExemptFlag);
 
             var stepRows = await _rateRepo.GetActiveStepsAsync(
                 request.JurisdictionCode, request.PayDate, ct);
@@ -55,10 +52,13 @@ public sealed class PayrollPipelineService : IPayrollPipelineService
             var jurisdictionSteps = await BuildStepsAsync(stepRows, ctx, ct);
 
             var benefitSteps = new List<ICalculationStep>();
-            foreach (var provider in _benefitProviders)
+            if (!request.SkipBenefitSteps)
             {
-                var providerSteps = await provider.GetStepsForEmployeeAsync(request, ct);
-                benefitSteps.AddRange(providerSteps);
+                foreach (var provider in _benefitProviders)
+                {
+                    var providerSteps = await provider.GetStepsForEmployeeAsync(request, ct);
+                    benefitSteps.AddRange(providerSteps);
+                }
             }
 
             // Split at sequence 800: pre-tax benefits (100–199) + tax (200–799) run first,
@@ -91,7 +91,8 @@ public sealed class PayrollPipelineService : IPayrollPipelineService
             }
 
             var employeeSteps = ctx.StepResults
-                .Where(kv => !ctx.EmployerStepResults.ContainsKey(kv.Key))
+                .Where(kv => !ctx.EmployerStepResults.ContainsKey(kv.Key)
+                          || ctx.BothStepCodes.Contains(kv.Key))
                 .ToDictionary(kv => kv.Key, kv => kv.Value);
 
             _logger.LogInformation(

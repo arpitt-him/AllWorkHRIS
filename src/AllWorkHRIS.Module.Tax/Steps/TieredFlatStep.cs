@@ -52,9 +52,12 @@ public sealed class TieredFlatStep : ICalculationStep
             periodAmount = Math.Min(periodAmount, Math.Max(0, maxAnnualCap.Value - ytd));
 
         var amount = Math.Max(0, periodAmount);
-        var next   = AppliesTo == StepAppliesTo.Employer
-            ? ctx.WithEmployerStepResult(StepCode, amount)
-            : ctx.WithStepResult(StepCode, amount);
+        var next = AppliesTo switch
+        {
+            StepAppliesTo.Employer => ctx.WithEmployerStepResult(StepCode, amount),
+            StepAppliesTo.Both     => ctx.WithBothStepResult(StepCode, amount),
+            _                      => ctx.WithStepResult(StepCode, amount)
+        };
 
         return Task.FromResult(next);
     }

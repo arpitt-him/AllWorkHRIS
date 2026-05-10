@@ -101,6 +101,35 @@ public sealed record PersonAddress
         };
 }
 
+public static class PersonChangeType
+{
+    public const string LegalName          = "LEGAL_NAME";
+    public const string DateOfBirth        = "DATE_OF_BIRTH";
+    public const string NationalIdentifier = "NATIONAL_IDENTIFIER";
+}
+
+public static class PersonChangeStatus
+{
+    public const string Pending  = "PENDING";
+    public const string Approved = "APPROVED";
+    public const string Rejected = "REJECTED";
+}
+
+public sealed record PersonChangeRequest
+{
+    public Guid             PersonChangeRequestId { get; init; }
+    public Guid             PersonId              { get; init; }
+    public string           ChangeType            { get; init; } = default!;
+    public string?          CurrentValueJson      { get; init; }
+    public string           RequestedValueJson    { get; init; } = default!;
+    public Guid             RequestedBy           { get; init; }
+    public DateTimeOffset   RequestedAt           { get; init; }
+    public string           Status                { get; init; } = default!;
+    public Guid?            ReviewedBy            { get; init; }
+    public DateTimeOffset?  ReviewedAt            { get; init; }
+    public string?          RejectionNotes        { get; init; }
+}
+
 public sealed record PersonEmergencyContact
 {
     public Guid EmergencyContactId { get; init; }

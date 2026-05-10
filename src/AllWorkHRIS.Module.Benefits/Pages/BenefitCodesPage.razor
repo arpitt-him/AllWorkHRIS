@@ -239,6 +239,10 @@
                         <div class="form-group">
                             <label class="form-label">Effective From <span class="required">*</span></label>
                             <input class="form-input" type="date" @bind="_rateFormFrom" />
+                            <small class="hint-text">
+                                Must be a future date. Rate changes on or before today could affect
+                                in-progress payroll runs.
+                            </small>
                         </div>
                         <div class="form-group">
                             <label class="form-label">Effective To</label>
@@ -271,12 +275,16 @@
                                     <td>
                                         <input class="form-input" type="number" step="0.01" min="0"
                                                style="max-width:110px;"
-                                               @bind="tier.EmployeeRate" placeholder="0.00" />
+                                               value="@(tier.EmployeeRate?.ToString("0.00"))"
+                                               @onchange="e => tier.EmployeeRate = ParseRoundedDecimal(e.Value?.ToString())"
+                                               placeholder="0.00" />
                                     </td>
                                     <td>
                                         <input class="form-input" type="number" step="0.01" min="0"
                                                style="max-width:110px;"
-                                               @bind="tier.EmployerRate" placeholder="0.00" />
+                                               value="@(tier.EmployerRate?.ToString("0.00"))"
+                                               @onchange="e => tier.EmployerRate = ParseRoundedDecimal(e.Value?.ToString())"
+                                               placeholder="0.00" />
                                     </td>
                                 </tr>
                             }
@@ -385,7 +393,9 @@
                         <div class="form-group">
                             <label class="form-label">Cap — Annual Amount ($)</label>
                             <input class="form-input" type="number" step="0.01" min="0"
-                                   @bind="_matchFormCapAnnual" placeholder="e.g. 3000" />
+                                   value="@_matchFormCapAnnual"
+                                   @onchange="e => _matchFormCapAnnual = ParseRoundedDecimal(e.Value?.ToString())"
+                                   placeholder="e.g. 3000" />
                             <small class="hint-text">Hard annual ceiling in dollars — takes precedence over % cap</small>
                         </div>
                         <div class="form-group">
@@ -636,6 +646,8 @@
     {
         if (_rateTableDeduction is null) return;
         if (_rateFormFrom is null) { _rateFormError = "Effective From is required."; return; }
+        if (_rateFormFrom.Value <= DateOnly.FromDateTime(DateTime.Today))
+        { _rateFormError = "Effective From must be a future date. Rate changes on or before today could affect in-progress payroll runs."; return; }
         if (_rateFormTo.HasValue && _rateFormTo.Value < _rateFormFrom.Value)
         { _rateFormError = "Effective To must be on or after Effective From."; return; }
         var bad = _rateFormTiers.FirstOrDefault(t => t.EmployeeRate is null or < 0);
@@ -667,6 +679,8 @@
             using var uow = new UnitOfWork(ConnectionFactory);
             try
             {
+                await RateTableRepo.CloseOpenTablesAsync(
+                    _rateTableDeduction.DeductionId, _rateFormFrom.Value.AddDays(-1), uow);
                 await RateTableRepo.InsertTableAsync(table, uow);
                 await RateTableRepo.ReplaceEntriesAsync(tableId, entries, uow);
                 uow.Commit();
@@ -806,6 +820,9 @@
     }
 
     // ── Helpers ──────────────────────────────────────────────────────
+
+    private static decimal? ParseRoundedDecimal(string? s) =>
+        decimal.TryParse(s, out var v) ? Math.Round(v, 2) : (decimal?)null;
 
     private static string TreatmentBadgeClass(string t) =>
         t == "PRE_TAX" ? "badge-blue" : "badge-orange";

@@ -1,23 +1,996 @@
 @page "/payroll/register"
 @layout PayrollShell
 @rendermode InteractiveServer
-@attribute [Authorize(Roles = "PayrollOperator,PayrollAdmin")]
+@attribute [Authorize(Roles = "PayrollOperator,PayrollAdmin,HrisAdmin,BenefitsAdmin")]
 @using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using AllWorkHRIS.Module.Payroll.Queries
+@using System.Text
+@using Microsoft.JSInterop
+@inject IHrisSessionState       SessionState
+@inject PayRegisterQueryService QueryService
+@inject IJSRuntime              JS
+@inject AuthenticationStateProvider AuthStateProvider
 
 <PageTitle>Pay Register — AllWork HRIS</PageTitle>
 
-<div class="page-container">
-    <div class="page-header">
-        <h2 class="page-title">Pay Register</h2>
+<div class="register-layout">
+
+    @* ── Left nav: year / month / run tree ─────────────────────────────── *@
+    <div class="register-nav">
+        <div class="register-nav__header">Runs</div>
+        @if (_loading)
+        {
+            <p class="nav-hint">Loading…</p>
+        }
+        else if (!_runs.Any())
+        {
+            <p class="nav-hint">No completed runs.</p>
+        }
+        else
+        {
+            @foreach (var year in _runs.Select(r => r.Year).Distinct().OrderByDescending(y => y))
+            {
+                var yearExpanded = _expandedYears.Contains(year);
+                <div class="nav-year">
+                    <button class="nav-year__btn" @onclick="() => ToggleYear(year)">
+                        <span class="nav-year__arrow">@(yearExpanded ? "▾" : "▸")</span>
+                        @year
+                    </button>
+                    @if (yearExpanded)
+                    {
+                        @foreach (var month in _runs.Where(r => r.Year == year)
+                                                    .Select(r => r.Month)
+                                                    .Distinct()
+                                                    .OrderByDescending(m => m))
+                        {
+                            var monthRuns = _runs.Where(r => r.Year == year && r.Month == month).ToList();
+                            <div class="nav-month">
+                                <span class="nav-month__label">@(new DateTime(year, month, 1).ToString("MMMM"))</span>
+                                @foreach (var run in monthRuns)
+                                {
+                                    <button class="nav-run @(_selectedRunId == run.RunId ? "nav-run--active" : "")"
+                                            @onclick="() => SelectRunAsync(run.RunId)">
+                                        @run.Label
+                                        <span class="nav-run__status">@run.StatusLabel</span>
+                                    </button>
+                                }
+                            </div>
+                        }
+                    }
+                </div>
+            }
+        }
     </div>
-    <div class="panel-card">
-        <p style="color:#6B7280;font-size:var(--font-size-sm);">
-            To view the pay register for a specific run, open that run from
-            <a href="/payroll/runs" class="table-link">Payroll Runs</a> and select the
-            <strong>Pay Register</strong> tab.
-        </p>
-        <p style="color:#6B7280;font-size:var(--font-size-sm);margin-top:var(--space-3);">
-            A cross-run register report with filtering and export will be available in a future release.
-        </p>
+
+    @* ── Right content ──────────────────────────────────────────────────── *@
+    <div class="register-content">
+
+        @if (_runHeader is null)
+        {
+            <div class="empty-state">
+                <p>Select a payroll run from the list on the left.</p>
+            </div>
+        }
+        else
+        {
+            @* Run header *@
+            <div class="run-header">
+                <div class="run-header__main">
+                    <span class="run-header__title">@(_runHeader.RunDescription ?? $"P{_runHeader.PeriodNumber}")</span>
+                    <span class="run-header__period">
+                        @_runHeader.PeriodYear P@_runHeader.PeriodNumber &nbsp;·&nbsp;
+                        @_runHeader.PeriodStartDate.ToString("MMM d") – @_runHeader.PeriodEndDate.ToString("MMM d, yyyy")
+                    </span>
+                </div>
+                <div class="run-header__meta">
+                    Pay Date: <strong>@_runHeader.PayDate.ToString("MMM d, yyyy")</strong>
+                </div>
+            </div>
+
+            @* Tab bar — full access roles only *@
+            <AuthorizeView Roles="PayrollOperator,PayrollAdmin,HrisAdmin">
+                <Authorized>
+                    <div class="tab-bar">
+                        <button class="tab @(_activeTab == "summary" ? "tab--active" : "")"
+                                @onclick='() => SwitchTab("summary")'>Company Summary</button>
+                        <button class="tab @(_activeTab == "org"     ? "tab--active" : "")"
+                                @onclick='() => SwitchTab("org")'>Org Rollup</button>
+                        <button class="tab @(_activeTab == "detail"  ? "tab--active" : "")"
+                                @onclick='() => SwitchTab("detail")'>Employee Detail</button>
+                    </div>
+                </Authorized>
+            </AuthorizeView>
+
+            @* ── Company Summary ────────────────────────────────────────── *@
+            @if (_activeTab == "summary" || _isBenefitsAdmin)
+            {
+                @if (_summaryLoading)
+                {
+                    <div class="tab-loading">Loading…</div>
+                }
+                else if (_summary is not null)
+                {
+                    <div class="tab-content">
+
+                        @* Payroll Cost Summary — hidden from BenefitsAdmin *@
+                        <AuthorizeView Roles="PayrollOperator,PayrollAdmin,HrisAdmin">
+                            <Authorized>
+                                <div class="summary-section">
+                                    <h3 class="summary-section__title">Payroll Cost Summary</h3>
+                                    <table class="summary-table">
+                                        <tbody>
+                                            <tr><td>Total Gross Payroll</td><td class="amount">@Fmt(_summary.TotalGrossPayroll)</td></tr>
+                                            <tr><td>Total Employer Taxes</td><td class="amount">@Fmt(_summary.TotalEmployerTaxes)</td></tr>
+                                            <tr><td>Total Employer Benefit Contributions</td><td class="amount">@Fmt(_summary.TotalEmployerBenefitContrib)</td></tr>
+                                            <tr class="summary-table__subtotal"><td><strong>Total Employer Cost</strong></td><td class="amount"><strong>@Fmt(_summary.TotalEmployerCost)</strong></td></tr>
+                                            <tr><td>Total Employee Tax Withholdings</td><td class="amount">@Fmt(_summary.TotalEmployeeTaxWithholdings)</td></tr>
+                                            <tr><td>Total Employee Benefit Deductions</td><td class="amount">@Fmt(_summary.TotalEmployeeBenefitDeducts)</td></tr>
+                                            <tr class="summary-table__subtotal"><td><strong>Total Net Pay</strong></td><td class="amount"><strong>@Fmt(_summary.TotalNetPay)</strong></td></tr>
+                                            <tr class="summary-table__highlight"><td><strong>Total Cash Required (ACH)</strong></td><td class="amount"><strong>@Fmt(_summary.TotalCashRequired)</strong></td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+
+                                <div class="summary-section">
+                                    <h3 class="summary-section__title">Tax Liability Summary</h3>
+                                    <table class="summary-table">
+                                        <tbody>
+                                            <tr><td>Federal Income Tax Withheld</td><td class="amount">@Fmt(_summary.FederalIncomeTax)</td></tr>
+                                            <tr><td>Social Security — Employee</td><td class="amount">@Fmt(_summary.SocialSecurityEe)</td></tr>
+                                            <tr><td>Social Security — Employer</td><td class="amount">@Fmt(_summary.SocialSecurityEr)</td></tr>
+                                            <tr><td>Medicare — Employee</td><td class="amount">@Fmt(_summary.MedicareEe)</td></tr>
+                                            <tr><td>Medicare — Employer</td><td class="amount">@Fmt(_summary.MedicareEr)</td></tr>
+                                            @foreach (var row in _summary.StateAndLocalTax)
+                                            {
+                                                <tr><td>@row.Label</td><td class="amount">@Fmt(row.Amount)</td></tr>
+                                            }
+                                            @if (_summary.Futa != 0)
+                                            {
+                                                <tr><td>FUTA</td><td class="amount">@Fmt(_summary.Futa)</td></tr>
+                                            }
+                                            @foreach (var row in _summary.SutaByState)
+                                            {
+                                                <tr><td>@row.Label</td><td class="amount">@Fmt(row.Amount)</td></tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </Authorized>
+                        </AuthorizeView>
+
+                        @* Benefit Summary — visible to all authorized roles *@
+                        <div class="summary-section">
+                            <h3 class="summary-section__title">Benefit Summary</h3>
+                            <table class="summary-table">
+                                <tbody>
+                                    <tr><td>Total Employee Deductions</td><td class="amount">@Fmt(_summary.TotalEmployeeDeductions)</td></tr>
+                                    <tr><td>Total Employer Contributions</td><td class="amount">@Fmt(_summary.TotalEmployerContributions)</td></tr>
+                                    <tr><td>Total Retirement Deductions (EE)</td><td class="amount">@Fmt(_summary.TotalRetirementDeductions)</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        @* Headcount — hidden from BenefitsAdmin *@
+                        <AuthorizeView Roles="PayrollOperator,PayrollAdmin,HrisAdmin">
+                            <Authorized>
+                                <div class="summary-section">
+                                    <h3 class="summary-section__title">Headcount</h3>
+                                    <table class="summary-table">
+                                        <tbody>
+                                            <tr><td>Employees Included</td><td class="amount">@_summary.EmployeesIncluded</td></tr>
+                                            <tr><td>Employees with Supplemental Pay</td><td class="amount">@_summary.EmployeesWithSupplementalPay</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <div class="export-row">
+                                    <button class="btn-link" @onclick="ExportSummaryCsvAsync">Download CSV</button>
+                                </div>
+                            </Authorized>
+                        </AuthorizeView>
+
+                    </div>
+                }
+            }
+
+            @* ── Org Rollup ─────────────────────────────────────────────── *@
+            <AuthorizeView Roles="PayrollOperator,PayrollAdmin,HrisAdmin">
+                <Authorized>
+                    @if (_activeTab == "org")
+                    {
+                        <div class="tab-content">
+                            <div class="sub-tab-bar">
+                                @foreach (var dim in _availableDimensions)
+                                {
+                                    <button class="sub-tab @(_orgDimension == dim.Code ? "sub-tab--active" : "")"
+                                            @onclick="() => SwitchOrgDimensionAsync(dim.Code)">
+                                        By @dim.Label
+                                    </button>
+                                }
+                                <button class="sub-tab @(_orgDimension == "LOCATION" ? "sub-tab--active" : "")"
+                                        @onclick='() => SwitchOrgDimensionAsync("LOCATION")'>By Location</button>
+                                <button class="sub-tab @(_orgDimension == "JOB" ? "sub-tab--active" : "")"
+                                        @onclick='() => SwitchOrgDimensionAsync("JOB")'>By Job</button>
+                            </div>
+
+                            @if (_orgLoading)
+                            {
+                                <div class="tab-loading">Loading…</div>
+                            }
+                            else
+                            {
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>@OrgGroupLabel</th>
+                                            <th class="num-col">Headcount</th>
+                                            <th class="num-col">Gross Wages</th>
+                                            <th class="num-col">EE Tax Withheld</th>
+                                            <th class="num-col">ER Tax Cost</th>
+                                            <th class="num-col">ER Benefit Cost</th>
+                                            <th class="num-col">Net Pay</th>
+                                            <th class="num-col">Total ER Cost</th>
+                                            <th style="width:40px;"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var row in _orgRows)
+                                        {
+                                            var expanded = _expandedOrgGroups.Contains(row.GroupId);
+                                            <tr class="data-row">
+                                                <td>@row.GroupName</td>
+                                                <td class="num-col">@row.Headcount</td>
+                                                <td class="num-col">@Fmt(row.GrossWages)</td>
+                                                <td class="num-col">@Fmt(row.EmployeeTaxWithheld)</td>
+                                                <td class="num-col">@Fmt(row.EmployerTaxCost)</td>
+                                                <td class="num-col">@Fmt(row.EmployerBenefitCost)</td>
+                                                <td class="num-col">@Fmt(row.NetPay)</td>
+                                                <td class="num-col">@Fmt(row.TotalEmployerCost)</td>
+                                                <td>
+                                                    <a href="" class="btn-link"
+                                                       @onclick="() => ToggleOrgGroupAsync(row.GroupId)"
+                                                       @onclick:preventDefault>
+                                                        @(expanded ? "Close" : "View")
+                                                    </a>
+                                                </td>
+                                            </tr>
+                                            @if (expanded && _orgGroupEmployees.TryGetValue(row.GroupId, out var empRows))
+                                            {
+                                                <tr class="expansion-row">
+                                                    <td colspan="9">
+                                                        <table class="emp-sub-table">
+                                                            <thead>
+                                                                <tr>
+                                                                    <th>#</th>
+                                                                    <th>Employee</th>
+                                                                    <th>Dept</th>
+                                                                    <th class="num-col">Gross</th>
+                                                                    <th class="num-col">Fed Tax</th>
+                                                                    <th class="num-col">SS (EE)</th>
+                                                                    <th class="num-col">Med (EE)</th>
+                                                                    <th class="num-col">Net Pay</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                @foreach (var e in empRows)
+                                                                {
+                                                                    <tr>
+                                                                        <td>@e.EmployeeNumber</td>
+                                                                        <td>@e.EmployeeName</td>
+                                                                        <td style="font-size:.75rem;color:#6b7280;">@e.DepartmentName</td>
+                                                                        <td class="num-col">@Fmt(e.Gross)</td>
+                                                                        <td class="num-col">@Fmt(e.FederalTax)</td>
+                                                                        <td class="num-col">@Fmt(e.SsEe)</td>
+                                                                        <td class="num-col">@Fmt(e.MedicareEe)</td>
+                                                                        <td class="num-col">@Fmt(e.NetPay)</td>
+                                                                    </tr>
+                                                                }
+                                                            </tbody>
+                                                        </table>
+                                                    </td>
+                                                </tr>
+                                            }
+                                            else if (expanded)
+                                            {
+                                                <tr class="expansion-row">
+                                                    <td colspan="9"><span class="tab-loading">Loading…</span></td>
+                                                </tr>
+                                            }
+                                        }
+                                        @* Totals row *@
+                                        <tr class="totals-row">
+                                            <td><strong>Total</strong></td>
+                                            <td class="num-col"><strong>@_orgRows.Sum(r => r.Headcount)</strong></td>
+                                            <td class="num-col"><strong>@Fmt(_orgRows.Sum(r => r.GrossWages))</strong></td>
+                                            <td class="num-col"><strong>@Fmt(_orgRows.Sum(r => r.EmployeeTaxWithheld))</strong></td>
+                                            <td class="num-col"><strong>@Fmt(_orgRows.Sum(r => r.EmployerTaxCost))</strong></td>
+                                            <td class="num-col"><strong>@Fmt(_orgRows.Sum(r => r.EmployerBenefitCost))</strong></td>
+                                            <td class="num-col"><strong>@Fmt(_orgRows.Sum(r => r.NetPay))</strong></td>
+                                            <td class="num-col"><strong>@Fmt(_orgRows.Sum(r => r.TotalEmployerCost))</strong></td>
+                                            <td></td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                                <div class="export-row">
+                                    <button class="btn-link" @onclick="ExportOrgCsvAsync">Download CSV</button>
+                                </div>
+                            }
+                        </div>
+                    }
+
+                    @* ── Employee Detail ─────────────────────────────────── *@
+                    @if (_activeTab == "detail")
+                    {
+                        <div class="tab-content">
+                            <div class="detail-toolbar">
+                                <input class="search-input" type="search" placeholder="Filter by name or number…"
+                                       @bind="_empFilter" @bind:event="oninput" @bind:after="ResetEmpPage" />
+                                <span class="detail-count">@FilteredCount employees</span>
+                            </div>
+
+                            @if (_empLoading)
+                            {
+                                <div class="tab-loading">Loading…</div>
+                            }
+                            else
+                            {
+                                <div class="table-scroll">
+                                    <table class="data-table data-table--detail">
+                                        <thead>
+                                            <tr>
+                                                <th><a href="" class="sort-link" @onclick='() => SortBy("number")' @onclick:preventDefault>
+                                                    # @SortIcon("number")</a></th>
+                                                <th><a href="" class="sort-link" @onclick='() => SortBy("name")' @onclick:preventDefault>
+                                                    Employee @SortIcon("name")</a></th>
+                                                <th>Dept</th>
+                                                <th class="num-col"><a href="" class="sort-link" @onclick='() => SortBy("gross")' @onclick:preventDefault>
+                                                    Gross @SortIcon("gross")</a></th>
+                                                <th class="num-col">@_columnLabels.LabelFederalTax</th>
+                                                <th class="num-col">@_columnLabels.LabelPensionEe</th>
+                                                <th class="num-col">@_columnLabels.LabelInsuranceEe</th>
+                                                <th class="num-col">@_columnLabels.LabelStateTax</th>
+                                                @if (_columnLabels.LabelLocalTax is not null)
+                                                {
+                                                    <th class="num-col">@_columnLabels.LabelLocalTax</th>
+                                                }
+                                                <th class="num-col">Benefits</th>
+                                                <th class="num-col">Retire (EE)</th>
+                                                <th class="num-col">Garnish</th>
+                                                <th class="num-col"><a href="" class="sort-link" @onclick='() => SortBy("net")' @onclick:preventDefault>
+                                                    Net Pay @SortIcon("net")</a></th>
+                                                <th class="num-col">@_columnLabels.LabelErPension</th>
+                                                <th class="num-col">@_columnLabels.LabelErInsurance</th>
+                                                <th class="num-col">ER Benefit</th>
+                                                <th style="width:40px;"></th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @foreach (var emp in PagedEmployeeRows)
+                                            {
+                                                var expEmp = _expandedEmployees.Contains(emp.EmployeePayrollResultId);
+                                                <tr class="data-row">
+                                                    <td>@emp.EmployeeNumber</td>
+                                                    <td>@emp.EmployeeName</td>
+                                                    <td style="font-size:.8rem;color:#6b7280;">@emp.DepartmentName</td>
+                                                    <td class="num-col">@Fmt(emp.Gross)</td>
+                                                    <td class="num-col">@Fmt(emp.FederalTax)</td>
+                                                    <td class="num-col">@Fmt(emp.SsEe)</td>
+                                                    <td class="num-col">@Fmt(emp.MedicareEe)</td>
+                                                    <td class="num-col">@Fmt(emp.StateTax)</td>
+                                                    @if (_columnLabels.LabelLocalTax is not null)
+                                                    {
+                                                        <td class="num-col">@Fmt(emp.LocalTax)</td>
+                                                    }
+                                                    <td class="num-col">@Fmt(emp.BenefitDeductions)</td>
+                                                    <td class="num-col">@Fmt(emp.RetirementDeductions)</td>
+                                                    <td class="num-col">@Fmt(emp.Garnishments)</td>
+                                                    <td class="num-col"><strong>@Fmt(emp.NetPay)</strong></td>
+                                                    <td class="num-col">@Fmt(emp.EmployerSs)</td>
+                                                    <td class="num-col">@Fmt(emp.EmployerMedicare)</td>
+                                                    <td class="num-col">@Fmt(emp.EmployerBenefit)</td>
+                                                    <td>
+                                                        <a href="" class="btn-link"
+                                                           @onclick="() => ToggleEmployeeLineDetailAsync(emp.EmployeePayrollResultId)"
+                                                           @onclick:preventDefault>
+                                                            @(expEmp ? "Close" : "View")
+                                                        </a>
+                                                    </td>
+                                                </tr>
+                                                @if (expEmp && _lineDetailCache.TryGetValue(emp.EmployeePayrollResultId, out var lines))
+                                                {
+                                                    <tr class="expansion-row">
+                                                        <td colspan="@EmpDetailColCount">
+                                                            <table class="line-detail-table">
+                                                                <thead>
+                                                                    <tr>
+                                                                        <th>Category</th>
+                                                                        <th>Code</th>
+                                                                        <th>Description</th>
+                                                                        <th class="num-col">Amount</th>
+                                                                    </tr>
+                                                                </thead>
+                                                                <tbody>
+                                                                    @foreach (var line in lines)
+                                                                    {
+                                                                        <tr class="@(line.Amount < 0 ? "line-negative" : "")">
+                                                                            <td style="color:#6b7280;font-size:.8rem;">@line.Category</td>
+                                                                            <td>@line.Code</td>
+                                                                            <td style="color:#6b7280;font-size:.8rem;">@line.Description</td>
+                                                                            <td class="num-col @(line.Amount < 0 ? "amount-negative" : "")">@Fmt(line.Amount)</td>
+                                                                        </tr>
+                                                                    }
+                                                                </tbody>
+                                                            </table>
+                                                        </td>
+                                                    </tr>
+                                                }
+                                            }
+                                        </tbody>
+                                        <tfoot>
+                                            <tr class="totals-row">
+                                                <td colspan="3"><strong>Total (@FilteredCount)</strong></td>
+                                                <td class="num-col"><strong>@Fmt(FilteredEmployeeRows.Sum(r => r.Gross))</strong></td>
+                                                <td class="num-col"><strong>@Fmt(FilteredEmployeeRows.Sum(r => r.FederalTax))</strong></td>
+                                                <td class="num-col"><strong>@Fmt(FilteredEmployeeRows.Sum(r => r.SsEe))</strong></td>
+                                                <td class="num-col"><strong>@Fmt(FilteredEmployeeRows.Sum(r => r.MedicareEe))</strong></td>
+                                                <td class="num-col"><strong>@Fmt(FilteredEmployeeRows.Sum(r => r.StateTax))</strong></td>
+                                                @if (_columnLabels.LabelLocalTax is not null)
+                                                {
+                                                    <td class="num-col"><strong>@Fmt(FilteredEmployeeRows.Sum(r => r.LocalTax))</strong></td>
+                                                }
+                                                <td class="num-col"><strong>@Fmt(FilteredEmployeeRows.Sum(r => r.BenefitDeductions))</strong></td>
+                                                <td class="num-col"><strong>@Fmt(FilteredEmployeeRows.Sum(r => r.RetirementDeductions))</strong></td>
+                                                <td class="num-col"><strong>@Fmt(FilteredEmployeeRows.Sum(r => r.Garnishments))</strong></td>
+                                                <td class="num-col"><strong>@Fmt(FilteredEmployeeRows.Sum(r => r.NetPay))</strong></td>
+                                                <td class="num-col"><strong>@Fmt(FilteredEmployeeRows.Sum(r => r.EmployerSs))</strong></td>
+                                                <td class="num-col"><strong>@Fmt(FilteredEmployeeRows.Sum(r => r.EmployerMedicare))</strong></td>
+                                                <td class="num-col"><strong>@Fmt(FilteredEmployeeRows.Sum(r => r.EmployerBenefit))</strong></td>
+                                                <td></td>
+                                            </tr>
+                                        </tfoot>
+                                    </table>
+                                </div>
+
+                                @* Pagination *@
+                                @if (TotalEmpPages > 1)
+                                {
+                                    <div class="pagination">
+                                        <button class="btn-link" disabled="@(_empPage <= 1)"
+                                                @onclick="() => _empPage--">‹ Prev</button>
+                                        <span>Page @_empPage of @TotalEmpPages</span>
+                                        <button class="btn-link" disabled="@(_empPage >= TotalEmpPages)"
+                                                @onclick="() => _empPage++">Next ›</button>
+                                    </div>
+                                }
+
+                                <div class="export-row">
+                                    <button class="btn-link" @onclick="ExportEmployeeCsvAsync">Download CSV</button>
+                                    <button class="btn-link" @onclick="ExportLineDetailCsvAsync">Export with Line Detail</button>
+                                </div>
+                            }
+                        </div>
+                    }
+                </Authorized>
+            </AuthorizeView>
+        }
     </div>
 </div>
+
+@code {
+    private IReadOnlyList<PayRegisterRunOption> _runs        = [];
+    private bool                                _loading     = true;
+    private bool                                _isBenefitsAdmin;
+
+    // Navigator
+    private readonly HashSet<int> _expandedYears = [];
+
+    // Selected run
+    private Guid?                  _selectedRunId;
+    private PayRegisterRunHeader?  _runHeader;
+
+    // Tab state
+    private string _activeTab = "summary";
+
+    // Company Summary
+    private PayRegisterCompanySummary? _summary;
+    private bool                       _summaryLoading;
+
+    // Org Rollup
+    private IReadOnlyList<OrgDimension>                         _availableDimensions = [];
+    private string                                              _orgDimension = "DEPARTMENT";
+    private IReadOnlyList<PayRegisterOrgRow>                    _orgRows      = [];
+    private bool                                                _orgLoading;
+    private readonly HashSet<Guid>                              _expandedOrgGroups    = [];
+    private readonly Dictionary<Guid, IReadOnlyList<PayRegisterEmployeeRow>> _orgGroupEmployees = new();
+
+    // Column labels (country-driven)
+    private PayRegisterColumnLabels _columnLabels = PayRegisterColumnLabels.Default;
+
+    // Employee Detail
+    private IReadOnlyList<PayRegisterEmployeeRow> _allEmployeeRows = [];
+    private bool                                  _empLoading;
+    private string                                _empFilter  = "";
+    private string                                _empSortCol = "number";
+    private bool                                  _empSortAsc = true;
+    private int                                   _empPage    = 1;
+    private const int                             EmpPageSize = 20;
+    private readonly HashSet<Guid>                _expandedEmployees = [];
+    private readonly Dictionary<Guid, IReadOnlyList<PayRegisterLineItem>> _lineDetailCache = new();
+
+    // ── Computed ──────────────────────────────────────────────────────────────
+
+    private IEnumerable<PayRegisterEmployeeRow> FilteredEmployeeRows =>
+        string.IsNullOrWhiteSpace(_empFilter)
+            ? _allEmployeeRows
+            : _allEmployeeRows.Where(r =>
+                r.EmployeeNumber.Contains(_empFilter, StringComparison.OrdinalIgnoreCase) ||
+                r.EmployeeName.Contains(_empFilter, StringComparison.OrdinalIgnoreCase));
+
+    private int FilteredCount => FilteredEmployeeRows.Count();
+
+    private IEnumerable<PayRegisterEmployeeRow> SortedEmployeeRows => _empSortCol switch
+    {
+        "name"  => _empSortAsc ? FilteredEmployeeRows.OrderBy(r => r.EmployeeName)  : FilteredEmployeeRows.OrderByDescending(r => r.EmployeeName),
+        "gross" => _empSortAsc ? FilteredEmployeeRows.OrderBy(r => r.Gross)          : FilteredEmployeeRows.OrderByDescending(r => r.Gross),
+        "net"   => _empSortAsc ? FilteredEmployeeRows.OrderBy(r => r.NetPay)         : FilteredEmployeeRows.OrderByDescending(r => r.NetPay),
+        _       => _empSortAsc ? FilteredEmployeeRows.OrderBy(r => r.EmployeeNumber) : FilteredEmployeeRows.OrderByDescending(r => r.EmployeeNumber),
+    };
+
+    private IEnumerable<PayRegisterEmployeeRow> PagedEmployeeRows =>
+        SortedEmployeeRows.Skip((_empPage - 1) * EmpPageSize).Take(EmpPageSize);
+
+    private int  TotalEmpPages    => (int)Math.Ceiling(FilteredCount / (double)EmpPageSize);
+    private int  EmpDetailColCount => _columnLabels.LabelLocalTax is null ? 16 : 17;
+    private string OrgGroupLabel =>
+        _orgDimension switch
+        {
+            "LOCATION" => "Location",
+            "JOB"      => "Job",
+            _ => _availableDimensions.FirstOrDefault(d => d.Code == _orgDimension)?.Label ?? _orgDimension
+        };
+
+    // ── Lifecycle ─────────────────────────────────────────────────────────────
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth  = await AuthStateProvider.GetAuthenticationStateAsync();
+        _isBenefitsAdmin = auth.User.IsInRole("BenefitsAdmin") &&
+                           !auth.User.IsInRole("PayrollOperator") &&
+                           !auth.User.IsInRole("PayrollAdmin") &&
+                           !auth.User.IsInRole("HrisAdmin");
+
+        var entityId = SessionState.SelectedLegalEntityId;
+        if (entityId.HasValue)
+        {
+            _runs = await QueryService.GetRunNavigatorAsync(entityId.Value);
+            if (_runs.Any())
+            {
+                var current = _runs[0];
+                _expandedYears.Add(current.Year);
+                await SelectRunAsync(current.RunId);
+            }
+        }
+        _loading = false;
+    }
+
+    // ── Navigator ─────────────────────────────────────────────────────────────
+
+    private void ToggleYear(int year)
+    {
+        if (!_expandedYears.Remove(year))
+            _expandedYears.Add(year);
+    }
+
+    private async Task SelectRunAsync(Guid runId)
+    {
+        _selectedRunId = runId;
+        _runHeader     = null;
+        _summary       = null;
+        _allEmployeeRows = [];
+        _orgRows         = [];
+        _expandedOrgGroups.Clear();
+        _orgGroupEmployees.Clear();
+        _expandedEmployees.Clear();
+        _lineDetailCache.Clear();
+        _empFilter  = "";
+        _empPage    = 1;
+
+        var dimensionsTask   = QueryService.GetAvailableOrgDimensionsAsync(runId);
+        var columnLabelsTask = QueryService.GetColumnLabelsAsync(runId);
+        var runHeaderTask    = QueryService.GetRunHeaderAsync(runId);
+        await Task.WhenAll(dimensionsTask, columnLabelsTask, runHeaderTask);
+
+        _availableDimensions = dimensionsTask.Result;
+        _columnLabels        = columnLabelsTask.Result;
+        _runHeader           = runHeaderTask.Result;
+
+        // Reset dimension if it's no longer present in this run (org hierarchy dimensions only)
+        if (_orgDimension != "LOCATION" && _orgDimension != "JOB" &&
+            !_availableDimensions.Any(d => d.Code == _orgDimension))
+        {
+            _orgDimension = _availableDimensions.FirstOrDefault()?.Code ?? "DEPARTMENT";
+        }
+
+        // Re-load whichever tab the user is currently viewing
+        if (_activeTab == "org")          await LoadOrgAsync();
+        else if (_activeTab == "detail")  await LoadEmployeeDetailAsync();
+        else                              await LoadSummaryAsync();
+    }
+
+    // ── Tab switching ─────────────────────────────────────────────────────────
+
+    private async Task SwitchTab(string tab)
+    {
+        _activeTab = tab;
+        if (tab == "summary" && _summary is null)       await LoadSummaryAsync();
+        if (tab == "org"     && !_orgRows.Any())        await LoadOrgAsync();
+        if (tab == "detail"  && !_allEmployeeRows.Any()) await LoadEmployeeDetailAsync();
+    }
+
+    private async Task SwitchOrgDimensionAsync(string dimension)
+    {
+        _orgDimension = dimension;
+        _expandedOrgGroups.Clear();
+        _orgGroupEmployees.Clear();
+        await LoadOrgAsync();
+    }
+
+    // ── Data loaders ─────────────────────────────────────────────────────────
+
+    private async Task LoadSummaryAsync()
+    {
+        if (_selectedRunId is null) return;
+        _summaryLoading = true;
+        StateHasChanged();
+        _summary = await QueryService.GetCompanySummaryAsync(_selectedRunId.Value);
+        _summaryLoading = false;
+    }
+
+    private async Task LoadOrgAsync()
+    {
+        if (_selectedRunId is null) return;
+        _orgLoading = true;
+        StateHasChanged();
+        _orgRows = await QueryService.GetOrgRollupAsync(_selectedRunId.Value, _orgDimension);
+        _orgLoading = false;
+    }
+
+    private async Task LoadEmployeeDetailAsync()
+    {
+        if (_selectedRunId is null) return;
+        _empLoading = true;
+        StateHasChanged();
+        _allEmployeeRows = await QueryService.GetEmployeeDetailAsync(_selectedRunId.Value);
+        _empLoading = false;
+    }
+
+    // ── Expansion ─────────────────────────────────────────────────────────────
+
+    private async Task ToggleOrgGroupAsync(Guid groupId)
+    {
+        if (!_expandedOrgGroups.Remove(groupId))
+        {
+            _expandedOrgGroups.Add(groupId);
+            if (!_orgGroupEmployees.ContainsKey(groupId) && _selectedRunId.HasValue)
+            {
+                if (!_allEmployeeRows.Any())
+                    _allEmployeeRows = await QueryService.GetEmployeeDetailAsync(_selectedRunId.Value);
+
+                IReadOnlyList<Guid> ids = _orgDimension switch
+                {
+                    "JOB"      => await QueryService.GetEmploymentIdsForJobAsync(_selectedRunId.Value, groupId),
+                    "LOCATION" => await QueryService.GetEmploymentIdsForLocationAsync(_selectedRunId.Value, groupId),
+                    _          => await QueryService.GetEmploymentIdsForOrgUnitAsync(_selectedRunId.Value, groupId)
+                };
+
+                var idSet = ids.ToHashSet();
+                _orgGroupEmployees[groupId] = _allEmployeeRows.Where(e => idSet.Contains(e.EmploymentId)).ToList();
+            }
+        }
+    }
+
+    private async Task ToggleEmployeeLineDetailAsync(Guid resultId)
+    {
+        if (!_expandedEmployees.Remove(resultId))
+        {
+            _expandedEmployees.Add(resultId);
+            if (!_lineDetailCache.ContainsKey(resultId))
+                _lineDetailCache[resultId] = await QueryService.GetLineDetailAsync(resultId);
+        }
+    }
+
+    // ── Sorting ───────────────────────────────────────────────────────────────
+
+    private void ResetEmpPage() => _empPage = 1;
+
+    private void SortBy(string col)
+    {
+        if (_empSortCol == col) _empSortAsc = !_empSortAsc;
+        else { _empSortCol = col; _empSortAsc = true; }
+        _empPage = 1;
+    }
+
+    private string SortIcon(string col) =>
+        _empSortCol != col ? "" : _empSortAsc ? "▲" : "▼";
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private static string Fmt(decimal v) =>
+        v < 0 ? $"({-v:N2})" : v.ToString("N2");
+
+    // ── CSV export ────────────────────────────────────────────────────────────
+
+    private async Task ExportSummaryCsvAsync()
+    {
+        if (_summary is null || _runHeader is null) return;
+        var sb = new StringBuilder();
+        sb.AppendLine("Line,Amount");
+        sb.AppendLine($"Total Gross Payroll,{_summary.TotalGrossPayroll:F2}");
+        sb.AppendLine($"Total Employer Taxes,{_summary.TotalEmployerTaxes:F2}");
+        sb.AppendLine($"Total Employer Benefit Contributions,{_summary.TotalEmployerBenefitContrib:F2}");
+        sb.AppendLine($"Total Employer Cost,{_summary.TotalEmployerCost:F2}");
+        sb.AppendLine($"Total Employee Tax Withholdings,{_summary.TotalEmployeeTaxWithholdings:F2}");
+        sb.AppendLine($"Total Employee Benefit Deductions,{_summary.TotalEmployeeBenefitDeducts:F2}");
+        sb.AppendLine($"Total Net Pay,{_summary.TotalNetPay:F2}");
+        sb.AppendLine($"Total Cash Required,{_summary.TotalCashRequired:F2}");
+        await DownloadCsvAsync($"pay-register-summary-{_runHeader.PayDate:yyyy-MM-dd}.csv", sb.ToString());
+    }
+
+    private async Task ExportOrgCsvAsync()
+    {
+        if (_runHeader is null) return;
+        var sb = new StringBuilder();
+        sb.AppendLine($"{OrgGroupLabel},Headcount,Gross Wages,EE Tax Withheld,ER Tax Cost,ER Benefit Cost,Net Pay,Total ER Cost");
+        foreach (var r in _orgRows)
+            sb.AppendLine($"\"{r.GroupName}\",{r.Headcount},{r.GrossWages:F2},{r.EmployeeTaxWithheld:F2},{r.EmployerTaxCost:F2},{r.EmployerBenefitCost:F2},{r.NetPay:F2},{r.TotalEmployerCost:F2}");
+        await DownloadCsvAsync($"pay-register-org-{_orgDimension}-{_runHeader.PayDate:yyyy-MM-dd}.csv", sb.ToString());
+    }
+
+    private async Task ExportEmployeeCsvAsync()
+    {
+        if (_runHeader is null) return;
+        var sb = new StringBuilder();
+        sb.AppendLine("Employee #,Name,Department,Gross,Fed Tax,SS (EE),Medicare (EE),State Tax,Local Tax,Benefits,Retire (EE),Garnish,Net Pay,ER SS,ER Medicare,ER Benefit");
+        foreach (var r in SortedEmployeeRows)
+            sb.AppendLine($"{r.EmployeeNumber},\"{r.EmployeeName}\",\"{r.DepartmentName}\",{r.Gross:F2},{r.FederalTax:F2},{r.SsEe:F2},{r.MedicareEe:F2},{r.StateTax:F2},{r.LocalTax:F2},{r.BenefitDeductions:F2},{r.RetirementDeductions:F2},{r.Garnishments:F2},{r.NetPay:F2},{r.EmployerSs:F2},{r.EmployerMedicare:F2},{r.EmployerBenefit:F2}");
+        await DownloadCsvAsync($"pay-register-employees-{_runHeader.PayDate:yyyy-MM-dd}.csv", sb.ToString());
+    }
+
+    private async Task ExportLineDetailCsvAsync()
+    {
+        if (_selectedRunId is null || _runHeader is null) return;
+        if (!_allEmployeeRows.Any())
+            _allEmployeeRows = await QueryService.GetEmployeeDetailAsync(_selectedRunId.Value);
+
+        var sb = new StringBuilder();
+        sb.AppendLine("Employee #,Name,Category,Code,Description,Amount");
+        foreach (var emp in _allEmployeeRows.OrderBy(r => r.EmployeeNumber))
+        {
+            if (!_lineDetailCache.TryGetValue(emp.EmployeePayrollResultId, out var lines))
+                lines = await QueryService.GetLineDetailAsync(emp.EmployeePayrollResultId);
+            foreach (var line in lines)
+                sb.AppendLine($"{emp.EmployeeNumber},\"{emp.EmployeeName}\",\"{line.Category}\",{line.Code},\"{line.Description}\",{line.Amount:F2}");
+        }
+        await DownloadCsvAsync($"pay-register-line-detail-{_runHeader.PayDate:yyyy-MM-dd}.csv", sb.ToString());
+    }
+
+    private async Task DownloadCsvAsync(string filename, string content)
+    {
+        var base64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(content));
+        await JS.InvokeVoidAsync("allworkFiles.downloadBase64", filename, "text/csv", base64);
+    }
+}
+
+<style>
+    .register-layout {
+        display: flex;
+        height: calc(100vh - 60px);
+        overflow: hidden;
+    }
+
+    .register-nav {
+        width: 220px;
+        flex-shrink: 0;
+        background: #f9fafb;
+        border-right: 1px solid #e5e7eb;
+        overflow-y: auto;
+        padding: var(--space-5) 0 var(--space-3);
+    }
+
+    .register-nav__header {
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-semibold);
+        color: #6b7280;
+        text-transform: uppercase;
+        letter-spacing: .05em;
+        padding: 0 var(--space-4) var(--space-2);
+    }
+
+    .nav-hint { font-size: var(--font-size-sm); color: #9ca3af; padding: var(--space-2) var(--space-4); }
+
+    .nav-year__btn {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        width: 100%;
+        background: none;
+        border: none;
+        padding: var(--space-1) var(--space-4);
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-semibold);
+        color: var(--aw-navy);
+        cursor: pointer;
+        text-align: left;
+    }
+    .nav-year__btn:hover { background: #f3f4f6; }
+    .nav-year__arrow { font-size: .65rem; }
+
+    .nav-month { padding-left: var(--space-4); margin-bottom: var(--space-1); }
+    .nav-month__label {
+        display: block;
+        font-size: .7rem;
+        font-weight: var(--font-weight-semibold);
+        color: #9ca3af;
+        text-transform: uppercase;
+        letter-spacing: .04em;
+        padding: var(--space-1) var(--space-2);
+    }
+
+    .nav-run {
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+        background: none;
+        border: none;
+        padding: var(--space-1) var(--space-2);
+        font-size: var(--font-size-sm);
+        color: var(--aw-navy);
+        cursor: pointer;
+        text-align: left;
+        border-radius: var(--radius-sm);
+        line-height: 1.3;
+    }
+    .nav-run:hover { background: #ede9fe; }
+    .nav-run--active { background: #ede9fe; color: #5b21b6; font-weight: var(--font-weight-semibold); }
+    .nav-run__status { font-size: .7rem; color: #9ca3af; }
+
+    .register-content {
+        flex: 1;
+        overflow-y: auto;
+        padding: var(--space-5);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-4);
+    }
+
+    .empty-state { text-align: center; color: #9ca3af; padding: var(--space-10); }
+
+    .run-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-end;
+        padding-bottom: var(--space-3);
+        border-bottom: 2px solid var(--module-payroll, #0f766e);
+    }
+    .run-header__title  { font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); color: var(--aw-navy); }
+    .run-header__period { font-size: var(--font-size-sm); color: #6b7280; margin-left: var(--space-3); }
+    .run-header__meta   { font-size: var(--font-size-sm); color: #6b7280; }
+
+    .tab-bar { display: flex; gap: 0; border-bottom: 1px solid #e5e7eb; }
+    .tab {
+        background: none;
+        border: none;
+        border-bottom: 2px solid transparent;
+        padding: var(--space-2) var(--space-5);
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-medium);
+        color: #6b7280;
+        cursor: pointer;
+        margin-bottom: -1px;
+    }
+    .tab:hover { color: var(--aw-navy); }
+    .tab--active { color: var(--module-payroll, #0f766e); border-bottom-color: var(--module-payroll, #0f766e); }
+
+    .sub-tab-bar { display: flex; gap: var(--space-2); margin-bottom: var(--space-4); }
+    .sub-tab {
+        background: #f3f4f6;
+        border: 1px solid #e5e7eb;
+        border-radius: var(--radius-sm);
+        padding: var(--space-1) var(--space-3);
+        font-size: var(--font-size-sm);
+        cursor: pointer;
+        color: #374151;
+    }
+    .sub-tab:hover { background: #e5e7eb; }
+    .sub-tab--active { background: #d1fae5; border-color: #6ee7b7; color: #065f46; font-weight: var(--font-weight-medium); }
+
+    .tab-content  { display: flex; flex-direction: column; gap: var(--space-5); }
+    .tab-loading  { color: #9ca3af; font-size: var(--font-size-sm); padding: var(--space-6); }
+
+    .summary-section { }
+    .summary-section__title {
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-semibold);
+        color: #6b7280;
+        text-transform: uppercase;
+        letter-spacing: .05em;
+        margin-bottom: var(--space-2);
+    }
+    .summary-table {
+        width: 400px;
+        border-collapse: collapse;
+        font-size: var(--font-size-sm);
+    }
+    .summary-table td { padding: var(--space-1) var(--space-3); border-bottom: 1px solid #f3f4f6; }
+    .summary-table td:first-child { color: var(--aw-navy); }
+    .summary-table .amount { text-align: right; font-variant-numeric: tabular-nums; color: var(--aw-navy); }
+    .summary-table__subtotal td { border-top: 1px solid #e5e7eb; background: #f9fafb; }
+    .summary-table__highlight td { background: #d1fae5; color: #065f46; }
+
+    .num-col { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+    .data-table--detail { font-size: .75rem; }
+
+    .expansion-row > td {
+        padding: 0;
+        background: #fafafa;
+        border-left: 3px solid var(--module-payroll, #0f766e);
+    }
+
+    .emp-sub-table, .line-detail-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: .75rem;
+        margin: 0;
+    }
+    .emp-sub-table th, .line-detail-table th {
+        background: #f3f4f6;
+        padding: .25rem .6rem;
+        text-align: left;
+        color: #6b7280;
+        font-weight: 600;
+    }
+    .emp-sub-table td, .line-detail-table td { padding: .25rem .6rem; border-bottom: 1px solid #f3f4f6; }
+
+    .line-negative td { color: #dc2626; }
+    .amount-negative   { color: #dc2626; }
+
+    .totals-row td { background: #f9fafb; border-top: 2px solid #e5e7eb; padding: var(--space-2) var(--space-3); }
+
+    .detail-toolbar {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        margin-bottom: var(--space-3);
+    }
+    .search-input {
+        border: 1px solid #d1d5db;
+        border-radius: var(--radius-sm);
+        padding: var(--space-1) var(--space-3);
+        font-size: var(--font-size-sm);
+        width: 240px;
+    }
+    .detail-count { font-size: var(--font-size-sm); color: #6b7280; }
+
+    .sort-link { color: var(--aw-navy); text-decoration: none; white-space: nowrap; }
+    .sort-link:hover { text-decoration: underline; }
+
+    .table-scroll { overflow-x: auto; }
+
+    .pagination {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        font-size: var(--font-size-sm);
+        color: #6b7280;
+        margin-top: var(--space-2);
+    }
+    .pagination button:disabled { opacity: .4; cursor: default; }
+
+    .export-row {
+        display: flex;
+        gap: var(--space-4);
+        font-size: var(--font-size-sm);
+        margin-top: var(--space-2);
+    }
+</style>

@@ -1,5 +1,6 @@
 using Dapper;
 using AllWorkHRIS.Core.Data;
+using AllWorkHRIS.Host.Hris.Commands;
 using AllWorkHRIS.Host.Hris.Domain;
 using AllWorkHRIS.Host.Hris.Queries;
 using System.Data;
@@ -106,15 +107,22 @@ public sealed class PersonRepository : IPersonRepository
     {
         const string sql = """
             UPDATE person SET
-                preferred_name        = @PreferredName,
-                gender                = @Gender,
-                pronouns              = @Pronouns,
-                marital_status        = @MaritalStatus,
-                language_preference   = @LanguagePreference,
-                veteran_status        = @VeteranStatus,
-                disability_status     = @DisabilityStatus,
-                last_update_timestamp = @LastUpdateTimestamp,
-                last_updated_by       = @LastUpdatedBy
+                legal_first_name         = @LegalFirstName,
+                legal_middle_name        = @LegalMiddleName,
+                legal_last_name          = @LegalLastName,
+                name_suffix              = @NameSuffix,
+                date_of_birth            = @DateOfBirth,
+                national_identifier      = @NationalIdentifier,
+                national_identifier_type = @NationalIdentifierType,
+                preferred_name           = @PreferredName,
+                gender                   = @Gender,
+                pronouns                 = @Pronouns,
+                marital_status           = @MaritalStatus,
+                language_preference      = @LanguagePreference,
+                veteran_status           = @VeteranStatus,
+                disability_status        = @DisabilityStatus,
+                last_update_timestamp    = @LastUpdateTimestamp,
+                last_updated_by          = @LastUpdatedBy
             WHERE person_id = @PersonId
             """;
         await uow.Connection.ExecuteAsync(sql, person, uow.Transaction);
@@ -146,6 +154,7 @@ public interface IPersonAddressRepository
 {
     Task<PersonAddress?> GetPrimaryAsync(Guid personId, DateOnly asOf);
     Task<Guid>           InsertAsync(PersonAddress address, IUnitOfWork uow);
+    Task                 UpdateAsync(UpdatePersonAddressCommand command, IUnitOfWork uow);
 }
 
 public sealed class PersonAddressRepository : IPersonAddressRepository
@@ -188,6 +197,110 @@ public sealed class PersonAddressRepository : IPersonAddressRepository
         await uow.Connection.ExecuteAsync(sql, address, uow.Transaction);
         return address.PersonAddressId;
     }
+
+    public async Task UpdateAsync(UpdatePersonAddressCommand command, IUnitOfWork uow)
+    {
+        const string sql = """
+            UPDATE person_address
+               SET address_line_1  = @AddressLine1,
+                   address_line_2  = @AddressLine2,
+                   city            = @City,
+                   state_code      = @StateCode,
+                   postal_code     = @PostalCode,
+                   country_code    = @CountryCode,
+                   phone_primary   = @PhonePrimary,
+                   phone_secondary = @PhoneSecondary,
+                   email_personal  = @EmailPersonal
+             WHERE person_address_id = @PersonAddressId
+            """;
+        await uow.Connection.ExecuteAsync(sql, command, uow.Transaction);
+    }
+}
+
+// ============================================================
+// PERSON CHANGE REQUEST
+// ============================================================
+
+public interface IPersonChangeRequestRepository
+{
+    Task<Guid>                          InsertAsync(PersonChangeRequest request, IUnitOfWork uow);
+    Task<IReadOnlyList<PersonChangeRequest>> GetPendingByPersonIdAsync(Guid personId);
+    Task<PersonChangeRequest?>          GetByIdAsync(Guid id);
+    Task                                ApproveAsync(Guid id, Guid reviewedBy, IUnitOfWork uow);
+    Task                                RejectAsync(Guid id, Guid reviewedBy, string? notes, IUnitOfWork uow);
+}
+
+public sealed class PersonChangeRequestRepository : IPersonChangeRequestRepository
+{
+    private readonly IConnectionFactory _connectionFactory;
+
+    public PersonChangeRequestRepository(IConnectionFactory connectionFactory)
+        => _connectionFactory = connectionFactory;
+
+    public async Task<Guid> InsertAsync(PersonChangeRequest request, IUnitOfWork uow)
+    {
+        const string sql = """
+            INSERT INTO person_change_request (
+                person_change_request_id, person_id, change_type,
+                current_value_json, requested_value_json,
+                requested_by, requested_at, status
+            ) VALUES (
+                @PersonChangeRequestId, @PersonId, @ChangeType,
+                @CurrentValueJson, @RequestedValueJson,
+                @RequestedBy, @RequestedAt, @Status
+            )
+            """;
+        await uow.Connection.ExecuteAsync(sql, request, uow.Transaction);
+        return request.PersonChangeRequestId;
+    }
+
+    public async Task<IReadOnlyList<PersonChangeRequest>> GetPendingByPersonIdAsync(Guid personId)
+    {
+        const string sql = """
+            SELECT * FROM person_change_request
+            WHERE person_id = @PersonId
+              AND status    = 'PENDING'
+            ORDER BY requested_at ASC
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        return (await conn.QueryAsync<PersonChangeRequest>(sql, new { PersonId = personId })).ToList();
+    }
+
+    public async Task<PersonChangeRequest?> GetByIdAsync(Guid id)
+    {
+        const string sql = "SELECT * FROM person_change_request WHERE person_change_request_id = @Id";
+        using var conn = _connectionFactory.CreateConnection();
+        return await conn.QueryFirstOrDefaultAsync<PersonChangeRequest>(sql, new { Id = id });
+    }
+
+    public async Task ApproveAsync(Guid id, Guid reviewedBy, IUnitOfWork uow)
+    {
+        const string sql = """
+            UPDATE person_change_request
+               SET status      = 'APPROVED',
+                   reviewed_by = @ReviewedBy,
+                   reviewed_at = @ReviewedAt
+             WHERE person_change_request_id = @Id
+            """;
+        await uow.Connection.ExecuteAsync(sql,
+            new { Id = id, ReviewedBy = reviewedBy, ReviewedAt = DateTimeOffset.UtcNow },
+            uow.Transaction);
+    }
+
+    public async Task RejectAsync(Guid id, Guid reviewedBy, string? notes, IUnitOfWork uow)
+    {
+        const string sql = """
+            UPDATE person_change_request
+               SET status          = 'REJECTED',
+                   reviewed_by     = @ReviewedBy,
+                   reviewed_at     = @ReviewedAt,
+                   rejection_notes = @Notes
+             WHERE person_change_request_id = @Id
+            """;
+        await uow.Connection.ExecuteAsync(sql,
+            new { Id = id, ReviewedBy = reviewedBy, ReviewedAt = DateTimeOffset.UtcNow, Notes = notes },
+            uow.Transaction);
+    }
 }
 
 // ============================================================
@@ -203,6 +316,10 @@ public interface IEmploymentRepository
     Task<Guid>                                InsertAsync(Employment employment, IUnitOfWork uow);
     Task                                      UpdateStatusAsync(Guid employmentId, int statusId,
                                                   DateOnly effectiveDate, IUnitOfWork uow);
+    Task                                      UpdateManagerAsync(Guid employmentId, Guid? newManagerEmploymentId,
+                                                  Guid updatedBy, IUnitOfWork uow);
+    Task                                      UpdateDepartmentAndLocationAsync(Guid employmentId, Guid departmentId,
+                                                  Guid locationId, Guid updatedBy, IUnitOfWork uow);
     Task<PagedResult<EmploymentListItem>>     GetPagedListAsync(EmployeeListQuery query);
     Task<IReadOnlyList<EmploymentListItem>>   GetAllActiveListAsync(Guid? legalEntityId = null);
     Task<EmployeeStatCards>                   GetStatCardsAsync(DateOnly asOf, Guid? legalEntityId = null);
@@ -301,6 +418,46 @@ public sealed class EmploymentRepository : IEmploymentRepository
         }, uow.Transaction);
     }
 
+    public async Task UpdateManagerAsync(Guid employmentId, Guid? newManagerEmploymentId,
+        Guid updatedBy, IUnitOfWork uow)
+    {
+        const string sql = """
+            UPDATE employment SET
+                manager_employment_id = @ManagerEmploymentId,
+                last_update_timestamp = @Now,
+                last_updated_by       = @UpdatedBy
+            WHERE employment_id = @EmploymentId
+            """;
+        await uow.Connection.ExecuteAsync(sql, new
+        {
+            EmploymentId        = employmentId,
+            ManagerEmploymentId = newManagerEmploymentId,
+            UpdatedBy           = updatedBy.ToString(),
+            Now                 = DateTimeOffset.UtcNow
+        }, uow.Transaction);
+    }
+
+    public async Task UpdateDepartmentAndLocationAsync(Guid employmentId, Guid departmentId,
+        Guid locationId, Guid updatedBy, IUnitOfWork uow)
+    {
+        const string sql = """
+            UPDATE employment SET
+                primary_department_id    = @DepartmentId,
+                primary_work_location_id = @LocationId,
+                last_update_timestamp    = @Now,
+                last_updated_by          = @UpdatedBy
+            WHERE employment_id = @EmploymentId
+            """;
+        await uow.Connection.ExecuteAsync(sql, new
+        {
+            EmploymentId  = employmentId,
+            DepartmentId  = departmentId,
+            LocationId    = locationId,
+            UpdatedBy     = updatedBy.ToString(),
+            Now           = DateTimeOffset.UtcNow
+        }, uow.Transaction);
+    }
+
     public async Task<PagedResult<EmploymentListItem>> GetPagedListAsync(EmployeeListQuery query)
     {
         var where = new List<string>
@@ -325,6 +482,11 @@ public sealed class EmploymentRepository : IEmploymentRepository
             where.Add("e.employment_status_id = (SELECT id FROM lkp_employment_status WHERE code = @Status)");
             p.Add("Status", query.Status);
         }
+        if (!string.IsNullOrWhiteSpace(query.EmploymentType))
+        {
+            where.Add("e.employment_type_id = (SELECT id FROM lkp_employment_type WHERE code = @EmploymentType)");
+            p.Add("EmploymentType", query.EmploymentType);
+        }
         if (query.DepartmentId.HasValue)
         {
             where.Add("a.department_id = @DepartmentId");
@@ -342,8 +504,20 @@ public sealed class EmploymentRepository : IEmploymentRepository
         }
 
         var whereClause = "WHERE " + string.Join(" AND ", where);
-        var sortColumn  = query.SortColumn ?? "p.legal_last_name";
-        var sortDir     = query.SortAscending ? "ASC" : "DESC";
+
+        // Whitelist — builds full ORDER BY expression; name sort uses last+first compound
+        var sortDir  = query.SortAscending ? "ASC" : "DESC";
+        var orderBy  = query.SortColumn switch
+        {
+            "legal_last_name"       => $"legal_last_name {sortDir}, legal_first_name {sortDir}",
+            "employee_number"       => $"employee_number {sortDir}",
+            "job_title"             => $"job_title {sortDir}",
+            "department_name"       => $"department_name {sortDir}",
+            "location_name"         => $"location_name {sortDir}",
+            "employment_status"     => $"employment_status {sortDir}",
+            "employment_start_date" => $"employment_start_date {sortDir}",
+            _                       => $"legal_last_name {sortDir}, legal_first_name {sortDir}"
+        };
 
         var countSql = $"""
             SELECT COUNT(DISTINCT e.employment_id)
@@ -356,27 +530,32 @@ public sealed class EmploymentRepository : IEmploymentRepository
             {whereClause}
             """;
 
+        // Wrap DISTINCT ON in a subquery so the outer ORDER BY sorts by column alias,
+        // not by employment_id (which DISTINCT ON requires as the primary ORDER BY key).
         var dataSql = $"""
-            SELECT DISTINCT ON (e.employment_id)
-                e.employment_id, e.person_id, p.legal_first_name, p.legal_last_name,
-                p.preferred_name, e.employee_number,
-                les.code  AS employment_status,
-                let2.code AS employment_type,
-                e.employment_start_date, j.job_title,
-                d.org_unit_name AS department_name,
-                l.org_unit_name AS location_name
-            FROM employment e
-            INNER JOIN person p ON p.person_id = e.person_id
-            LEFT JOIN lkp_employment_status les  ON les.id  = e.employment_status_id
-            LEFT JOIN lkp_employment_type   let2 ON let2.id = e.employment_type_id
-            LEFT JOIN assignment a ON a.employment_id = e.employment_id
-                AND a.assignment_type_id   = (SELECT id FROM lkp_assignment_type   WHERE code = 'PRIMARY')
-                AND a.assignment_status_id = (SELECT id FROM lkp_assignment_status  WHERE code = 'ACTIVE')
-            LEFT JOIN job j      ON j.job_id         = a.job_id
-            LEFT JOIN org_unit d ON d.org_unit_id    = a.department_id
-            LEFT JOIN org_unit l ON l.org_unit_id    = a.location_id
-            {whereClause}
-            ORDER BY e.employment_id, {sortColumn} {sortDir}
+            SELECT * FROM (
+                SELECT DISTINCT ON (e.employment_id)
+                    e.employment_id, e.person_id, p.legal_first_name, p.legal_last_name,
+                    p.preferred_name, e.employee_number,
+                    les.code  AS employment_status,
+                    let2.code AS employment_type,
+                    e.employment_start_date, j.job_title,
+                    d.org_unit_name AS department_name,
+                    l.org_unit_name AS location_name
+                FROM employment e
+                INNER JOIN person p ON p.person_id = e.person_id
+                LEFT JOIN lkp_employment_status les  ON les.id  = e.employment_status_id
+                LEFT JOIN lkp_employment_type   let2 ON let2.id = e.employment_type_id
+                LEFT JOIN assignment a ON a.employment_id = e.employment_id
+                    AND a.assignment_type_id   = (SELECT id FROM lkp_assignment_type   WHERE code = 'PRIMARY')
+                    AND a.assignment_status_id = (SELECT id FROM lkp_assignment_status  WHERE code = 'ACTIVE')
+                LEFT JOIN job j      ON j.job_id         = a.job_id
+                LEFT JOIN org_unit d ON d.org_unit_id    = a.department_id
+                LEFT JOIN org_unit l ON l.org_unit_id    = a.location_id
+                {whereClause}
+                ORDER BY e.employment_id
+            ) sub
+            ORDER BY {orderBy}
             LIMIT @PageSize OFFSET @Offset
             """;
 
@@ -455,13 +634,12 @@ public sealed class EmploymentRepository : IEmploymentRepository
                  WHERE a.assignment_status_id = (SELECT id FROM lkp_assignment_status WHERE code = 'ACTIVE')
                    {deptFilter}) AS departments
             FROM employment
-            WHERE employment_start_date <= @AsOf
-              AND employment_status_id != (SELECT id FROM lkp_employment_status WHERE code = 'CLOSED')
+            WHERE employment_status_id != (SELECT id FROM lkp_employment_status WHERE code = 'CLOSED')
               {entityFilter}
             """;
         using var conn = _connectionFactory.CreateConnection();
         return await conn.QueryFirstAsync<EmployeeStatCards>(sql,
-            new { AsOf = asOf.ToDateTime(TimeOnly.MinValue), LegalEntityId = legalEntityId });
+            new { LegalEntityId = legalEntityId });
     }
 }
 
@@ -648,6 +826,7 @@ public interface IOrgUnitRepository
     Task<IEnumerable<OrgUnit>>      GetAllActiveAsync(Guid? legalEntityId = null);
     Task<IEnumerable<OrgUnitEmployee>> GetWorkforceByOrgUnitAsync(Guid orgUnitId);
     Task<Guid>                      InsertAsync(OrgUnit orgUnit, IUnitOfWork uow);
+    Task                            UpdateAsync(UpdateOrgUnitCommand command, IUnitOfWork uow);
 }
 
 public sealed class OrgUnitRepository : IOrgUnitRepository
@@ -783,6 +962,23 @@ public sealed class OrgUnitRepository : IOrgUnitRepository
             """;
         await uow.Connection.ExecuteAsync(sql, orgUnit, uow.Transaction);
         return orgUnit.OrgUnitId;
+    }
+
+    public async Task UpdateAsync(UpdateOrgUnitCommand command, IUnitOfWork uow)
+    {
+        const string sql = """
+            UPDATE org_unit SET
+                org_unit_code           = @OrgUnitCode,
+                org_unit_name           = @OrgUnitName,
+                legal_entity_type_id    = @LegalEntityTypeId,
+                tax_registration_number = @TaxRegistrationNumber,
+                state_of_incorporation  = @StateOfIncorporation,
+                country_code            = @CountryCode,
+                last_updated_by         = @UpdatedBy,
+                last_update_timestamp   = now()
+            WHERE org_unit_id = @OrgUnitId
+            """;
+        await uow.Connection.ExecuteAsync(sql, command, uow.Transaction);
     }
 }
 

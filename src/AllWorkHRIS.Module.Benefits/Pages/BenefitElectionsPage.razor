@@ -33,28 +33,39 @@
     {
         <div class="form-panel" style="margin-bottom:1.5rem;border:2px solid #2F4350;border-radius:10px;padding:1.5rem;">
 
-            @* Step indicator *@
-            <div style="display:flex;align-items:flex-start;gap:.375rem;margin-bottom:2rem;flex-wrap:wrap;max-width:40%;">
-                @foreach (var (label, num) in StepLabels)
-                {
-                    var done    = _wizardStep > num;
-                    var current = _wizardStep == num;
-                    <div style="display:flex;flex-direction:column;align-items:center;gap:.3rem;flex-shrink:0;">
-                        <div style="width:28px;height:28px;border-radius:50%;display:flex;align-items:center;
-                                    justify-content:center;font-size:.78rem;font-weight:700;flex-shrink:0;
-                                    background:@(done ? "#16a34a" : current ? "#2563eb" : "#e5e7eb");
-                                    color:@(done || current ? "#fff" : "#9ca3af");">
-                            @(done ? "✓" : num.ToString())
-                        </div>
-                        <span style="font-size:.72rem;white-space:nowrap;text-align:center;
-                                     font-weight:@(current ? "600" : "400");
-                                     color:@(current ? "inherit" : done ? "#374151" : "#9ca3af");">@label</span>
-                    </div>
-                    @if (num < 5)
+            @* Step indicator + employee badge *@
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:2rem;gap:1rem;">
+                <div style="display:flex;align-items:flex-start;gap:.375rem;flex-wrap:wrap;max-width:60%;">
+                    @foreach (var (label, num) in StepLabels)
                     {
-                        <div style="flex:1;min-width:.75rem;height:2px;align-self:flex-start;margin-top:13px;
-                                    background:@(done ? "#16a34a" : "#e5e7eb");"></div>
+                        var done    = _wizardStep > num;
+                        var current = _wizardStep == num;
+                        <div style="display:flex;flex-direction:column;align-items:center;gap:.3rem;flex-shrink:0;">
+                            <div style="width:28px;height:28px;border-radius:50%;display:flex;align-items:center;
+                                        justify-content:center;font-size:.78rem;font-weight:700;flex-shrink:0;
+                                        background:@(done ? "#16a34a" : current ? "#2563eb" : "#e5e7eb");
+                                        color:@(done || current ? "#fff" : "#9ca3af");">
+                                @(done ? "✓" : num.ToString())
+                            </div>
+                            <span style="font-size:.72rem;white-space:nowrap;text-align:center;
+                                         font-weight:@(current ? "600" : "400");
+                                         color:@(current ? "inherit" : done ? "#374151" : "#9ca3af");">@label</span>
+                        </div>
+                        @if (num < 5)
+                        {
+                            <div style="flex:1;min-width:.75rem;height:2px;align-self:flex-start;margin-top:13px;
+                                        background:@(done ? "#16a34a" : "#e5e7eb");"></div>
+                        }
                     }
+                </div>
+                @if (_selectedEmployee is not null)
+                {
+                    <div style="text-align:right;padding:.5rem .875rem;background:#f0f9ff;
+                                border:1px solid #bae6fd;border-radius:6px;flex-shrink:0;">
+                        <div style="font-size:.72rem;color:#6b7280;margin-bottom:.15rem;">Election for</div>
+                        <div style="font-weight:600;font-size:.9rem;">@_selectedEmployee.LegalLastName, @_selectedEmployee.LegalFirstName</div>
+                        <samp style="font-size:.78rem;color:#6b7280;">@_selectedEmployee.EmployeeNumber</samp>
+                    </div>
                 }
             </div>
 
@@ -230,7 +241,9 @@
                         <div class="form-group">
                             <label class="form-label">@GetAmountLabel(mode)</label>
                             <input class="form-input" type="number" step="0.01" min="0"
-                                   @bind="_addEmployeeAmount" placeholder="0.00" />
+                                   value="@_addEmployeeAmount"
+                                   @onchange="e => _addEmployeeAmount = ParseRoundedDecimal(e.Value?.ToString())"
+                                   placeholder="0.00" />
                         </div>
                         <div class="form-group">
                             <label class="form-label">
@@ -238,7 +251,9 @@
                                 <span style="font-size:.8rem;color:#6b7280;">(optional)</span>
                             </label>
                             <input class="form-input" type="number" step="0.01" min="0"
-                                   @bind="_addEmployerAmount" placeholder="0.00" />
+                                   value="@_addEmployerAmount"
+                                   @onchange="e => _addEmployerAmount = ParseRoundedDecimal(e.Value?.ToString())"
+                                   placeholder="0.00" />
                             <small class="hint-text">
                                 A fixed employer dollar contribution each period — separate from any percentage-match rule
                                 configured on the deduction code.
@@ -396,6 +411,88 @@
     }
 
     @* ── Terminate confirmation ──────────────────────────────────── *@
+    @if (_amendTarget is not null)
+    {
+        <div class="confirm-panel" style="margin-bottom:1.5rem;border:2px solid #2563eb;border-radius:10px;padding:1.5rem;">
+            <h3 style="margin:0 0 .25rem;">Amend Election</h3>
+            <p style="color:#6b7280;font-size:.9rem;margin-bottom:1.25rem;">
+                <strong>@_amendTarget.EmployeeDisplayName</strong>
+                <samp style="font-size:.85em;margin-left:.4rem;">(@_amendTarget.EmployeeNumber)</samp>
+                — <samp>@_amendTarget.DeductionCode</samp> @_amendTarget.DeductionDescription
+            </p>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:1rem;max-width:700px;">
+                @if (_amendTarget.CalculationMode is CalculationMode.PctPreTax or CalculationMode.PctPostTax)
+                {
+                    <div class="form-group">
+                        <label class="form-label">Contribution %</label>
+                        <div style="position:relative;">
+                            <input class="form-input" type="number" step="0.001" min="0.001" max="100"
+                                   @bind="_amendContributionPct" style="padding-right:2.25rem;" />
+                            <span style="position:absolute;right:1rem;top:50%;transform:translateY(-50%);
+                                         color:#6b7280;pointer-events:none;">%</span>
+                        </div>
+                    </div>
+                }
+                else if (_amendTarget.CalculationMode == CalculationMode.CoverageBased)
+                {
+                    <div class="form-group" style="grid-column:1/-1;">
+                        <label class="form-label">Coverage Tier</label>
+                        <div style="display:flex;gap:.75rem;flex-wrap:wrap;">
+                            @foreach (var (tierCode, tierLabel) in CoverageTiers)
+                            {
+                                var sel   = _amendCoverageTier == tierCode;
+                                var entry = _amendCoverageRateEntries.FirstOrDefault(e => e.TierCode == tierCode);
+                                <div @onclick="() => _amendCoverageTier = tierCode"
+                                     style="border:2px solid @(sel ? "#2563eb" : "#e5e7eb");border-radius:8px;
+                                            padding:.75rem 1rem;cursor:pointer;min-width:140px;text-align:center;
+                                            background:@(sel ? "rgba(37,99,235,.04)" : "#fff");">
+                                    <div style="font-weight:600;margin-bottom:.3rem;">@tierLabel</div>
+                                    @if (entry is not null)
+                                    {
+                                        <div style="font-size:1.1rem;font-weight:700;color:#2563eb;">$@entry.EmployeeRate.ToString("N2")</div>
+                                        <div style="font-size:.75rem;color:#6b7280;">/ period</div>
+                                    }
+                                    else
+                                    {
+                                        <div style="font-size:.82rem;color:#9ca3af;">Rate TBD</div>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <div class="form-group">
+                        <label class="form-label">@GetAmountLabel(_amendTarget.CalculationMode)</label>
+                        <input class="form-input" type="number" step="0.01" min="0"
+                               @bind="_amendEmployeeAmount" placeholder="0.00" />
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Employer Contribution <span style="font-size:.8rem;color:#6b7280;">(optional)</span></label>
+                        <input class="form-input" type="number" step="0.01" min="0"
+                               @bind="_amendEmployerAmount" placeholder="0.00" />
+                    </div>
+                }
+                <div class="form-group">
+                    <label class="form-label">Amendment Date <span class="required">*</span></label>
+                    <input class="form-input" type="date" @bind="_amendDate" />
+                    <small class="hint-text">Prior election is end-dated to the day before this date.</small>
+                </div>
+            </div>
+            @if (_amendError is not null)
+            {
+                <p class="form-error" style="margin-top:.75rem;">@_amendError</p>
+            }
+            <div class="form-actions" style="margin-top:1rem;">
+                <button class="btn btn-primary" @onclick="ConfirmAmendAsync" disabled="@_saving">
+                    @(_saving ? "Saving…" : "Confirm Amendment")
+                </button>
+                <button class="btn btn-ghost" @onclick="() => _amendTarget = null">Cancel</button>
+            </div>
+        </div>
+    }
+
     @if (_terminateTarget is not null)
     {
         <div class="confirm-panel confirm-panel--warn" style="margin-bottom:1.5rem;border:2px solid #2F4350;border-radius:10px;padding:1.5rem;">
@@ -468,11 +565,18 @@
                         <td>
                             <AuthorizeView Roles="HrisAdmin,BenefitsAdmin">
                                 <Authorized>
-                                    @if (item.Status is "ACTIVE" or "PENDING")
-                                    {
-                                        <button class="btn btn-sm btn-ghost"
-                                                @onclick="() => StartTerminate(item)">Terminate</button>
-                                    }
+                                    <div style="display:flex;gap:.375rem;flex-wrap:wrap;">
+                                        @if (item.Status is "ACTIVE" or "PENDING")
+                                        {
+                                            <button class="btn btn-sm btn-ghost"
+                                                    @onclick="() => StartWizardForEmployee(item.EmploymentId)"
+                                                    title="Add another election for this employee">Add+</button>
+                                            <button class="btn btn-sm btn-ghost"
+                                                    @onclick="async () => await StartAmendAsync(item)">Amend</button>
+                                            <button class="btn btn-sm btn-ghost"
+                                                    @onclick="() => StartTerminate(item)">Terminate</button>
+                                        }
+                                    </div>
                                 </Authorized>
                             </AuthorizeView>
                         </td>
@@ -480,7 +584,18 @@
                 }
                 @if (_page.Items.Count == 0)
                 {
-                    <tr><td colspan="10" class="empty-state">No elections found.</td></tr>
+                    <tr>
+                        <td colspan="10" class="empty-state">
+                            @if (string.IsNullOrWhiteSpace(_filterCode) && string.IsNullOrWhiteSpace(_filterStatus))
+                            {
+                                <span>No benefit elections have been created yet. Use <strong>+ Add Election</strong> to enrol an employee.</span>
+                            }
+                            else
+                            {
+                                <span>No elections match the current filter. Clear the filter to see all elections.</span>
+                            }
+                        </td>
+                    </tr>
                 }
             </tbody>
         </table>
@@ -521,6 +636,16 @@
     // ── Terminate ────────────────────────────────────────────────────
     private ElectionListItem? _terminateTarget;
     private bool              _saving;
+
+    // ── Amend ────────────────────────────────────────────────────────
+    private ElectionListItem?        _amendTarget;
+    private DateOnly                 _amendDate;
+    private decimal?                 _amendEmployeeAmount;
+    private decimal?                 _amendEmployerAmount;
+    private decimal?                 _amendContributionPct;
+    private string                   _amendCoverageTier        = string.Empty;
+    private List<DeductionRateEntry> _amendCoverageRateEntries = [];
+    private string?                  _amendError;
 
     // ── Wizard state ─────────────────────────────────────────────────
     private int _wizardStep = 0;
@@ -580,6 +705,17 @@
         _coverageRateEntries = [];
         _addStart = DateOnly.FromDateTime(DateTime.Today);
         _addEnd   = null;
+    }
+
+    private void StartWizardForEmployee(Guid employmentId)
+    {
+        StartWizard();
+        _selectedEmployee = _allEmployees.FirstOrDefault(x => x.EmploymentId == employmentId);
+        if (_selectedEmployee is not null)
+        {
+            _empSearch  = $"{_selectedEmployee.LegalLastName}, {_selectedEmployee.LegalFirstName} ({_selectedEmployee.EmployeeNumber})";
+            _wizardStep = 2;
+        }
     }
 
     private async Task NextStep()
@@ -676,7 +812,9 @@
             ? _allEmployees
                 .Where(x => x.LegalLastName.Contains(_empSearch,  StringComparison.OrdinalIgnoreCase)
                          || x.LegalFirstName.Contains(_empSearch, StringComparison.OrdinalIgnoreCase)
-                         || x.EmployeeNumber.Contains(_empSearch, StringComparison.OrdinalIgnoreCase))
+                         || x.EmployeeNumber.Contains(_empSearch, StringComparison.OrdinalIgnoreCase)
+                         || ($"{x.LegalFirstName} {x.LegalLastName}").Contains(_empSearch, StringComparison.OrdinalIgnoreCase)
+                         || ($"{x.LegalLastName}, {x.LegalFirstName}").Contains(_empSearch, StringComparison.OrdinalIgnoreCase))
                 .Take(20).ToList()
             : [];
     }
@@ -755,6 +893,77 @@
     private async Task PrevPage() { _query = _query with { Page = _query.Page - 1 }; await LoadPageAsync(); }
     private async Task NextPage() { _query = _query with { Page = _query.Page + 1 }; await LoadPageAsync(); }
 
+    private async Task StartAmendAsync(ElectionListItem item)
+    {
+        _terminateTarget       = null;
+        _amendTarget           = item;
+        _amendDate             = DateOnly.FromDateTime(DateTime.Today);
+        _amendEmployeeAmount   = item.EmployeeAmount > 0 ? item.EmployeeAmount : null;
+        _amendEmployerAmount   = item.EmployerContributionAmount;
+        _amendContributionPct  = item.ContributionPct.HasValue ? Math.Round(item.ContributionPct.Value * 100m, 3) : null;
+        _amendCoverageTier     = item.CoverageTier ?? string.Empty;
+        _amendError            = null;
+        _amendCoverageRateEntries = [];
+
+        if (item.CalculationMode == CalculationMode.CoverageBased)
+        {
+            var deduction = _activeCodes.FirstOrDefault(d => d.Code == item.DeductionCode);
+            if (deduction is not null)
+            {
+                var table = await RateTableRepo.GetActiveByDeductionIdAsync(
+                    deduction.DeductionId, DateOnly.FromDateTime(DateTime.Today));
+                _amendCoverageRateEntries = table is not null
+                    ? (await RateTableRepo.GetEntriesAsync(table.RateTableId)).ToList()
+                    : [];
+            }
+        }
+    }
+
+    private async Task ConfirmAmendAsync()
+    {
+        if (_amendTarget is null) return;
+        _amendError = null;
+
+        var mode = _amendTarget.CalculationMode;
+        if (mode is CalculationMode.PctPreTax or CalculationMode.PctPostTax)
+        {
+            if (_amendContributionPct is null or <= 0 or > 100)
+            { _amendError = "Contribution % must be between 0 and 100."; return; }
+        }
+        else if (mode == CalculationMode.CoverageBased)
+        {
+            if (string.IsNullOrEmpty(_amendCoverageTier))
+            { _amendError = "Please select a coverage tier."; return; }
+        }
+
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        Guid.TryParse(auth.User.FindFirstValue(ClaimTypes.NameIdentifier), out var amendedBy);
+
+        decimal? contributionPct = mode is CalculationMode.PctPreTax or CalculationMode.PctPostTax
+            ? Math.Round(_amendContributionPct!.Value / 100m, 6) : null;
+
+        _saving = true;
+        try
+        {
+            await ElectionService.AmendElectionAsync(new AmendElectionCommand
+            {
+                ElectionId                 = _amendTarget.ElectionId,
+                AmendmentDate              = _amendDate,
+                EmployeeAmount             = mode is CalculationMode.PctPreTax or CalculationMode.PctPostTax
+                                             or CalculationMode.CoverageBased ? null : _amendEmployeeAmount,
+                EmployerContributionAmount = mode is CalculationMode.PctPreTax or CalculationMode.PctPostTax
+                                             or CalculationMode.CoverageBased ? null : _amendEmployerAmount,
+                ContributionPct            = contributionPct,
+                CoverageTier               = mode == CalculationMode.CoverageBased ? _amendCoverageTier : null,
+                AmendedBy                  = amendedBy
+            });
+            _amendTarget = null;
+            await LoadPageAsync();
+        }
+        catch (Exception ex) { _amendError = ex.Message; }
+        finally { _saving = false; }
+    }
+
     private void StartTerminate(ElectionListItem item) => _terminateTarget = item;
 
     private async Task ConfirmTerminate()
@@ -829,6 +1038,9 @@
         CalculationMode.FixedMonthly => "Monthly Amount ($)",
         _                            => "Amount per Period ($)"
     };
+
+    private static decimal? ParseRoundedDecimal(string? s) =>
+        decimal.TryParse(s, out var v) ? Math.Round(v, 2) : (decimal?)null;
 
     private static string TreatmentClass(string t) => t == "PRE_TAX" ? "badge-blue" : "badge-orange";
 

@@ -15,16 +15,9 @@
 <PageTitle>Dashboard — AllWork HRIS</PageTitle>
 
 <div class="dashboard-page">
-    @if (!string.IsNullOrWhiteSpace(_returnUrl))
-    {
-        <div class="dashboard-returnurl-notice">
-            <span>Select a client to continue to your destination.</span>
-        </div>
-    }
-
     <div class="dashboard-section-header">
         <h2 class="dashboard-section-title">Your Clients</h2>
-        <p class="dashboard-section-sub">Select a client to begin working.</p>
+        <p class="dashboard-section-sub">Select a company to focus on.</p>
     </div>
 
     @if (_loading)
@@ -139,16 +132,6 @@
     .dashboard-page {
         padding: var(--space-6) var(--space-8);
         max-width: 1200px;
-    }
-
-    .dashboard-returnurl-notice {
-        background: #fef9c3;
-        border: 1px solid #fde047;
-        border-radius: var(--radius-md);
-        padding: var(--space-3) var(--space-4);
-        margin-bottom: var(--space-5);
-        font-size: var(--font-size-sm);
-        color: #713f12;
     }
 
     .dashboard-section-header {

@@ -95,6 +95,12 @@
                             <span class="org-type-badge">@LookupLabel(LookupTables.OrgUnitType, unit.OrgUnitTypeId)</span>
                             <span class="org-node-name">@unit.OrgUnitName</span>
                             <span class="org-node-code">@unit.OrgUnitCode</span>
+                            @if (_isHrisAdmin)
+                            {
+                                <span class="org-node-actions" @onclick:stopPropagation>
+                                    <button class="btn-icon-edit" title="Edit" @onclick="() => OpenEditOrgUnitPanel(unit)">✎</button>
+                                </span>
+                            }
                         </div>
                     </div>
                 }
@@ -111,6 +117,10 @@
                         <div class="location-chip">
                             <span class="location-chip-name">@loc.OrgUnitName</span>
                             <span class="location-chip-code">@loc.OrgUnitCode</span>
+                            @if (_isHrisAdmin)
+                            {
+                                <button class="btn-icon-edit" title="Edit" @onclick="() => OpenEditOrgUnitPanel(loc)">✎</button>
+                            }
                         </div>
                     }
                 </div>
@@ -136,6 +146,7 @@
                             <th>Type</th>
                             <th>Status</th>
                             <th>Effective Start</th>
+                            @if (_isHrisAdmin) { <th></th> }
                         </tr>
                     </thead>
                     <tbody>
@@ -149,6 +160,12 @@
                                 <td><span class="org-type-badge">@LookupLabel(LookupTables.OrgUnitType, unit.OrgUnitTypeId)</span></td>
                                 <td><span class="status-badge status-@LookupCode(LookupTables.OrgStatus, unit.OrgStatusId)">@LookupLabel(LookupTables.OrgStatus, unit.OrgStatusId)</span></td>
                                 <td>@unit.EffectiveStartDate.ToString("yyyy-MM-dd")</td>
+                                @if (_isHrisAdmin)
+                                {
+                                    <td @onclick:stopPropagation style="width:40px">
+                                        <button class="btn-icon-edit" title="Edit" @onclick="() => OpenEditOrgUnitPanel(unit)">✎</button>
+                                    </td>
+                                }
                             </tr>
                         }
                     </tbody>
@@ -307,6 +324,43 @@
     </div>
 }
 
+@if (_showEditPanel && _editingUnit is not null)
+{
+    <div class="panel-overlay" @onclick="CloseEditOrgUnitPanel">
+        <div class="panel-content" @onclick:stopPropagation>
+            <h3 class="panel-title">Edit Org Unit</h3>
+
+            <div class="panel-form">
+                <div class="form-field">
+                    <label class="form-label">Type</label>
+                    <div class="form-readonly">@LookupLabel(LookupTables.OrgUnitType, _editingUnit.OrgUnitTypeId)</div>
+                </div>
+                <div class="form-field">
+                    <label class="form-label">Name</label>
+                    <input type="text" class="form-input" @bind="_editName" />
+                </div>
+                <div class="form-field">
+                    <label class="form-label">Code</label>
+                    <input type="text" class="form-input" @bind="_editCode"
+                           maxlength="20" style="text-transform:uppercase" />
+                </div>
+            </div>
+
+            @if (_editError is not null)
+            {
+                <p class="form-error">@_editError</p>
+            }
+
+            <div class="panel-actions">
+                <button class="btn-primary" @onclick="SaveEditOrgUnitAsync" disabled="@_editSaving">
+                    @(_editSaving ? "Saving…" : "Save")
+                </button>
+                <button class="btn-secondary" @onclick="CloseEditOrgUnitPanel">Cancel</button>
+            </div>
+        </div>
+    </div>
+}
+
 @code {
     [CascadingParameter] private Task<AuthenticationState> AuthStateTask { get; set; } = default!;
 
@@ -335,9 +389,21 @@
     private string?  _addError;
     private bool     _saving         = false;
 
+    // Edit panel state
+    private bool     _showEditPanel = false;
+    private OrgUnit? _editingUnit;
+    private string   _editName      = "";
+    private string   _editCode      = "";
+    private string?  _editError;
+    private bool     _editSaving    = false;
+    private bool     _isHrisAdmin   = false;
+
     protected override async Task OnInitializedAsync()
     {
         SessionState.OnChanged += HandleEntityChanged;
+
+        var state    = await AuthStateTask;
+        _isHrisAdmin = state.User.IsInRole("HrisAdmin");
 
         _loading = true;
         try
@@ -481,6 +547,52 @@
         }
         catch (Exception ex) { _addError = ex.Message; }
         finally { _saving = false; }
+    }
+
+    private void OpenEditOrgUnitPanel(OrgUnit unit)
+    {
+        _editingUnit   = unit;
+        _editName      = unit.OrgUnitName;
+        _editCode      = unit.OrgUnitCode;
+        _editError     = null;
+        _showEditPanel = true;
+    }
+
+    private void CloseEditOrgUnitPanel()
+    {
+        _showEditPanel = false;
+        _editingUnit   = null;
+    }
+
+    private async Task SaveEditOrgUnitAsync()
+    {
+        _editError = null;
+        if (string.IsNullOrWhiteSpace(_editName)) { _editError = "Name is required."; return; }
+        if (string.IsNullOrWhiteSpace(_editCode)) { _editError = "Code is required."; return; }
+        if (_editingUnit is null) return;
+
+        _editSaving = true;
+        try
+        {
+            var state   = await AuthStateTask;
+            var sub     = state.User.FindFirst("sub")?.Value;
+            var actorId = Guid.TryParse(sub, out var g) ? g : Guid.Empty;
+
+            var command = new UpdateOrgUnitCommand
+            {
+                OrgUnitId   = _editingUnit.OrgUnitId,
+                OrgUnitCode = _editCode.Trim().ToUpper(),
+                OrgUnitName = _editName.Trim(),
+                UpdatedBy   = actorId
+            };
+
+            await OrgStructureService.UpdateOrgUnitAsync(command);
+            _showEditPanel = false;
+            _editingUnit   = null;
+            await SelectLegalEntityAsync(SessionState.SelectedLegalEntityId!.Value);
+        }
+        catch (Exception ex) { _editError = ex.Message; }
+        finally { _editSaving = false; }
     }
 
     private string LookupLabel(string tableName, int id)
@@ -890,4 +1002,19 @@
     .wf-unknown     { background: #F3F4F6; color: #6B7280; }
 
     .mono { font-family: monospace; }
+
+    .org-node-actions { margin-left: auto; display: flex; align-items: center; }
+
+    .btn-icon-edit {
+        background: none;
+        border: none;
+        color: #9CA3AF;
+        cursor: pointer;
+        padding: 2px var(--space-1);
+        font-size: var(--font-size-sm);
+        line-height: 1;
+        border-radius: var(--radius-sm);
+    }
+
+    .btn-icon-edit:hover { color: var(--aw-teal); background: #F0F9FF; }
 </style>

@@ -16,9 +16,15 @@
         <h2 class="page-title">Timecards</h2>
     </div>
 
-    @* ── Period selector ──────────────────────────────────────────────── *@
+    @* ── View toggle + Period selector ───────────────────────────────── *@
     <div class="filter-row" style="margin-bottom:var(--space-5,1.25rem);">
-        <label class="filter-label">Period</label>
+        <div class="segmented-toggle">
+            <button class="seg-btn @(_viewMode == "ACTIVE" ? "seg-btn--active" : "")"
+                    @onclick='() => OnViewModeChanged("ACTIVE")'>Active</button>
+            <button class="seg-btn @(_viewMode == "HISTORICAL" ? "seg-btn--active" : "")"
+                    @onclick='() => OnViewModeChanged("HISTORICAL")'>Historical</button>
+        </div>
+        <label class="filter-label" style="margin-left:1rem;">Period</label>
         <select class="form-input" style="width:320px;" value="@_selectedPeriodId"
                 @onchange="OnPeriodChanged">
             <option value="">— select period —</option>
@@ -27,6 +33,10 @@
                 <option value="@p.PeriodId">@p.Label</option>
             }
         </select>
+        @if (_viewMode == "HISTORICAL" && _periods.Count == 0 && !_loadingPeriods)
+        {
+            <span style="font-size:.85rem;color:#6b7280;margin-left:.75rem;">No closed periods yet.</span>
+        }
     </div>
 
     @if (_selectedPeriodId == Guid.Empty)
@@ -87,7 +97,13 @@
                                 <td class="text-right @(row.OvertimeHours > 0 ? "text-warn" : "")">
                                     @row.OvertimeHours.ToString("F2")
                                 </td>
-                                <td><span class="status-badge status-@TimecardStatus(row).ToLower()">@TimecardStatus(row)</span></td>
+                                <td>
+                                    <span class="status-badge status-@TimecardStatus(row).ToLower()">@TimecardStatus(row)</span>
+                                    @if (row.RejectedCount > 0)
+                                    {
+                                        <span class="rejected-count">@row.RejectedCount rejected</span>
+                                    }
+                                </td>
                                 <td>
                                     <div style="display:flex;gap:.5rem;align-items:center;">
                                         <button class="btn-link" @onclick="() => ToggleDetail(row.EmploymentId)">
@@ -96,7 +112,7 @@
                                         @if (row.SubmittedCount > 0)
                                         {
                                             <button class="btn-sm btn-primary" @onclick="() => ApproveAllAsync(row)">
-                                                Approve All
+                                                Approve All (@row.SubmittedCount)
                                             </button>
                                         }
                                     </div>
@@ -202,6 +218,8 @@
 </div>
 
 @code {
+    private string                     _viewMode         = "ACTIVE";
+    private bool                       _loadingPeriods;
     private Guid                       _selectedPeriodId = Guid.Empty;
     private List<TaPeriodOption>       _periods          = [];
     private List<TimecardSummaryRow>   _rows             = [];
@@ -223,12 +241,39 @@
         var entityId = SessionState.SelectedLegalEntityId;
         if (entityId is null) return;
 
-        _periods = (await QueryService.GetOpenPeriodsForEntityAsync(entityId.Value)).ToList();
-        if (_periods.Count > 0)
+        await LoadPeriodsAsync(entityId.Value);
+    }
+
+    private async Task OnViewModeChanged(string mode)
+    {
+        if (_viewMode == mode) return;
+        _viewMode           = mode;
+        _selectedPeriodId   = Guid.Empty;
+        _rows               = [];
+        _detailEmploymentId = null;
+        _detailEntries      = [];
+        var entityId = SessionState.SelectedLegalEntityId;
+        if (entityId is not null)
+            await LoadPeriodsAsync(entityId.Value);
+    }
+
+    private async Task LoadPeriodsAsync(Guid entityId)
+    {
+        _loadingPeriods = true;
+        StateHasChanged();
+        try
         {
-            _selectedPeriodId = _periods[0].PeriodId;
-            await LoadPeriodAsync();
+            _periods = _viewMode == "HISTORICAL"
+                ? (await QueryService.GetClosedPeriodsForEntityAsync(entityId)).ToList()
+                : (await QueryService.GetOpenPeriodsForEntityAsync(entityId)).ToList();
+
+            if (_periods.Count > 0)
+            {
+                _selectedPeriodId = _periods[0].PeriodId;
+                await LoadPeriodAsync();
+            }
         }
+        finally { _loadingPeriods = false; }
     }
 
     private async Task OnPeriodChanged(ChangeEventArgs e)
@@ -403,4 +448,12 @@
     .btn-link    { background:none;border:none;color:var(--aw-blue,#2563eb);cursor:pointer;font-size:.85rem;padding:0; }
 
     .alert-error { background:#fee2e2;color:#7f1d1d;padding:.75rem 1rem;border-radius:6px;font-size:.875rem; }
+
+    .rejected-count { display:inline-block;margin-left:.35rem;padding:1px 6px;border-radius:999px;font-size:.7rem;font-weight:600;background:#fee2e2;color:#991b1b; }
+
+    .segmented-toggle { display:inline-flex;border:1px solid #e5e7eb;border-radius:6px;overflow:hidden; }
+    .seg-btn { padding:.3rem .9rem;font-size:.85rem;font-weight:500;border:none;background:#fff;color:#374151;cursor:pointer;transition:background .1s,color .1s; }
+    .seg-btn:not(:last-child) { border-right:1px solid #e5e7eb; }
+    .seg-btn--active { background:#2563eb;color:#fff; }
+    .seg-btn:not(.seg-btn--active):hover { background:#f3f4f6; }
 </style>

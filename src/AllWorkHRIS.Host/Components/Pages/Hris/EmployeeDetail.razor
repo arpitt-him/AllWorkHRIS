@@ -2,7 +2,7 @@
 @layout HrisShell
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @implements IDisposable
-@attribute [Authorize(Roles = "HrisViewer,HrisAdmin")]
+@attribute [Authorize(Roles = "HrisViewer,HrisAdmin,HrisOperator")]
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Components.Authorization
 @using Microsoft.AspNetCore.Components.Forms
@@ -12,6 +12,7 @@
 @using AllWorkHRIS.Host.Hris.Commands
 @using AllWorkHRIS.Host.Hris.Services
 @using AllWorkHRIS.Host.Hris.Repositories
+@using AllWorkHRIS.Host.Hris.Queries
 @using AllWorkHRIS.Host.Hris.Domain
 @inject IEmploymentService    EmploymentService
 @inject IPersonService        PersonService
@@ -66,10 +67,10 @@ else
                     <div class="action-buttons">
                         @if (_employment.EmploymentStatusId == _activeStatusId)
                         {
-                            <button class="btn-secondary">Change Compensation</button>
-                            <button class="btn-secondary">Transfer</button>
-                            <button class="btn-secondary">Change Manager</button>
-                            <button class="btn-secondary">Place on Leave</button>
+                            <button class="btn-secondary" @onclick="BeginChangeCompensation">Change Compensation</button>
+                            <button class="btn-secondary" @onclick="BeginTransfer">Transfer</button>
+                            <button class="btn-secondary" @onclick="BeginChangeManager">Change Manager</button>
+                            <button class="btn-secondary" @onclick="BeginPlaceOnLeave">Place on Leave</button>
                             <button class="btn-danger">Terminate</button>
                         }
                         else if (_employment.EmploymentStatusId == _onLeaveStatusId)
@@ -81,6 +82,175 @@ else
                 </Authorized>
             </AuthorizeView>
         </div>
+
+        @* Action panels — shown between header and tabs when an action button is active *@
+        @if (_actionMode != ActionMode.None)
+        {
+            <div class="action-panel">
+                <div class="action-panel-header">
+                    <h3 class="action-panel-title">
+                        @(_actionMode switch {
+                            ActionMode.ChangeCompensation => "Change Compensation",
+                            ActionMode.Transfer           => "Transfer Employee",
+                            ActionMode.ChangeManager      => "Change Manager",
+                            _                             => ""
+                        })
+                    </h3>
+                    <button class="btn-link" @onclick="CancelAction" style="font-size:.85rem;">✕ Cancel</button>
+                </div>
+
+                @if (_actionMode == ActionMode.ChangeCompensation)
+                {
+                    <div class="form-panel">
+                        <div class="form-grid">
+                            <div class="form-field">
+                                <label class="form-label">Rate Type <span class="req">*</span></label>
+                                <select class="form-select" @bind="_compNewRateTypeId">
+                                    <option value="0">Select…</option>
+                                    @foreach (var rt in LookupCache.GetAll(LookupTables.CompensationRateType))
+                                    {
+                                        <option value="@rt.Id">@rt.Label</option>
+                                    }
+                                </select>
+                            </div>
+                            <div class="form-field">
+                                <label class="form-label">New Base Rate <span class="req">*</span></label>
+                                <input type="number" step="0.01" min="0" class="form-input" @bind="_compNewBaseRate" />
+                            </div>
+                            <div class="form-field">
+                                <label class="form-label">Pay Frequency <span class="req">*</span></label>
+                                <select class="form-select" @bind="_compNewFreqId">
+                                    <option value="0">Select…</option>
+                                    @foreach (var pf in LookupCache.GetAll(LookupTables.PayFrequency))
+                                    {
+                                        <option value="@pf.Id">@pf.Label</option>
+                                    }
+                                </select>
+                            </div>
+                            <div class="form-field">
+                                <label class="form-label">Effective Date <span class="req">*</span></label>
+                                <input type="date" class="form-input" @bind="_compEffectiveDt" />
+                            </div>
+                            <div class="form-field form-field-full">
+                                <label class="form-label">Change Reason <span class="req">*</span></label>
+                                <input type="text" class="form-input" @bind="_compReasonCode"
+                                       placeholder="e.g. MERIT, PROMOTION, CORRECTION" />
+                            </div>
+                        </div>
+                        @if (_compError is not null) { <p class="form-error">@_compError</p> }
+                        <div class="form-actions">
+                            <button class="btn-primary" @onclick="SaveChangeCompensationAsync" disabled="@_compSaving">
+                                @(_compSaving ? "Saving…" : "Save Change")
+                            </button>
+                            <button class="btn-secondary" @onclick="CancelAction" disabled="@_compSaving">Cancel</button>
+                        </div>
+                    </div>
+                }
+                else if (_actionMode == ActionMode.Transfer)
+                {
+                    @if (_txfrLoading)
+                    {
+                        <p class="loading-text">Loading options…</p>
+                    }
+                    else
+                    {
+                        <div class="form-panel">
+                            <div class="form-grid">
+                                <div class="form-field">
+                                    <label class="form-label">New Department <span class="req">*</span></label>
+                                    <select class="form-select" @bind="_txfrNewDeptId">
+                                        <option value="@Guid.Empty">Select…</option>
+                                        @foreach (var d in _txfrDepts ?? [])
+                                        {
+                                            <option value="@d.OrgUnitId">@d.OrgUnitName</option>
+                                        }
+                                    </select>
+                                </div>
+                                <div class="form-field">
+                                    <label class="form-label">New Location <span class="req">*</span></label>
+                                    <select class="form-select" @bind="_txfrNewLocationId">
+                                        <option value="@Guid.Empty">Select…</option>
+                                        @foreach (var l in _txfrLocations ?? [])
+                                        {
+                                            <option value="@l.OrgUnitId">@l.OrgUnitName</option>
+                                        }
+                                    </select>
+                                </div>
+                                <div class="form-field">
+                                    <label class="form-label">New Job (optional — leave blank to keep current)</label>
+                                    <select class="form-select" @bind="_txfrNewJobId">
+                                        <option value="">Keep current</option>
+                                        @foreach (var j in _txfrJobs ?? [])
+                                        {
+                                            <option value="@j.JobId">@j.JobTitle (@j.JobCode)</option>
+                                        }
+                                    </select>
+                                </div>
+                                <div class="form-field">
+                                    <label class="form-label">Effective Date <span class="req">*</span></label>
+                                    <input type="date" class="form-input" @bind="_txfrEffectiveDt" />
+                                </div>
+                                <div class="form-field">
+                                    <label class="form-label">Reason Code <span class="req">*</span></label>
+                                    <input type="text" class="form-input" @bind="_txfrReasonCode"
+                                           placeholder="e.g. RESTRUCTURE, VOLUNTARY, LATERAL" />
+                                </div>
+                                <div class="form-field form-field-full">
+                                    <label class="form-label">Notes (optional)</label>
+                                    <textarea class="form-input" rows="2" @bind="_txfrNotes"></textarea>
+                                </div>
+                            </div>
+                            @if (_txfrError is not null) { <p class="form-error">@_txfrError</p> }
+                            <div class="form-actions">
+                                <button class="btn-primary" @onclick="SaveTransferAsync" disabled="@_txfrSaving">
+                                    @(_txfrSaving ? "Saving…" : "Save Transfer")
+                                </button>
+                                <button class="btn-secondary" @onclick="CancelAction" disabled="@_txfrSaving">Cancel</button>
+                            </div>
+                        </div>
+                    }
+                }
+                else if (_actionMode == ActionMode.ChangeManager)
+                {
+                    @if (_mgrLoading)
+                    {
+                        <p class="loading-text">Loading employee list…</p>
+                    }
+                    else
+                    {
+                        <div class="form-panel">
+                            <div class="form-grid">
+                                <div class="form-field">
+                                    <label class="form-label">New Manager <span class="req">*</span></label>
+                                    <select class="form-select" @bind="_mgrNewManagerId">
+                                        <option value="">Select…</option>
+                                        @foreach (var e in _mgrCandidates)
+                                        {
+                                            <option value="@e.EmploymentId">@e.LegalLastName, @e.LegalFirstName (@e.EmployeeNumber)</option>
+                                        }
+                                    </select>
+                                </div>
+                                <div class="form-field">
+                                    <label class="form-label">Effective Date <span class="req">*</span></label>
+                                    <input type="date" class="form-input" @bind="_mgrEffectiveDt" />
+                                </div>
+                                <div class="form-field form-field-full">
+                                    <label class="form-label">Notes (optional)</label>
+                                    <textarea class="form-input" rows="2" @bind="_mgrNotes"></textarea>
+                                </div>
+                            </div>
+                            @if (_mgrError is not null) { <p class="form-error">@_mgrError</p> }
+                            <div class="form-actions">
+                                <button class="btn-primary" @onclick="SaveChangeManagerAsync" disabled="@_mgrSaving">
+                                    @(_mgrSaving ? "Saving…" : "Save Change")
+                                </button>
+                                <button class="btn-secondary" @onclick="CancelAction" disabled="@_mgrSaving">Cancel</button>
+                            </div>
+                        </div>
+                    }
+                }
+            </div>
+        }
 
         @* Tabs *@
         <div class="tab-bar">
@@ -108,33 +278,385 @@ else
             {
                 case "Profile":
                     <div class="detail-section">
-                        <h3 class="section-title">Personal Information</h3>
-                        <div class="detail-grid">
-                            <div class="detail-item">
-                                <span class="detail-label">Legal Name</span>
-                                <span class="detail-value">@_person?.LegalFirstName @_person?.LegalMiddleName @_person?.LegalLastName</span>
-                            </div>
-                            <div class="detail-item">
-                                <span class="detail-label">Preferred Name</span>
-                                <span class="detail-value">@(_person?.PreferredName ?? "—")</span>
-                            </div>
-                            <div class="detail-item">
-                                <span class="detail-label">Date of Birth</span>
-                                <span class="detail-value">@_person?.DateOfBirth.ToString("yyyy-MM-dd")</span>
-                            </div>
-                            <div class="detail-item">
-                                <span class="detail-label">Gender</span>
-                                <span class="detail-value">@(_person?.Gender ?? "—")</span>
-                            </div>
-                            <div class="detail-item">
-                                <span class="detail-label">Pronouns</span>
-                                <span class="detail-value">@(_person?.Pronouns ?? "—")</span>
-                            </div>
-                            <div class="detail-item">
-                                <span class="detail-label">Marital Status</span>
-                                <span class="detail-value">@(_person?.MaritalStatus ?? "—")</span>
-                            </div>
+                        <div class="section-header-row">
+                            <h3 class="section-title">Personal Information</h3>
+                            @if (!_profileEditing && !_basicEditing && !_crEditing)
+                            {
+                                <AuthorizeView Roles="HrisAdmin">
+                                    <Authorized>
+                                        <button class="btn-link" @onclick="BeginEditProfile">Edit</button>
+                                    </Authorized>
+                                </AuthorizeView>
+                                <AuthorizeView Roles="HrisOperator">
+                                    <Authorized>
+                                        <div style="display:flex;gap:var(--space-3)">
+                                            <button class="btn-link" @onclick="BeginBasicEdit">Edit</button>
+                                            <button class="btn-link" @onclick="BeginChangeRequest">Request change</button>
+                                        </div>
+                                    </Authorized>
+                                </AuthorizeView>
+                            }
                         </div>
+
+                        @if (!_profileEditing && !_basicEditing && !_crEditing)
+                        {
+                            <div class="detail-grid">
+                                <div class="detail-item">
+                                    <span class="detail-label">
+                                        Legal Name
+                                        @if (HasPendingFor(PersonChangeType.LegalName))
+                                        { <span class="pending-badge">pending</span> }
+                                    </span>
+                                    <span class="detail-value">@_person?.LegalFirstName @_person?.LegalMiddleName @_person?.LegalLastName @_person?.NameSuffix</span>
+                                </div>
+                                <div class="detail-item">
+                                    <span class="detail-label">Preferred Name</span>
+                                    <span class="detail-value">@(_person?.PreferredName ?? "—")</span>
+                                </div>
+                                <div class="detail-item">
+                                    <span class="detail-label">
+                                        Date of Birth
+                                        @if (HasPendingFor(PersonChangeType.DateOfBirth))
+                                        { <span class="pending-badge">pending</span> }
+                                    </span>
+                                    <span class="detail-value">@_person?.DateOfBirth.ToString("yyyy-MM-dd")</span>
+                                </div>
+                                <AuthorizeView Roles="HrisAdmin,HrisOperator">
+                                    <Authorized>
+                                        <div class="detail-item">
+                                            <span class="detail-label">
+                                                @(_person?.NationalIdentifierType ?? "National ID")
+                                                @if (HasPendingFor(PersonChangeType.NationalIdentifier))
+                                                { <span class="pending-badge">pending</span> }
+                                            </span>
+                                            <span class="detail-value">@MaskNationalIdentifier(_person?.NationalIdentifier)</span>
+                                        </div>
+                                    </Authorized>
+                                </AuthorizeView>
+                                <div class="detail-item">
+                                    <span class="detail-label">Gender</span>
+                                    <span class="detail-value">@(_person?.Gender ?? "—")</span>
+                                </div>
+                                <div class="detail-item">
+                                    <span class="detail-label">Pronouns</span>
+                                    <span class="detail-value">@(_person?.Pronouns ?? "—")</span>
+                                </div>
+                                <div class="detail-item">
+                                    <span class="detail-label">Marital Status</span>
+                                    <span class="detail-value">@(_person?.MaritalStatus ?? "—")</span>
+                                </div>
+                            </div>
+                        }
+
+                        @* HrisAdmin — direct edit, all fields *@
+                        @if (_profileEditing)
+                        {
+                            <div class="stacked-form">
+                                <p class="form-section-label">Identity (restricted)</p>
+                                <div class="form-row form-row--3col">
+                                    <div>
+                                        <label class="form-label">Legal first name <span class="req">*</span></label>
+                                        <input class="form-input" @bind="_profFirstName" />
+                                    </div>
+                                    <div>
+                                        <label class="form-label">Middle name</label>
+                                        <input class="form-input" @bind="_profMiddleName" />
+                                    </div>
+                                    <div>
+                                        <label class="form-label">Legal last name <span class="req">*</span></label>
+                                        <input class="form-input" @bind="_profLastName" />
+                                    </div>
+                                </div>
+                                <div class="form-row form-row--2col">
+                                    <div>
+                                        <label class="form-label">Suffix</label>
+                                        <input class="form-input form-input--sm" @bind="_profSuffix" placeholder="Jr., Sr., III…" />
+                                    </div>
+                                    <div>
+                                        <label class="form-label">Date of birth <span class="req">*</span></label>
+                                        <input class="form-input form-input--dob" type="date" @bind="_profDob" />
+                                    </div>
+                                </div>
+                                <div class="form-row form-row--2col">
+                                    <div>
+                                        <label class="form-label">National identifier</label>
+                                        <input class="form-input" @bind="_profNI" placeholder="e.g. 123-45-6789" />
+                                    </div>
+                                    <div>
+                                        <label class="form-label">ID type</label>
+                                        <input class="form-input form-input--sm" @bind="_profNIType" placeholder="SSN, SIN…" />
+                                    </div>
+                                </div>
+                                <p class="form-section-label" style="margin-top:var(--space-3)">Personal details</p>
+                                <div class="form-row">
+                                    <label class="form-label">Preferred name</label>
+                                    <input class="form-input" @bind="_profPreferredName" />
+                                </div>
+                                <div class="form-row form-row--2col">
+                                    <div>
+                                        <label class="form-label">Gender</label>
+                                        <input class="form-input" @bind="_profGender" placeholder="e.g. Male, Female, Non-binary" />
+                                    </div>
+                                    <div>
+                                        <label class="form-label">Pronouns</label>
+                                        <input class="form-input" @bind="_profPronouns" placeholder="e.g. she/her" />
+                                    </div>
+                                </div>
+                                <div class="form-row">
+                                    <label class="form-label">Marital status</label>
+                                    <input class="form-input" @bind="_profMaritalStatus" placeholder="e.g. Single, Married" />
+                                </div>
+                                @if (_profileError is not null) { <p class="form-error">@_profileError</p> }
+                                <div class="form-actions">
+                                    <button class="btn-primary" @onclick="SaveProfileAsync" disabled="@_profileSaving">@(_profileSaving ? "Saving…" : "Save")</button>
+                                    <button class="btn-secondary" @onclick="CancelEditProfile" disabled="@_profileSaving">Cancel</button>
+                                </div>
+                            </div>
+                        }
+
+                        @* HrisOperator — basic field direct edit *@
+                        @if (_basicEditing)
+                        {
+                            <div class="stacked-form">
+                                <div class="form-row">
+                                    <label class="form-label">Preferred name</label>
+                                    <input class="form-input" @bind="_basicPreferredName" />
+                                </div>
+                                <div class="form-row form-row--2col">
+                                    <div>
+                                        <label class="form-label">Gender</label>
+                                        <input class="form-input" @bind="_basicGender" placeholder="e.g. Male, Female, Non-binary" />
+                                    </div>
+                                    <div>
+                                        <label class="form-label">Pronouns</label>
+                                        <input class="form-input" @bind="_basicPronouns" placeholder="e.g. she/her" />
+                                    </div>
+                                </div>
+                                <div class="form-row">
+                                    <label class="form-label">Marital status</label>
+                                    <input class="form-input" @bind="_basicMaritalStatus" placeholder="e.g. Single, Married" />
+                                </div>
+                                @if (_basicError is not null) { <p class="form-error">@_basicError</p> }
+                                <div class="form-actions">
+                                    <button class="btn-primary" @onclick="SaveBasicAsync" disabled="@_basicSaving">@(_basicSaving ? "Saving…" : "Save")</button>
+                                    <button class="btn-secondary" @onclick="CancelBasicEdit" disabled="@_basicSaving">Cancel</button>
+                                </div>
+                            </div>
+                        }
+
+                        @* HrisOperator — restricted field change request *@
+                        @if (_crEditing)
+                        {
+                            <div class="stacked-form">
+                                <p class="form-hint">Changes to these fields require HrisAdmin approval before taking effect.</p>
+                                <p class="form-section-label">Legal name</p>
+                                <div class="form-row form-row--3col">
+                                    <div>
+                                        <label class="form-label">First name <span class="req">*</span></label>
+                                        <input class="form-input" @bind="_crFirstName" />
+                                    </div>
+                                    <div>
+                                        <label class="form-label">Middle name</label>
+                                        <input class="form-input" @bind="_crMiddleName" />
+                                    </div>
+                                    <div>
+                                        <label class="form-label">Last name <span class="req">*</span></label>
+                                        <input class="form-input" @bind="_crLastName" />
+                                    </div>
+                                </div>
+                                <div class="form-row">
+                                    <label class="form-label">Suffix</label>
+                                    <input class="form-input form-input--sm" @bind="_crSuffix" placeholder="Jr., Sr., III…" />
+                                </div>
+                                <p class="form-section-label" style="margin-top:var(--space-3)">Date of birth</p>
+                                <div class="form-row">
+                                    <label class="form-label">Date of birth</label>
+                                    <input class="form-input form-input--dob" type="date" @bind="_crDob" />
+                                </div>
+                                <p class="form-section-label" style="margin-top:var(--space-3)">National identifier</p>
+                                <div class="form-row form-row--2col">
+                                    <div>
+                                        <label class="form-label">Identifier</label>
+                                        <input class="form-input" @bind="_crNI" placeholder="e.g. 123-45-6789" />
+                                    </div>
+                                    <div>
+                                        <label class="form-label">Type</label>
+                                        <input class="form-input form-input--sm" @bind="_crNIType" placeholder="SSN, SIN…" />
+                                    </div>
+                                </div>
+                                @if (_crError is not null) { <p class="form-error">@_crError</p> }
+                                <div class="form-actions">
+                                    <button class="btn-primary" @onclick="SubmitChangeRequestsAsync" disabled="@_crSaving">@(_crSaving ? "Submitting…" : "Submit for approval")</button>
+                                    <button class="btn-secondary" @onclick="CancelChangeRequest" disabled="@_crSaving">Cancel</button>
+                                </div>
+                            </div>
+                        }
+
+                        @if (_profileSuccess  is not null) { <p class="form-success">@_profileSuccess</p>  }
+                        @if (_basicSuccess    is not null) { <p class="form-success">@_basicSuccess</p>    }
+                        @if (_crSuccess       is not null) { <p class="form-success">@_crSuccess</p>       }
+                    </div>
+
+                    @* Pending change requests — HrisAdmin only *@
+                    @if (_pendingRequests.Count > 0)
+                    {
+                        <AuthorizeView Roles="HrisAdmin">
+                            <Authorized>
+                                <div class="detail-section pending-changes-section">
+                                    <h3 class="section-title">Pending Change Requests</h3>
+                                    @if (_reviewError is not null) { <p class="form-error">@_reviewError</p> }
+                                    <div class="pending-list">
+                                        @foreach (var req in _pendingRequests)
+                                        {
+                                            <div class="pending-item">
+                                                <div class="pending-item-header">
+                                                    <span class="pending-type-label">@ChangeTypeLabel(req.ChangeType)</span>
+                                                    <span class="pending-meta">Requested @req.RequestedAt.LocalDateTime.ToString("yyyy-MM-dd HH:mm")</span>
+                                                </div>
+                                                <div class="pending-values">
+                                                    <div>
+                                                        <span class="pending-value-label">Current</span>
+                                                        <span class="pending-value">@FormatChangeDisplay(req, current: true)</span>
+                                                    </div>
+                                                    <span class="pending-arrow">→</span>
+                                                    <div>
+                                                        <span class="pending-value-label">Requested</span>
+                                                        <span class="pending-value">@FormatChangeDisplay(req, current: false)</span>
+                                                    </div>
+                                                </div>
+                                                @if (_rejectingId == req.PersonChangeRequestId)
+                                                {
+                                                    <div class="pending-reject-form">
+                                                        <textarea class="form-input" rows="2" placeholder="Rejection note (optional)"
+                                                                  @bind="_rejectNote"></textarea>
+                                                        <div class="form-actions">
+                                                            <button class="btn-danger" @onclick="() => ConfirmRejectAsync(req.PersonChangeRequestId)" disabled="@_reviewSaving">
+                                                                @(_reviewSaving ? "Rejecting…" : "Confirm reject")
+                                                            </button>
+                                                            <button class="btn-secondary" @onclick="CancelReject">Cancel</button>
+                                                        </div>
+                                                    </div>
+                                                }
+                                                else
+                                                {
+                                                    <div class="pending-actions">
+                                                        <button class="btn-primary btn-sm" @onclick="() => ApproveRequestAsync(req.PersonChangeRequestId)" disabled="@_reviewSaving">Approve</button>
+                                                        <button class="btn-secondary btn-sm" @onclick="() => BeginReject(req.PersonChangeRequestId)">Reject</button>
+                                                    </div>
+                                                }
+                                            </div>
+                                        }
+                                    </div>
+                                </div>
+                            </Authorized>
+                        </AuthorizeView>
+                    }
+
+                    <div class="detail-section">
+                        <div class="section-header-row">
+                            <h3 class="section-title">Address &amp; Contact</h3>
+                            <AuthorizeView Roles="HrisAdmin">
+                                <Authorized>
+                                    @if (!_addressEditing && _address is not null)
+                                    {
+                                        <button class="btn-link" @onclick="BeginEditAddress">Edit</button>
+                                    }
+                                </Authorized>
+                            </AuthorizeView>
+                        </div>
+
+                        @if (_address is null)
+                        {
+                            <p class="placeholder-text">No address on file.</p>
+                        }
+                        else if (!_addressEditing)
+                        {
+                            <div class="detail-grid">
+                                <div class="detail-item detail-item--wide">
+                                    <span class="detail-label">Address</span>
+                                    <span class="detail-value">
+                                        @_address.AddressLine1
+                                        @if (!string.IsNullOrWhiteSpace(_address.AddressLine2))
+                                        { <br />@_address.AddressLine2 }
+                                        <br />@_address.City, @_address.StateCode @_address.PostalCode
+                                        <br />@_address.CountryCode
+                                    </span>
+                                </div>
+                                <div class="detail-item">
+                                    <span class="detail-label">Phone (primary)</span>
+                                    <span class="detail-value">@(_address.PhonePrimary ?? "—")</span>
+                                </div>
+                                <div class="detail-item">
+                                    <span class="detail-label">Phone (secondary)</span>
+                                    <span class="detail-value">@(_address.PhoneSecondary ?? "—")</span>
+                                </div>
+                                <div class="detail-item">
+                                    <span class="detail-label">Personal email</span>
+                                    <span class="detail-value">@(_address.EmailPersonal ?? "—")</span>
+                                </div>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="stacked-form">
+                                <div class="form-row">
+                                    <label class="form-label">Address line 1 <span class="req">*</span></label>
+                                    <input class="form-input" @bind="_addrLine1" />
+                                </div>
+                                <div class="form-row">
+                                    <label class="form-label">Address line 2</label>
+                                    <input class="form-input" @bind="_addrLine2" />
+                                </div>
+                                <div class="form-row form-row--3col">
+                                    <div>
+                                        <label class="form-label">City <span class="req">*</span></label>
+                                        <input class="form-input" @bind="_addrCity" />
+                                    </div>
+                                    <div>
+                                        <label class="form-label">State / Province <span class="req">*</span></label>
+                                        <input class="form-input" @bind="_addrState" maxlength="10" />
+                                    </div>
+                                    <div>
+                                        <label class="form-label">Postal code <span class="req">*</span></label>
+                                        <input class="form-input" @bind="_addrPostal" maxlength="20" />
+                                    </div>
+                                </div>
+                                <div class="form-row">
+                                    <label class="form-label">Country code <span class="req">*</span></label>
+                                    <input class="form-input form-input--sm" @bind="_addrCountry" maxlength="3" />
+                                </div>
+                                <div class="form-row form-row--2col">
+                                    <div>
+                                        <label class="form-label">Phone (primary)</label>
+                                        <input class="form-input" @bind="_addrPhone1" />
+                                    </div>
+                                    <div>
+                                        <label class="form-label">Phone (secondary)</label>
+                                        <input class="form-input" @bind="_addrPhone2" />
+                                    </div>
+                                </div>
+                                <div class="form-row">
+                                    <label class="form-label">Personal email</label>
+                                    <input class="form-input" type="email" @bind="_addrEmail" />
+                                </div>
+
+                                @if (_addressError is not null)
+                                {
+                                    <p class="form-error">@_addressError</p>
+                                }
+                                <div class="form-actions">
+                                    <button class="btn-primary" @onclick="SaveAddressAsync" disabled="@_addressSaving">
+                                        @(_addressSaving ? "Saving…" : "Save")
+                                    </button>
+                                    <button class="btn-secondary" @onclick="CancelEditAddress" disabled="@_addressSaving">Cancel</button>
+                                </div>
+                            </div>
+                        }
+
+                        @if (_addressSuccess is not null)
+                        {
+                            <p class="form-success">@_addressSuccess</p>
+                        }
                     </div>
                     break;
 
@@ -775,13 +1297,113 @@ else
     private string            _initials   = "??";
     private Employment?       _employment;
     private Person?           _person;
+    private PersonAddress?    _address;
     private CompensationRecord? _compensation;
+
+    // Pending change requests (loaded with person)
+    private IReadOnlyList<PersonChangeRequest> _pendingRequests = [];
+
+    // Profile edit (HrisAdmin — direct save all fields)
+    private bool     _profileEditing    = false;
+    private bool     _profileSaving     = false;
+    private string   _profFirstName     = "";
+    private string   _profMiddleName    = "";
+    private string   _profLastName      = "";
+    private string   _profSuffix        = "";
+    private string   _profPreferredName = "";
+    private DateTime _profDob;
+    private string   _profGender        = "";
+    private string   _profPronouns      = "";
+    private string   _profMaritalStatus = "";
+    private string   _profNI            = "";
+    private string   _profNIType        = "";
+    private string?  _profileError;
+    private string?  _profileSuccess;
+
+    // Basic edit (HrisOperator — direct save non-sensitive fields only)
+    private bool     _basicEditing      = false;
+    private bool     _basicSaving       = false;
+    private string   _basicPreferredName = "";
+    private string   _basicGender       = "";
+    private string   _basicPronouns     = "";
+    private string   _basicMaritalStatus = "";
+    private string?  _basicError;
+    private string?  _basicSuccess;
+
+    // Change request form (HrisOperator — queued for HrisAdmin approval)
+    private bool     _crEditing         = false;
+    private bool     _crSaving          = false;
+    private string   _crFirstName       = "";
+    private string   _crMiddleName      = "";
+    private string   _crLastName        = "";
+    private string   _crSuffix          = "";
+    private DateTime _crDob;
+    private string   _crNI              = "";
+    private string   _crNIType          = "";
+    private string?  _crError;
+    private string?  _crSuccess;
+
+    // Change request review (HrisAdmin)
+    private bool     _reviewSaving      = false;
+    private Guid?    _rejectingId;
+    private string   _rejectNote        = "";
+    private string?  _reviewError;
+
+    // Address edit
+    private bool    _addressEditing   = false;
+    private bool    _addressSaving    = false;
+    private string  _addrLine1        = "";
+    private string  _addrLine2        = "";
+    private string  _addrCity         = "";
+    private string  _addrState        = "";
+    private string  _addrPostal       = "";
+    private string  _addrCountry      = "";
+    private string  _addrPhone1       = "";
+    private string  _addrPhone2       = "";
+    private string  _addrEmail        = "";
+    private string? _addressError;
+    private string? _addressSuccess;
 
     private int _activeStatusId;
     private int _onLeaveStatusId;
     private int _taskPendingStatusId;
     private int _taskCompletedStatusId;
     private int _taskWaivedStatusId;
+
+    private enum ActionMode { None, ChangeCompensation, Transfer, ChangeManager }
+    private ActionMode _actionMode = ActionMode.None;
+
+    // Change Compensation form
+    private int      _compNewRateTypeId;
+    private decimal  _compNewBaseRate;
+    private int      _compNewFreqId;
+    private DateTime _compEffectiveDt;
+    private string   _compReasonCode = "";
+    private bool     _compSaving;
+    private string?  _compError;
+
+    // Transfer form
+    private Guid     _txfrNewDeptId     = Guid.Empty;
+    private Guid     _txfrNewLocationId = Guid.Empty;
+    private string   _txfrNewJobId      = "";
+    private DateTime _txfrEffectiveDt;
+    private string   _txfrReasonCode = "";
+    private string?  _txfrNotes;
+    private bool     _txfrSaving;
+    private bool     _txfrLoading;
+    private string?  _txfrError;
+    private IEnumerable<OrgUnit>? _txfrDepts;
+    private IEnumerable<OrgUnit>? _txfrLocations;
+    private IEnumerable<Job>?     _txfrJobs;
+
+    // Change Manager form
+    private string   _mgrNewManagerId = "";
+    private DateTime _mgrEffectiveDt;
+    private string?  _mgrNotes;
+    private bool     _mgrSaving;
+    private bool     _mgrLoading;
+    private string?  _mgrError;
+    private IReadOnlyList<EmploymentListItem> _mgrCandidates = [];
 
     private sealed record TabEntry(string Label, int SortOrder, Type? ComponentType = null);
 
@@ -888,6 +1510,10 @@ else
                 {
                     _pageTitle = $"{_person.LegalFirstName} {_person.LegalLastName}";
                     _initials  = $"{_person.LegalFirstName.FirstOrDefault()}{_person.LegalLastName.FirstOrDefault()}".ToUpper();
+                    _address          = await PersonService.GetPrimaryAddressAsync(
+                                          _person.PersonId,
+                                          DateOnly.FromDateTime(TemporalContext.GetOperativeDate()));
+                    _pendingRequests  = await PersonService.GetPendingChangeRequestsAsync(_person.PersonId);
                 }
 
                 var entityUnit = await OrgStructureService.GetOrgUnitByIdAsync(_employment.LegalEntityId);
@@ -913,6 +1539,552 @@ else
             case "Community"  when !_communityLoaded:   await LoadCommunityAsync();   break;
         }
     }
+
+    // ---- Helpers ----
+
+    private bool HasPendingFor(string changeType)
+        => _pendingRequests.Any(r => r.ChangeType == changeType);
+
+    private static string ChangeTypeLabel(string changeType) => changeType switch
+    {
+        PersonChangeType.LegalName          => "Legal name",
+        PersonChangeType.DateOfBirth        => "Date of birth",
+        PersonChangeType.NationalIdentifier => "National identifier",
+        _                                   => changeType
+    };
+
+    private static string MaskNationalIdentifier(string? ni)
+    {
+        if (string.IsNullOrEmpty(ni)) return "—";
+        var digits = new string(ni.Where(char.IsDigit).ToArray());
+        return digits.Length >= 4
+            ? new string('•', digits.Length - 4) + digits[^4..]
+            : "••••";
+    }
+
+    private string FormatChangeDisplay(PersonChangeRequest req, bool current)
+    {
+        var json = current ? req.CurrentValueJson : req.RequestedValueJson;
+        if (json is null) return "—";
+        try
+        {
+            var doc = System.Text.Json.JsonDocument.Parse(json).RootElement;
+            return req.ChangeType switch
+            {
+                PersonChangeType.LegalName =>
+                    string.Join(" ", new[]
+                    {
+                        doc.GetProperty("legalFirstName").GetString(),
+                        doc.TryGetProperty("legalMiddleName", out var mn) ? mn.GetString() : null,
+                        doc.GetProperty("legalLastName").GetString(),
+                        doc.TryGetProperty("nameSuffix", out var sfx) ? sfx.GetString() : null
+                    }.Where(s => !string.IsNullOrWhiteSpace(s))!),
+                PersonChangeType.DateOfBirth =>
+                    doc.GetProperty("dateOfBirth").GetString() ?? "—",
+                PersonChangeType.NationalIdentifier =>
+                    MaskNationalIdentifier(doc.GetProperty("nationalIdentifier").GetString()),
+                _ => json
+            };
+        }
+        catch { return json; }
+    }
+
+    // ---- HrisOperator: basic edit (direct save) ----
+
+    private void BeginBasicEdit()
+    {
+        if (_person is null) return;
+        _basicPreferredName  = _person.PreferredName ?? "";
+        _basicGender         = _person.Gender ?? "";
+        _basicPronouns       = _person.Pronouns ?? "";
+        _basicMaritalStatus  = _person.MaritalStatus ?? "";
+        _basicError          = null;
+        _basicSuccess        = null;
+        _basicEditing        = true;
+    }
+
+    private void CancelBasicEdit() { _basicEditing = false; _basicError = null; }
+
+    private async Task SaveBasicAsync()
+    {
+        _basicSaving = true;
+        _basicError  = null;
+        try
+        {
+            var cmd = new UpdatePersonCommand
+            {
+                PersonId        = _person!.PersonId,
+                LegalFirstName  = _person.LegalFirstName,
+                LegalMiddleName = _person.LegalMiddleName,
+                LegalLastName   = _person.LegalLastName,
+                NameSuffix      = _person.NameSuffix,
+                DateOfBirth     = _person.DateOfBirth,
+                PreferredName   = string.IsNullOrWhiteSpace(_basicPreferredName) ? null : _basicPreferredName.Trim(),
+                Gender          = string.IsNullOrWhiteSpace(_basicGender)        ? null : _basicGender.Trim(),
+                Pronouns        = string.IsNullOrWhiteSpace(_basicPronouns)      ? null : _basicPronouns.Trim(),
+                MaritalStatus   = string.IsNullOrWhiteSpace(_basicMaritalStatus) ? null : _basicMaritalStatus.Trim(),
+                InitiatedBy     = await GetCurrentUserIdAsync()
+            };
+            await PersonService.UpdatePersonAsync(cmd);
+            _person       = _person with { PreferredName = cmd.PreferredName, Gender = cmd.Gender, Pronouns = cmd.Pronouns, MaritalStatus = cmd.MaritalStatus };
+            _basicEditing = false;
+            _basicSuccess = "Details updated.";
+        }
+        catch (Exception ex) { _basicError = ex.Message; }
+        finally { _basicSaving = false; }
+    }
+
+    // ---- HrisOperator: change request (approval required) ----
+
+    private void BeginChangeRequest()
+    {
+        if (_person is null) return;
+        _crFirstName  = _person.LegalFirstName;
+        _crMiddleName = _person.LegalMiddleName ?? "";
+        _crLastName   = _person.LegalLastName;
+        _crSuffix     = _person.NameSuffix ?? "";
+        _crDob        = _person.DateOfBirth.ToDateTime(TimeOnly.MinValue);
+        _crNI         = "";   // never pre-fill NI from the live record
+        _crNIType     = _person.NationalIdentifierType ?? "";
+        _crError      = null;
+        _crSuccess    = null;
+        _crEditing    = true;
+    }
+
+    private void CancelChangeRequest() { _crEditing = false; _crError = null; }
+
+    private async Task SubmitChangeRequestsAsync()
+    {
+        if (_person is null) return;
+        _crSaving = true;
+        _crError  = null;
+        try
+        {
+            var requestor  = await GetCurrentUserIdAsync();
+            int submitted  = 0;
+
+            // Legal name — submit if any name field changed
+            var nameChanged = _crFirstName.Trim()  != _person.LegalFirstName
+                           || (_crMiddleName.Trim() != (_person.LegalMiddleName ?? ""))
+                           || _crLastName.Trim()   != _person.LegalLastName
+                           || (_crSuffix.Trim()    != (_person.NameSuffix ?? ""));
+            if (nameChanged)
+            {
+                if (string.IsNullOrWhiteSpace(_crFirstName) || string.IsNullOrWhiteSpace(_crLastName))
+                { _crError = "First and last name are required when requesting a legal name change."; return; }
+
+                var currentJson   = System.Text.Json.JsonSerializer.Serialize(new { legalFirstName = _person.LegalFirstName, legalMiddleName = _person.LegalMiddleName, legalLastName = _person.LegalLastName, nameSuffix = _person.NameSuffix });
+                var requestedJson = System.Text.Json.JsonSerializer.Serialize(new { legalFirstName = _crFirstName.Trim(), legalMiddleName = string.IsNullOrWhiteSpace(_crMiddleName) ? (string?)null : _crMiddleName.Trim(), legalLastName = _crLastName.Trim(), nameSuffix = string.IsNullOrWhiteSpace(_crSuffix) ? (string?)null : _crSuffix.Trim() });
+                await PersonService.SubmitChangeRequestAsync(new SubmitPersonChangeRequestCommand { PersonId = _person.PersonId, ChangeType = PersonChangeType.LegalName, CurrentValueJson = currentJson, RequestedValueJson = requestedJson, RequestedBy = requestor });
+                submitted++;
+            }
+
+            // Date of birth — submit if changed
+            var dobChanged = DateOnly.FromDateTime(_crDob) != _person.DateOfBirth;
+            if (dobChanged)
+            {
+                var currentJson   = System.Text.Json.JsonSerializer.Serialize(new { dateOfBirth = _person.DateOfBirth.ToString("yyyy-MM-dd") });
+                var requestedJson = System.Text.Json.JsonSerializer.Serialize(new { dateOfBirth = DateOnly.FromDateTime(_crDob).ToString("yyyy-MM-dd") });
+                await PersonService.SubmitChangeRequestAsync(new SubmitPersonChangeRequestCommand { PersonId = _person.PersonId, ChangeType = PersonChangeType.DateOfBirth, CurrentValueJson = currentJson, RequestedValueJson = requestedJson, RequestedBy = requestor });
+                submitted++;
+            }
+
+            // National identifier — submit if a new value was entered
+            if (!string.IsNullOrWhiteSpace(_crNI))
+            {
+                var currentJson   = System.Text.Json.JsonSerializer.Serialize(new { nationalIdentifier = (string?)null, nationalIdentifierType = _person.NationalIdentifierType });
+                var requestedJson = System.Text.Json.JsonSerializer.Serialize(new { nationalIdentifier = _crNI.Trim(), nationalIdentifierType = string.IsNullOrWhiteSpace(_crNIType) ? _person.NationalIdentifierType : _crNIType.Trim() });
+                await PersonService.SubmitChangeRequestAsync(new SubmitPersonChangeRequestCommand { PersonId = _person.PersonId, ChangeType = PersonChangeType.NationalIdentifier, CurrentValueJson = currentJson, RequestedValueJson = requestedJson, RequestedBy = requestor });
+                submitted++;
+            }
+
+            if (submitted == 0)
+            { _crError = "No changes detected. Adjust at least one field before submitting."; return; }
+
+            _pendingRequests = await PersonService.GetPendingChangeRequestsAsync(_person.PersonId);
+            _crEditing       = false;
+            _crSuccess       = $"{submitted} change request{(submitted > 1 ? "s" : "")} submitted for approval.";
+        }
+        catch (Exception ex) { _crError = ex.Message; }
+        finally { _crSaving = false; }
+    }
+
+    // ---- HrisAdmin: approve / reject ----
+
+    private async Task ApproveRequestAsync(Guid requestId)
+    {
+        _reviewSaving = true;
+        _reviewError  = null;
+        try
+        {
+            await PersonService.ApproveChangeRequestAsync(new ReviewPersonChangeRequestCommand { PersonChangeRequestId = requestId, ReviewedBy = await GetCurrentUserIdAsync() });
+            // Reload person to reflect approved changes
+            _person          = await PersonService.GetByEmploymentIdAsync(EmploymentId);
+            _pendingRequests = await PersonService.GetPendingChangeRequestsAsync(_person!.PersonId);
+            if (_person is not null)
+            {
+                _pageTitle = $"{_person.LegalFirstName} {_person.LegalLastName}";
+                _initials  = $"{_person.LegalFirstName.FirstOrDefault()}{_person.LegalLastName.FirstOrDefault()}".ToUpper();
+            }
+        }
+        catch (Exception ex) { _reviewError = ex.Message; }
+        finally { _reviewSaving = false; }
+    }
+
+    private void BeginReject(Guid requestId)  { _rejectingId = requestId; _rejectNote = ""; _reviewError = null; }
+    private void CancelReject()               { _rejectingId = null; _rejectNote = ""; }
+
+    private async Task ConfirmRejectAsync(Guid requestId)
+    {
+        _reviewSaving = true;
+        _reviewError  = null;
+        try
+        {
+            await PersonService.RejectChangeRequestAsync(new ReviewPersonChangeRequestCommand { PersonChangeRequestId = requestId, ReviewedBy = await GetCurrentUserIdAsync(), RejectionNotes = string.IsNullOrWhiteSpace(_rejectNote) ? null : _rejectNote.Trim() });
+            _pendingRequests = await PersonService.GetPendingChangeRequestsAsync(_person!.PersonId);
+            _rejectingId     = null;
+            _rejectNote      = "";
+        }
+        catch (Exception ex) { _reviewError = ex.Message; }
+        finally { _reviewSaving = false; }
+    }
+
+    private void BeginEditProfile()
+    {
+        if (_person is null) return;
+        _profFirstName     = _person.LegalFirstName;
+        _profMiddleName    = _person.LegalMiddleName ?? "";
+        _profLastName      = _person.LegalLastName;
+        _profSuffix        = _person.NameSuffix ?? "";
+        _profPreferredName = _person.PreferredName ?? "";
+        _profDob           = _person.DateOfBirth.ToDateTime(TimeOnly.MinValue);
+        _profGender        = _person.Gender ?? "";
+        _profPronouns      = _person.Pronouns ?? "";
+        _profMaritalStatus = _person.MaritalStatus ?? "";
+        _profNI            = "";   // never pre-fill NI; admin must type it when correcting
+        _profNIType        = _person.NationalIdentifierType ?? "";
+        _profileError      = null;
+        _profileSuccess    = null;
+        _profileEditing    = true;
+    }
+
+    private void CancelEditProfile()
+    {
+        _profileEditing = false;
+        _profileError   = null;
+    }
+
+    private async Task SaveProfileAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_profFirstName) || string.IsNullOrWhiteSpace(_profLastName))
+        {
+            _profileError = "Legal first name and last name are required.";
+            return;
+        }
+
+        _profileSaving = true;
+        _profileError  = null;
+        try
+        {
+            var cmd = new UpdatePersonCommand
+            {
+                PersonId        = _person!.PersonId,
+                LegalFirstName  = _profFirstName.Trim(),
+                LegalMiddleName = string.IsNullOrWhiteSpace(_profMiddleName)    ? null : _profMiddleName.Trim(),
+                LegalLastName   = _profLastName.Trim(),
+                NameSuffix      = string.IsNullOrWhiteSpace(_profSuffix)        ? null : _profSuffix.Trim(),
+                DateOfBirth     = DateOnly.FromDateTime(_profDob),
+                PreferredName   = string.IsNullOrWhiteSpace(_profPreferredName) ? null : _profPreferredName.Trim(),
+                Gender          = string.IsNullOrWhiteSpace(_profGender)        ? null : _profGender.Trim(),
+                Pronouns        = string.IsNullOrWhiteSpace(_profPronouns)      ? null : _profPronouns.Trim(),
+                MaritalStatus           = string.IsNullOrWhiteSpace(_profMaritalStatus) ? null : _profMaritalStatus.Trim(),
+                NationalIdentifier      = string.IsNullOrWhiteSpace(_profNI)     ? null : _profNI.Trim(),
+                NationalIdentifierType  = string.IsNullOrWhiteSpace(_profNIType) ? null : _profNIType.Trim(),
+                InitiatedBy             = await GetCurrentUserIdAsync()
+            };
+            await PersonService.UpdatePersonAsync(cmd);
+
+            _person = _person with
+            {
+                LegalFirstName         = cmd.LegalFirstName,
+                LegalMiddleName        = cmd.LegalMiddleName,
+                LegalLastName          = cmd.LegalLastName,
+                NameSuffix             = cmd.NameSuffix,
+                DateOfBirth            = cmd.DateOfBirth,
+                PreferredName          = cmd.PreferredName,
+                Gender                 = cmd.Gender,
+                Pronouns               = cmd.Pronouns,
+                MaritalStatus          = cmd.MaritalStatus,
+                NationalIdentifier     = cmd.NationalIdentifier     ?? _person!.NationalIdentifier,
+                NationalIdentifierType = cmd.NationalIdentifierType ?? _person!.NationalIdentifierType,
+            };
+            _pageTitle      = $"{_person.LegalFirstName} {_person.LegalLastName}";
+            _initials       = $"{_person.LegalFirstName.FirstOrDefault()}{_person.LegalLastName.FirstOrDefault()}".ToUpper();
+            _profileEditing = false;
+            _profileSuccess = "Personal information updated.";
+        }
+        catch (Exception ex)
+        {
+            _profileError = ex.Message;
+        }
+        finally { _profileSaving = false; }
+    }
+
+    private void BeginEditAddress()
+    {
+        if (_address is null) return;
+        _addrLine1   = _address.AddressLine1;
+        _addrLine2   = _address.AddressLine2 ?? "";
+        _addrCity    = _address.City;
+        _addrState   = _address.StateCode;
+        _addrPostal  = _address.PostalCode;
+        _addrCountry = _address.CountryCode;
+        _addrPhone1  = _address.PhonePrimary ?? "";
+        _addrPhone2  = _address.PhoneSecondary ?? "";
+        _addrEmail   = _address.EmailPersonal ?? "";
+        _addressError   = null;
+        _addressSuccess = null;
+        _addressEditing = true;
+    }
+
+    private void CancelEditAddress()
+    {
+        _addressEditing = false;
+        _addressError   = null;
+    }
+
+    private async Task SaveAddressAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_addrLine1) ||
+            string.IsNullOrWhiteSpace(_addrCity)   ||
+            string.IsNullOrWhiteSpace(_addrState)  ||
+            string.IsNullOrWhiteSpace(_addrPostal) ||
+            string.IsNullOrWhiteSpace(_addrCountry))
+        {
+            _addressError = "Address line 1, city, state, postal code, and country are required.";
+            return;
+        }
+
+        _addressSaving = true;
+        _addressError  = null;
+        try
+        {
+            var cmd = new UpdatePersonAddressCommand
+            {
+                PersonAddressId = _address!.PersonAddressId,
+                AddressLine1    = _addrLine1.Trim(),
+                AddressLine2    = string.IsNullOrWhiteSpace(_addrLine2) ? null : _addrLine2.Trim(),
+                City            = _addrCity.Trim(),
+                StateCode       = _addrState.Trim().ToUpperInvariant(),
+                PostalCode      = _addrPostal.Trim(),
+                CountryCode     = _addrCountry.Trim().ToUpperInvariant(),
+                PhonePrimary    = string.IsNullOrWhiteSpace(_addrPhone1) ? null : _addrPhone1.Trim(),
+                PhoneSecondary  = string.IsNullOrWhiteSpace(_addrPhone2) ? null : _addrPhone2.Trim(),
+                EmailPersonal   = string.IsNullOrWhiteSpace(_addrEmail)  ? null : _addrEmail.Trim(),
+            };
+            await PersonService.UpdateAddressAsync(cmd);
+
+            _address        = _address with
+            {
+                AddressLine1   = cmd.AddressLine1,
+                AddressLine2   = cmd.AddressLine2,
+                City           = cmd.City,
+                StateCode      = cmd.StateCode,
+                PostalCode     = cmd.PostalCode,
+                CountryCode    = cmd.CountryCode,
+                PhonePrimary   = cmd.PhonePrimary,
+                PhoneSecondary = cmd.PhoneSecondary,
+                EmailPersonal  = cmd.EmailPersonal,
+            };
+            _addressEditing = false;
+            _addressSuccess = "Address updated.";
+        }
+        catch (Exception ex)
+        {
+            _addressError = ex.Message;
+        }
+        finally { _addressSaving = false; }
+    }
+
+    // ---- Action panel helpers ----
+
+    private void CancelAction()
+    {
+        _actionMode    = ActionMode.None;
+        _compError     = null;
+        _txfrError     = null;
+        _mgrError      = null;
+    }
+
+    // ---- Change Compensation ----
+
+    private void BeginChangeCompensation()
+    {
+        _compNewRateTypeId = _compensation?.RateTypeId  ?? 0;
+        _compNewBaseRate   = _compensation?.BaseRate    ?? 0m;
+        _compNewFreqId     = _compensation?.PayFrequencyId ?? 0;
+        _compEffectiveDt   = DateTime.Today;
+        _compReasonCode    = "";
+        _compError         = null;
+        _actionMode        = ActionMode.ChangeCompensation;
+    }
+
+    private async Task SaveChangeCompensationAsync()
+    {
+        if (_compNewRateTypeId == 0 || _compNewFreqId == 0 || _compNewBaseRate <= 0 ||
+            string.IsNullOrWhiteSpace(_compReasonCode))
+        {
+            _compError = "Rate type, base rate, pay frequency, and reason code are all required.";
+            return;
+        }
+        _compSaving = true;
+        _compError  = null;
+        try
+        {
+            var cmd = new ChangeCompensationCommand
+            {
+                EmploymentId     = EmploymentId,
+                RateTypeId       = _compNewRateTypeId,
+                NewBaseRate      = _compNewBaseRate,
+                PayFrequencyId   = _compNewFreqId,
+                EffectiveDate    = DateOnly.FromDateTime(_compEffectiveDt),
+                ChangeReasonCode = _compReasonCode.Trim(),
+                InitiatedBy      = await GetCurrentUserIdAsync()
+            };
+            await CompensationService.ChangeCompensationAsync(cmd);
+            _compensation = await CompensationService.GetCurrentRateAsync(
+                EmploymentId, DateOnly.FromDateTime(TemporalContext.GetOperativeDate()));
+            _actionMode = ActionMode.None;
+        }
+        catch (Exception ex) { _compError = ex.Message; }
+        finally { _compSaving = false; }
+    }
+
+    // ---- Transfer ----
+
+    private async Task BeginTransfer()
+    {
+        _txfrNewDeptId     = _employment?.PrimaryDepartmentId   ?? Guid.Empty;
+        _txfrNewLocationId = _employment?.PrimaryWorkLocationId ?? Guid.Empty;
+        _txfrNewJobId      = "";
+        _txfrEffectiveDt   = DateTime.Today;
+        _txfrReasonCode    = "";
+        _txfrNotes         = null;
+        _txfrError         = null;
+        _actionMode        = ActionMode.Transfer;
+        _txfrLoading       = true;
+        try
+        {
+            var legalEntityId = _employment!.LegalEntityId;
+            var deptTask      = OrgStructureService.GetDepartmentsAsync(legalEntityId);
+            var locTask       = OrgStructureService.GetLocationsAsync(legalEntityId);
+            var jobTask       = JobRepository.GetByLegalEntityAsync(legalEntityId);
+            await Task.WhenAll(deptTask, locTask, jobTask);
+            _txfrDepts     = await deptTask;
+            _txfrLocations = await locTask;
+            _txfrJobs      = await jobTask;
+        }
+        finally { _txfrLoading = false; }
+    }
+
+    private async Task SaveTransferAsync()
+    {
+        if (_txfrNewDeptId == Guid.Empty || _txfrNewLocationId == Guid.Empty ||
+            string.IsNullOrWhiteSpace(_txfrReasonCode))
+        {
+            _txfrError = "New department, location, and reason code are all required.";
+            return;
+        }
+        _txfrSaving = true;
+        _txfrError  = null;
+        try
+        {
+            var cmd = new TransferEmployeeCommand
+            {
+                EmploymentId    = EmploymentId,
+                NewDepartmentId = _txfrNewDeptId,
+                NewLocationId   = _txfrNewLocationId,
+                NewJobId        = Guid.TryParse(_txfrNewJobId, out var jid) ? jid : (Guid?)null,
+                EffectiveDate   = DateOnly.FromDateTime(_txfrEffectiveDt),
+                ReasonCode      = _txfrReasonCode.Trim(),
+                Notes           = string.IsNullOrWhiteSpace(_txfrNotes) ? null : _txfrNotes.Trim(),
+                InitiatedBy     = await GetCurrentUserIdAsync()
+            };
+            await EmploymentService.TransferAsync(cmd);
+            // Reload assignment data
+            _assignmentLoaded = false;
+            await LoadAssignmentAsync();
+            _actionMode = ActionMode.None;
+        }
+        catch (Exception ex) { _txfrError = ex.Message; }
+        finally { _txfrSaving = false; }
+    }
+
+    // ---- Change Manager ----
+
+    private async Task BeginChangeManager()
+    {
+        _mgrNewManagerId = "";
+        _mgrEffectiveDt  = DateTime.Today;
+        _mgrNotes        = null;
+        _mgrError        = null;
+        _actionMode      = ActionMode.ChangeManager;
+        _mgrLoading      = true;
+        try
+        {
+            _mgrCandidates = (await EmploymentService.GetAllActiveListAsync(_employment!.LegalEntityId))
+                .Where(e => e.EmploymentId != EmploymentId)
+                .OrderBy(e => e.LegalLastName).ThenBy(e => e.LegalFirstName)
+                .ToList();
+        }
+        finally { _mgrLoading = false; }
+    }
+
+    private async Task SaveChangeManagerAsync()
+    {
+        if (!Guid.TryParse(_mgrNewManagerId, out var newMgrId) || newMgrId == Guid.Empty)
+        {
+            _mgrError = "A new manager must be selected.";
+            return;
+        }
+        _mgrSaving = true;
+        _mgrError  = null;
+        try
+        {
+            var cmd = new ChangeManagerCommand
+            {
+                EmploymentId           = EmploymentId,
+                NewManagerEmploymentId = newMgrId,
+                EffectiveDate          = DateOnly.FromDateTime(_mgrEffectiveDt),
+                Notes                  = string.IsNullOrWhiteSpace(_mgrNotes) ? null : _mgrNotes.Trim(),
+                InitiatedBy            = await GetCurrentUserIdAsync()
+            };
+            await EmploymentService.ChangeManagerAsync(cmd);
+            // Reload employment to reflect new manager
+            _employment = await EmploymentService.GetByIdAsync(EmploymentId);
+            if (_assignmentLoaded)
+            {
+                _assignmentLoaded = false;
+                await LoadAssignmentAsync();
+            }
+            _actionMode = ActionMode.None;
+        }
+        catch (Exception ex) { _mgrError = ex.Message; }
+        finally { _mgrSaving = false; }
+    }
+
+    // ---- Place on Leave ----
+
+    private async Task BeginPlaceOnLeave()
+    {
+        _showLeaveForm = true;
+        if (!_leaveLoaded)
+            await SwitchTabAsync("Leave");
+        else
+            _activeTab = "Leave";
+    }
+
+    // ---- Assignment lazy load ----
 
     private async Task LoadAssignmentAsync()
     {
@@ -1255,6 +2427,28 @@ else
 
 <style>
     .page-container { padding: var(--space-6); }
+
+    .action-panel {
+        background: #fffbeb;
+        border: 1px solid #fcd34d;
+        border-radius: var(--radius-lg);
+        margin-bottom: var(--space-4);
+        overflow: hidden;
+    }
+    .action-panel-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: var(--space-3) var(--space-4);
+        background: #fef3c7;
+        border-bottom: 1px solid #fcd34d;
+    }
+    .action-panel-title {
+        font-size: var(--font-size-base);
+        font-weight: 600;
+        color: #92400e;
+        margin: 0;
+    }
 
     .page-header {
         display: flex;
@@ -1723,4 +2917,149 @@ else
         font-size: var(--font-size-sm);
         font-weight: var(--font-weight-medium);
     }
+
+    /* ---- Pending badge ---- */
+
+    .pending-badge {
+        display: inline-block;
+        background: #FEF3C7;
+        color: #92400E;
+        font-size: 10px;
+        font-weight: 600;
+        padding: 1px 6px;
+        border-radius: var(--radius-sm);
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        margin-left: var(--space-1);
+        vertical-align: middle;
+    }
+
+    /* ---- Pending changes section ---- */
+
+    .pending-changes-section { border-top: 2px solid #FDE68A; }
+
+    .pending-list { display: flex; flex-direction: column; gap: var(--space-4); }
+
+    .pending-item {
+        background: #FFFBEB;
+        border: 1px solid #FDE68A;
+        border-radius: var(--radius-md);
+        padding: var(--space-4);
+    }
+
+    .pending-item-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: var(--space-3);
+    }
+
+    .pending-type-label {
+        font-weight: var(--font-weight-semibold);
+        font-size: var(--font-size-sm);
+        color: var(--aw-navy);
+    }
+
+    .pending-meta {
+        font-size: 11px;
+        color: #9CA3AF;
+    }
+
+    .pending-values {
+        display: flex;
+        align-items: center;
+        gap: var(--space-4);
+        margin-bottom: var(--space-3);
+        flex-wrap: wrap;
+    }
+
+    .pending-value-label {
+        display: block;
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #9CA3AF;
+        margin-bottom: 2px;
+    }
+
+    .pending-value {
+        font-size: var(--font-size-sm);
+        color: #374151;
+    }
+
+    .pending-arrow { color: #9CA3AF; font-size: 1.2rem; }
+
+    .pending-actions { display: flex; gap: var(--space-2); }
+
+    .pending-reject-form { display: flex; flex-direction: column; gap: var(--space-2); margin-top: var(--space-2); }
+
+    .btn-sm { padding: 4px 12px; font-size: var(--font-size-sm); }
+
+    .btn-danger {
+        background: #DC2626;
+        color: #fff;
+        border: none;
+        border-radius: var(--radius-md);
+        padding: var(--space-2) var(--space-4);
+        cursor: pointer;
+        font-size: var(--font-size-sm);
+    }
+    .btn-danger:hover:not(:disabled) { opacity: 0.9; }
+    .btn-danger:disabled { opacity: 0.6; cursor: not-allowed; }
+
+    /* ---- Form section label / hint ---- */
+
+    .form-section-label {
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #9CA3AF;
+        margin: 0;
+    }
+
+    .form-hint {
+        font-size: var(--font-size-sm);
+        color: #92400E;
+        background: #FEF3C7;
+        border: 1px solid #FDE68A;
+        border-radius: var(--radius-sm);
+        padding: var(--space-2) var(--space-3);
+        margin: 0;
+    }
+
+    /* ---- Address / stacked form ---- */
+
+    .stacked-form {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-3);
+        max-width: 640px;
+    }
+
+    .form-row {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-1);
+    }
+
+    .form-row--2col {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: var(--space-3);
+    }
+
+    .form-row--3col {
+        display: grid;
+        grid-template-columns: 2fr 1fr 1fr;
+        gap: var(--space-3);
+    }
+
+    .form-input--sm  { width: 100px; }
+    .form-input--dob { width: 150px; }
+
+    .detail-item--wide { grid-column: 1 / -1; }
+
+    .req { color: #DC2626; }
 </style>

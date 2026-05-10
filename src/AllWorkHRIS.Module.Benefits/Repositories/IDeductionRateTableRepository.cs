@@ -20,6 +20,9 @@ public interface IDeductionRateTableRepository
     // Replaces all entries for a table atomically (used by admin save).
     Task                                  ReplaceEntriesAsync(Guid rateTableId, IEnumerable<DeductionRateEntry> entries, IUnitOfWork uow);
 
+    // Closes any open-ended table(s) for a deduction by setting effective_to = closingDate.
+    Task                                  CloseOpenTablesAsync(Guid deductionId, DateOnly closingDate, IUnitOfWork uow);
+
     // Convenience overload — wraps InsertTableAsync in its own UoW.
     Task<Guid>                            InsertTableAsync(DeductionRateTable table);
 }
