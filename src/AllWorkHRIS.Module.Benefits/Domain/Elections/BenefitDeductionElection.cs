@@ -10,6 +10,10 @@ public sealed record BenefitDeductionElection
     public Guid             DeductionId                 { get; init; }
     public string           DeductionCode               { get; init; } = string.Empty;  // populated by JOIN; not a DB column
     public string           CalculationMode             { get; init; } = string.Empty;  // populated by JOIN; not a DB column
+    public bool             FitExempt                   { get; init; }                  // populated by JOIN; not a DB column
+    public bool             FicaExempt                  { get; init; }                  // populated by JOIN; not a DB column
+    public bool             FutaExempt                  { get; init; }                  // populated by JOIN; not a DB column
+    public bool             SutaExempt                  { get; init; }                  // populated by JOIN; not a DB column
     public string           TaxTreatment                { get; init; } = string.Empty;
     public decimal          EmployeeAmount              { get; init; }
     public decimal?         EmployerContributionAmount  { get; init; }

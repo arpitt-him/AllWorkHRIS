@@ -111,7 +111,7 @@ public sealed class PayrollRunRepository : IPayrollRunRepository
             WHERE run_id = @RunId
             """;
         using var conn = _connectionFactory.CreateConnection();
-        await conn.ExecuteAsync(sql, new { RunId = runId, StatusId = statusId, UpdatedBy = updatedBy });
+        await conn.ExecuteAsync(sql, new { RunId = runId, StatusId = statusId, UpdatedBy = updatedBy }, commandTimeout: 30);
     }
 
     public async Task SetRunTimestampsAsync(Guid runId, DateTimeOffset startTimestamp,
@@ -132,7 +132,7 @@ public sealed class PayrollRunRepository : IPayrollRunRepository
             Start     = startTimestamp,
             End       = endTimestamp,
             UpdatedBy = updatedBy
-        });
+        }, commandTimeout: 30);
     }
 
     public async Task InsertRunExceptionAsync(PayrollRunException exception)
@@ -237,7 +237,7 @@ public sealed class PayrollRunResultSetRepository : IPayrollRunResultSetReposito
             WHERE payroll_run_result_set_id = @ResultSetId
             """;
         using var conn = _connectionFactory.CreateConnection();
-        await conn.ExecuteAsync(sql, new { ResultSetId = resultSetId, StatusId = statusId });
+        await conn.ExecuteAsync(sql, new { ResultSetId = resultSetId, StatusId = statusId }, commandTimeout: 30);
     }
 
     public async Task SetTimestampsAsync(Guid resultSetId, DateTimeOffset? startTimestamp,
@@ -662,7 +662,7 @@ public sealed class AccumulatorRepository : IAccumulatorRepository
                 source_period_id, execution_period_id, employment_id,
                 scope_type_id, scope_object_id,
                 contribution_amount, contribution_type_id,
-                before_value, after_value, contribution_timestamp, created_timestamp
+                before_value, after_value, creation_timestamp
             ) VALUES (
                 @ContributionId, @AccumulatorId, @AccumulatorImpactId,
                 @AccumulatorDefinitionId, @ParentContributionId, @RootContributionId,
@@ -671,7 +671,7 @@ public sealed class AccumulatorRepository : IAccumulatorRepository
                 @SourcePeriodId, @ExecutionPeriodId, @EmploymentId,
                 @ScopeTypeId, @ScopeObjectId,
                 @ContributionAmount, @ContributionTypeId,
-                @BeforeValue, @AfterValue, @ContributionTimestamp, @CreatedTimestamp
+                @BeforeValue, @AfterValue, @CreationTimestamp
             )
             """;
         using var conn = _connectionFactory.CreateConnection();
@@ -698,6 +698,159 @@ public sealed class AccumulatorRepository : IAccumulatorRepository
             """;
         using var conn = _connectionFactory.CreateConnection();
         return (await conn.QueryAsync<AccumulatorImpact>(sql, new { EmploymentId = employmentId })).ToList();
+    }
+
+    public async Task<IReadOnlyList<AccumulatorImpact>> GetImpactsByResultIdAsync(Guid employeePayrollResultId)
+    {
+        const string sql = """
+            SELECT * FROM accumulator_impact
+            WHERE employee_payroll_result_id = @ResultId
+            ORDER BY impact_timestamp ASC
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        return (await conn.QueryAsync<AccumulatorImpact>(sql, new { ResultId = employeePayrollResultId })).ToList();
+    }
+
+    public async Task<IReadOnlyList<AccumulatorContribution>> GetContributionsByResultIdAsync(Guid employeePayrollResultId)
+    {
+        const string sql = """
+            SELECT * FROM accumulator_contribution
+            WHERE source_employee_result_id = @ResultId
+            ORDER BY creation_timestamp ASC
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        return (await conn.QueryAsync<AccumulatorContribution>(sql, new { ResultId = employeePayrollResultId })).ToList();
+    }
+
+    public async Task RevertBalanceAsync(Guid accumulatorDefinitionId, Guid employmentId,
+        Guid periodId, decimal targetValue, Guid runId, DateTimeOffset now)
+    {
+        const string sql = """
+            UPDATE accumulator_balance
+            SET    current_value         = @TargetValue,
+                   last_updated_run_id   = @RunId,
+                   last_update_timestamp = @Now
+            WHERE  accumulator_definition_id = @AccumulatorDefinitionId
+              AND  participant_id            = @EmploymentId
+              AND  calendar_context_id       = @PeriodId
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        await conn.ExecuteAsync(sql, new
+        {
+            AccumulatorDefinitionId = accumulatorDefinitionId,
+            EmploymentId            = employmentId,
+            PeriodId                = periodId,
+            TargetValue             = targetValue,
+            RunId                   = runId,
+            Now                     = now
+        });
+    }
+
+    public async Task<IReadOnlyDictionary<string, decimal>> GetYtdBalancesAsync(Guid employmentId, DateOnly asOf)
+    {
+        const string sql = """
+            SELECT ad.accumulator_code, SUM(ab.current_value) AS period_sum
+            FROM   accumulator_balance ab
+            JOIN   accumulator_definition ad ON ad.accumulator_definition_id = ab.accumulator_definition_id
+            JOIN   payroll_period pp          ON pp.period_id = ab.calendar_context_id
+            WHERE  ab.participant_id    = @EmploymentId
+              AND  ad.reset_type        = 'CALENDAR_YEAR'
+              AND  pp.period_start_date >= @YearStart
+              AND  pp.period_start_date <  @AsOf
+            GROUP BY ad.accumulator_code
+            """;
+
+        using var conn = _connectionFactory.CreateConnection();
+        var rows = await conn.QueryAsync(sql, new
+        {
+            EmploymentId = employmentId,
+            YearStart    = new DateOnly(asOf.Year, 1, 1).ToDateTime(TimeOnly.MinValue),
+            AsOf         = asOf.ToDateTime(TimeOnly.MinValue)
+        });
+
+        var result = new Dictionary<string, decimal>();
+        foreach (var row in rows)
+            result[(string)row.accumulator_code] = (decimal)row.period_sum;
+        return result;
+    }
+
+    public async Task ApplyImpactChainAsync(
+        AccumulatorImpact impact, AccumulatorContribution contribution,
+        AccumulatorBalance balance, IUnitOfWork uow)
+    {
+        const string impactSql = """
+            INSERT INTO accumulator_impact (
+                accumulator_impact_id, accumulator_definition_id,
+                payroll_run_result_set_id, employee_payroll_result_id,
+                payroll_run_id, employment_id, person_id,
+                impact_status_id, impact_source_type_id, source_object_id,
+                prior_value, delta_value, new_value,
+                posting_direction_id, scope_type_id, scope_object_id,
+                jurisdiction_id, rule_pack_id, rule_version_id,
+                retroactive_flag, reversal_flag, correction_flag,
+                prior_accumulator_impact_id, notes,
+                impact_timestamp, created_timestamp, updated_timestamp
+            ) VALUES (
+                @AccumulatorImpactId, @AccumulatorDefinitionId,
+                @PayrollRunResultSetId, @EmployeePayrollResultId,
+                @PayrollRunId, @EmploymentId, @PersonId,
+                @ImpactStatusId, @ImpactSourceTypeId, @SourceObjectId,
+                @PriorValue, @DeltaValue, @NewValue,
+                @PostingDirectionId, @ScopeTypeId, @ScopeObjectId,
+                @JurisdictionId, @RulePackId, @RuleVersionId,
+                @RetroactiveFlag, @ReversalFlag, @CorrectionFlag,
+                @PriorAccumulatorImpactId, @Notes,
+                @ImpactTimestamp, @CreatedTimestamp, @UpdatedTimestamp
+            )
+            """;
+
+        const string contributionSql = """
+            INSERT INTO accumulator_contribution (
+                contribution_id, accumulator_id, accumulator_impact_id,
+                accumulator_definition_id, parent_contribution_id, root_contribution_id,
+                contribution_lineage_sequence, correction_reference_id,
+                source_run_id, source_result_set_id, source_employee_result_id,
+                source_period_id, execution_period_id, employment_id,
+                scope_type_id, scope_object_id,
+                contribution_amount, contribution_type_id,
+                before_value, after_value, creation_timestamp
+            ) VALUES (
+                @ContributionId, @AccumulatorId, @AccumulatorImpactId,
+                @AccumulatorDefinitionId, @ParentContributionId, @RootContributionId,
+                @ContributionLineageSequence, @CorrectionReferenceId,
+                @SourceRunId, @SourceResultSetId, @SourceEmployeeResultId,
+                @SourcePeriodId, @ExecutionPeriodId, @EmploymentId,
+                @ScopeTypeId, @ScopeObjectId,
+                @ContributionAmount, @ContributionTypeId,
+                @BeforeValue, @AfterValue, @CreationTimestamp
+            )
+            """;
+
+        const string balanceSql = """
+            INSERT INTO accumulator_balance (
+                accumulator_id, accumulator_definition_id, accumulator_family_id,
+                scope_type_id, participant_id, employer_id, jurisdiction_id, plan_id,
+                period_context_id, calendar_context_id, current_value,
+                balance_status_id, last_updated_run_id, last_updated_result_set_id,
+                last_update_timestamp
+            ) VALUES (
+                @AccumulatorId, @AccumulatorDefinitionId, @AccumulatorFamilyId,
+                @ScopeTypeId, @ParticipantId, @EmployerId, @JurisdictionId, @PlanId,
+                @PeriodContextId, @CalendarContextId, @CurrentValue,
+                @BalanceStatusId, @LastUpdatedRunId, @LastUpdatedResultSetId,
+                @LastUpdateTimestamp
+            )
+            ON CONFLICT (accumulator_id) DO UPDATE SET
+                current_value              = EXCLUDED.current_value,
+                balance_status_id          = EXCLUDED.balance_status_id,
+                last_updated_run_id        = EXCLUDED.last_updated_run_id,
+                last_updated_result_set_id = EXCLUDED.last_updated_result_set_id,
+                last_update_timestamp      = EXCLUDED.last_update_timestamp
+            """;
+
+        await uow.Connection.ExecuteAsync(impactSql,       impact,       uow.Transaction);
+        await uow.Connection.ExecuteAsync(contributionSql, contribution, uow.Transaction);
+        await uow.Connection.ExecuteAsync(balanceSql,      balance,      uow.Transaction);
     }
 }
 
@@ -762,6 +915,7 @@ public sealed class PayrollContextRepository : IPayrollContextRepository
                 context_version_number, context_change_reason_code,
                 effective_start_date, effective_end_date,
                 pay_date_convention, pay_date_offset_days, cutoff_offset_days, extra_period_policy,
+                ot_weekly_threshold_hours, workweek_start_day,
                 created_by, creation_timestamp, last_updated_by, last_update_timestamp
             ) VALUES (
                 @PayrollContextId, @PayrollContextCode, @PayrollContextName,
@@ -770,6 +924,7 @@ public sealed class PayrollContextRepository : IPayrollContextRepository
                 @ContextVersionNumber, @ContextChangeReasonCode,
                 @EffectiveStartDate, @EffectiveEndDate,
                 @PayDateConvention, @PayDateOffsetDays, @CutoffOffsetDays, @ExtraPeriodPolicy,
+                @OtWeeklyThresholdHours, @WorkweekStartDay,
                 @CreatedBy, @CreationTimestamp, @LastUpdatedBy, @LastUpdateTimestamp
             )
             """;
@@ -793,6 +948,8 @@ public sealed class PayrollContextRepository : IPayrollContextRepository
             context.PayDateOffsetDays,
             context.CutoffOffsetDays,
             context.ExtraPeriodPolicy,
+            context.OtWeeklyThresholdHours,
+            context.WorkweekStartDay,
             context.CreatedBy,
             context.CreationTimestamp,
             context.LastUpdatedBy,
@@ -1051,6 +1208,19 @@ public sealed class PayrollContextRepository : IPayrollContextRepository
         using var conn = _connectionFactory.CreateConnection();
         return await conn.ExecuteScalarAsync<int>(sql, new { PayrollContextId = payrollContextId });
     }
+
+    public async Task<(decimal? OtWeeklyThresholdHours, int? WorkweekStartDay)> GetLegalEntityDefaultsAsync(Guid legalEntityId)
+    {
+        const string sql = """
+            SELECT ot_weekly_threshold_hours, default_workweek_start_day
+            FROM org_unit
+            WHERE org_unit_id = @LegalEntityId
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        var row = await conn.QuerySingleOrDefaultAsync(sql, new { LegalEntityId = legalEntityId });
+        if (row is null) return (null, null);
+        return ((decimal?)row.ot_weekly_threshold_hours, (int?)row.default_workweek_start_day);
+    }
 }
 
 // ============================================================
@@ -1064,11 +1234,18 @@ public sealed class PayrollCompensationSnapshotRepository : IPayrollCompensation
     public PayrollCompensationSnapshotRepository(IConnectionFactory connectionFactory)
         => _connectionFactory = connectionFactory;
 
-    public async Task<decimal?> GetAnnualEquivalentAsync(Guid employmentId, DateOnly asOf)
+    public async Task<CompensationSnapshot?> GetSnapshotAsync(Guid employmentId, DateOnly asOf)
     {
         const string sql = """
-            SELECT cr.annual_equivalent
-            FROM compensation_record cr
+            SELECT
+                cr.annual_equivalent,
+                cr.base_rate,
+                rt.code AS rate_type_code,
+                fs.code AS flsa_status_code
+            FROM  compensation_record       cr
+            JOIN  lkp_compensation_rate_type rt  ON rt.id  = cr.rate_type_id
+            JOIN  employment                 emp ON emp.employment_id = cr.employment_id
+            JOIN  lkp_flsa_status            fs  ON fs.id  = emp.flsa_status_id
             WHERE cr.employment_id = @EmploymentId
               AND cr.primary_rate_flag = true
               AND cr.compensation_status_id = (
@@ -1077,10 +1254,10 @@ public sealed class PayrollCompensationSnapshotRepository : IPayrollCompensation
               AND cr.effective_start_date <= @AsOf
               AND (cr.effective_end_date IS NULL OR cr.effective_end_date >= @AsOf)
             ORDER BY cr.effective_start_date DESC
-            LIMIT 1
+            FETCH FIRST 1 ROWS ONLY
             """;
         using var conn = _connectionFactory.CreateConnection();
-        return await conn.ExecuteScalarAsync<decimal?>(sql, new
+        return await conn.QueryFirstOrDefaultAsync<CompensationSnapshot>(sql, new
         {
             EmploymentId = employmentId,
             AsOf         = asOf.ToDateTime(TimeOnly.MinValue)

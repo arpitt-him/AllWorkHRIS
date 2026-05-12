@@ -19,6 +19,8 @@ public sealed record PayrollContext
     public int          PayDateOffsetDays          { get; init; } = 5;
     public int          CutoffOffsetDays           { get; init; } = 3;
     public string       ExtraPeriodPolicy          { get; init; } = "EXTRA_SPECIAL";
+    public decimal      OtWeeklyThresholdHours     { get; init; } = 40.00m;
+    public int          WorkweekStartDay           { get; init; } = 1;
     public Guid         CreatedBy                  { get; init; }
     public DateTimeOffset CreationTimestamp        { get; init; }
     public Guid         LastUpdatedBy              { get; init; }

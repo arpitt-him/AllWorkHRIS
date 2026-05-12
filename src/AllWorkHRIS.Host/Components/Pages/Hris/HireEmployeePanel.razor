@@ -552,7 +552,14 @@
 
     private string BaseRateHint(int rateTypeId)
     {
-        var code = LookupCache.GetCode(LookupTables.CompensationRateType, rateTypeId);
+        var code     = LookupCache.GetCode(LookupTables.CompensationRateType, rateTypeId);
+        var flsaCode = _cmd.FlsaStatusId != 0
+            ? LookupCache.GetCode(LookupTables.FlsaStatus, _cmd.FlsaStatusId)
+            : null;
+
+        if (code == "SALARY" && flsaCode == "NON_EXEMPT")
+            return "Enter the annual salary. The hourly equivalent (annual ÷ 2080) will be derived and stored for FLSA compliance.";
+
         return code switch
         {
             "HOURLY"   => "Enter the hourly rate (e.g. 25.00). Payroll multiplies this by hours worked each period.",

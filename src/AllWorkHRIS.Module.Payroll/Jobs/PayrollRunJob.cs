@@ -117,8 +117,11 @@ public sealed class PayrollRunJob : BackgroundService
             };
             await resultSetRepo.InsertAsync(resultSet);
 
-            // Resolve pay frequency and period dates (same for all employees in the run)
+            // Resolve pay frequency, OT threshold, and period dates (same for all employees in the run)
             var periodsPerYear = await contextRepo.GetPeriodsPerYearAsync(run.PayrollContextId);
+            var payrollContext  = await contextRepo.GetByIdAsync(run.PayrollContextId)
+                                  ?? throw new InvalidOperationException(
+                                      $"Payroll context {run.PayrollContextId} not found for run {runId}");
             var period         = await contextRepo.GetPeriodByIdAsync(run.PeriodId)
                                  ?? throw new InvalidOperationException($"Period {run.PeriodId} not found for run {runId}");
 
@@ -199,7 +202,7 @@ public sealed class PayrollRunJob : BackgroundService
                 };
                 await resultRepo.InsertAsync(employeeResult);
 
-                var annualEquivalent = await compSnapshot.GetAnnualEquivalentAsync(employmentId, run.PayDate);
+                var snapshot = await compSnapshot.GetSnapshotAsync(employmentId, run.PayDate);
 
                 var input = new CalculationInput
                 {
@@ -211,7 +214,12 @@ public sealed class PayrollRunJob : BackgroundService
                     PayrollContextId        = run.PayrollContextId,
                     PeriodId                = run.PeriodId,
                     PayDate                 = run.PayDate,
-                    AnnualEquivalent        = annualEquivalent,
+                    AnnualEquivalent        = snapshot?.AnnualEquivalent,
+                    BaseRate                = snapshot?.BaseRate ?? 0m,
+                    FlsaStatusCode          = snapshot?.FlsaStatusCode,
+                    RateTypeCode            = snapshot?.RateTypeCode,
+                    OtWeeklyThresholdHours  = payrollContext.OtWeeklyThresholdHours,
+                    WorkWeekStartDay        = payrollContext.WorkweekStartDay,
                     PeriodsPerYear          = periodsPerYear,
                     PayPeriodStart          = period.PeriodStartDate,
                     PayPeriodEnd            = period.PeriodEndDate

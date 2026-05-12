@@ -37,4 +37,11 @@ public interface IPayrollContextRepository
     /// derived from the context's pay frequency.
     /// </summary>
     Task<int> GetPeriodsPerYearAsync(Guid payrollContextId);
+
+    /// <summary>
+    /// Returns the entity-level OT threshold and workweek start day stored on org_unit,
+    /// used to pre-populate new payroll context forms. Returns nulls when the entity
+    /// has no stored defaults (system defaults apply: 40.00 hrs, Monday).
+    /// </summary>
+    Task<(decimal? OtWeeklyThresholdHours, int? WorkweekStartDay)> GetLegalEntityDefaultsAsync(Guid legalEntityId);
 }

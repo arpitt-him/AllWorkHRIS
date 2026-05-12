@@ -732,9 +732,10 @@ public sealed class AssignmentRepository : IAssignmentRepository
 public interface ICompensationRepository
 {
     Task<CompensationRecord?>             GetActiveByEmploymentIdAsync(Guid employmentId, DateOnly asOf);
+    Task<CompensationRecord?>             GetNextScheduledByEmploymentIdAsync(Guid employmentId, DateOnly asOf);
     Task<IEnumerable<CompensationRecord>> GetHistoryByEmploymentIdAsync(Guid employmentId);
     Task<Guid>                            InsertAsync(CompensationRecord record, IUnitOfWork uow);
-    Task                                  CloseCurrentAsync(Guid employmentId, DateOnly endDate, IUnitOfWork uow);
+    Task                                  CloseCurrentAsync(Guid employmentId, DateOnly endDate, DateOnly newEffectiveDate, IUnitOfWork uow);
 }
 
 public sealed class CompensationRepository : ICompensationRepository
@@ -760,6 +761,22 @@ public sealed class CompensationRepository : ICompensationRepository
             new { EmploymentId = employmentId, AsOf = asOf });
     }
 
+    public async Task<CompensationRecord?> GetNextScheduledByEmploymentIdAsync(Guid employmentId, DateOnly asOf)
+    {
+        const string sql = """
+            SELECT * FROM compensation_record
+            WHERE employment_id         = @EmploymentId
+              AND primary_rate_flag      = true
+              AND compensation_status_id = (SELECT id FROM lkp_compensation_status WHERE code = 'ACTIVE')
+              AND effective_start_date   > @AsOf
+            ORDER BY effective_start_date ASC
+            FETCH FIRST 1 ROWS ONLY
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        return await conn.QueryFirstOrDefaultAsync<CompensationRecord>(sql,
+            new { EmploymentId = employmentId, AsOf = asOf });
+    }
+
     public async Task<IEnumerable<CompensationRecord>> GetHistoryByEmploymentIdAsync(Guid employmentId)
     {
         const string sql = """
@@ -775,13 +792,13 @@ public sealed class CompensationRepository : ICompensationRepository
     {
         const string sql = """
             INSERT INTO compensation_record (
-                compensation_id, employment_id, rate_type_id, base_rate, rate_currency,
+                compensation_id, employment_id, rate_type_id, pay_type_id, base_rate, rate_currency,
                 annual_equivalent, pay_frequency_id, effective_start_date, effective_end_date,
                 compensation_status_id, change_reason_code, approval_status_id, approved_by,
                 approval_timestamp, primary_rate_flag, created_by, creation_timestamp,
                 last_updated_by, last_update_timestamp
             ) VALUES (
-                @CompensationId, @EmploymentId, @RateTypeId, @BaseRate, @RateCurrency,
+                @CompensationId, @EmploymentId, @RateTypeId, @PayTypeId, @BaseRate, @RateCurrency,
                 @AnnualEquivalent, @PayFrequencyId, @EffectiveStartDate, @EffectiveEndDate,
                 @CompensationStatusId, @ChangeReasonCode, @ApprovalStatusId, @ApprovedBy,
                 @ApprovalTimestamp, @PrimaryRateFlag, @CreatedBy, @CreationTimestamp,
@@ -792,7 +809,7 @@ public sealed class CompensationRepository : ICompensationRepository
         return record.CompensationId;
     }
 
-    public async Task CloseCurrentAsync(Guid employmentId, DateOnly endDate, IUnitOfWork uow)
+    public async Task CloseCurrentAsync(Guid employmentId, DateOnly endDate, DateOnly newEffectiveDate, IUnitOfWork uow)
     {
         const string sql = """
             UPDATE compensation_record SET
@@ -803,13 +820,15 @@ public sealed class CompensationRepository : ICompensationRepository
             WHERE employment_id         = @EmploymentId
               AND primary_rate_flag      = true
               AND compensation_status_id = (SELECT id FROM lkp_compensation_status WHERE code = 'ACTIVE')
+              AND effective_start_date  <= @NewEffectiveDate
             """;
         await uow.Connection.ExecuteAsync(sql, new
         {
-            EmploymentId = employmentId,
-            EndDate      = endDate,
-            Now          = DateTimeOffset.UtcNow,
-            UpdatedBy    = Guid.Empty
+            EmploymentId     = employmentId,
+            EndDate          = endDate,
+            NewEffectiveDate = newEffectiveDate,
+            Now              = DateTimeOffset.UtcNow,
+            UpdatedBy        = Guid.Empty
         }, uow.Transaction);
     }
 }
@@ -948,6 +967,7 @@ public sealed class OrgUnitRepository : IOrgUnitRepository
                 org_unit_id, org_unit_type_id, org_unit_code, org_unit_name, parent_org_unit_id,
                 legal_entity_id, org_status_id, effective_start_date, effective_end_date,
                 tax_registration_number, country_code, state_of_incorporation, legal_entity_type_id,
+                ot_weekly_threshold_hours, default_workweek_start_day,
                 address_line_1, address_line_2, city, state_code, postal_code, locality_code,
                 work_location_type_id,
                 created_by, creation_timestamp, last_updated_by, last_update_timestamp
@@ -955,6 +975,7 @@ public sealed class OrgUnitRepository : IOrgUnitRepository
                 @OrgUnitId, @OrgUnitTypeId, @OrgUnitCode, @OrgUnitName, @ParentOrgUnitId,
                 @LegalEntityId, @OrgStatusId, @EffectiveStartDate, @EffectiveEndDate,
                 @TaxRegistrationNumber, @CountryCode, @StateOfIncorporation, @LegalEntityTypeId,
+                @OtWeeklyThresholdHours, @DefaultWorkweekStartDay,
                 @AddressLine1, @AddressLine2, @City, @StateCode, @PostalCode, @LocalityCode,
                 @WorkLocationTypeId,
                 @CreatedBy, @CreationTimestamp, @LastUpdatedBy, @LastUpdateTimestamp
@@ -968,14 +989,16 @@ public sealed class OrgUnitRepository : IOrgUnitRepository
     {
         const string sql = """
             UPDATE org_unit SET
-                org_unit_code           = @OrgUnitCode,
-                org_unit_name           = @OrgUnitName,
-                legal_entity_type_id    = @LegalEntityTypeId,
-                tax_registration_number = @TaxRegistrationNumber,
-                state_of_incorporation  = @StateOfIncorporation,
-                country_code            = @CountryCode,
-                last_updated_by         = @UpdatedBy,
-                last_update_timestamp   = now()
+                org_unit_code             = @OrgUnitCode,
+                org_unit_name             = @OrgUnitName,
+                legal_entity_type_id      = @LegalEntityTypeId,
+                tax_registration_number   = @TaxRegistrationNumber,
+                state_of_incorporation    = @StateOfIncorporation,
+                country_code              = @CountryCode,
+                ot_weekly_threshold_hours    = @OtWeeklyThresholdHours,
+                default_workweek_start_day   = @DefaultWorkweekStartDay,
+                last_updated_by              = @UpdatedBy,
+                last_update_timestamp     = now()
             WHERE org_unit_id = @OrgUnitId
             """;
         await uow.Connection.ExecuteAsync(sql, command, uow.Transaction);

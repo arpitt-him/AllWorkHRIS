@@ -8,6 +8,10 @@ public sealed record PipelineRequest
     public required Guid     PeriodId          { get; init; }
     public required DateOnly PayDate           { get; init; }
     public required decimal  GrossPayPeriod    { get; init; }
+    // When set, overrides the initial FicaTaxableWages in the pipeline context.
+    // Used by CalculationEngine to pass the FICA-adjusted wage base (gross minus only
+    // FICA-exempt deductions) separately from the income-taxable wage base.
+    public decimal?          FicaTaxableWages  { get; init; }
     public required int      PayPeriodsPerYear { get; init; }
 
     // Jurisdiction resolved by the caller from employee work-location data

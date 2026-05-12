@@ -187,13 +187,15 @@ public sealed class TimeAttendanceImportGateTests : IAsyncLifetime
     // -----------------------------------------------------------------------
     private ITimeImportService BuildService()
     {
-        var entryRepo    = new AllWorkHRIS.Module.TimeAttendance.Repositories.TimeEntryRepository(
-                               _connectionFactory, _lookupCache);
-        var notifier     = new NullTimeApprovalNotifier();
-        var otService    = new OvertimeDetectionService(entryRepo, _connectionFactory,
-                               _lookupCache, notifier);
-        var entryService = new TimeEntryService(entryRepo, otService, _connectionFactory,
-                               _lookupCache, notifier, NullLogger<TimeEntryService>.Instance);
+        var entryRepo      = new AllWorkHRIS.Module.TimeAttendance.Repositories.TimeEntryRepository(
+                                 _connectionFactory, _lookupCache);
+        var workSchedules  = new AllWorkHRIS.Module.TimeAttendance.Repositories.WorkScheduleRepository(
+                                 _connectionFactory);
+        var notifier       = new NullTimeApprovalNotifier();
+        var otService      = new OvertimeDetectionService(entryRepo, _connectionFactory,
+                                 _lookupCache, notifier);
+        var entryService   = new TimeEntryService(entryRepo, otService, workSchedules, _connectionFactory,
+                                 _lookupCache, notifier, NullLogger<TimeEntryService>.Instance);
         return new TimeImportService(_connectionFactory, _lookupCache, entryService);
     }
 

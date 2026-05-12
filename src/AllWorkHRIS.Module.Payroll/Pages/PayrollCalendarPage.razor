@@ -145,6 +145,29 @@
                             </select>
                         </div>
                     }
+                    <div class="form-field">
+                        <label class="form-label">OT Weekly Threshold (hrs)</label>
+                        <input type="number" class="form-control" @bind="_newCtx.OtWeeklyThresholdHours"
+                               min="1" max="168" step="0.5" />
+                        <span style="font-size:var(--font-size-sm);color:#6B7280">
+                            FLSA standard is 40.00. Override only if this payroll group has a lower company-configured threshold than the legal entity default.
+                        </span>
+                    </div>
+                    <div class="form-field">
+                        <label class="form-label">Workweek Start Day</label>
+                        <select class="form-control" @bind="_newCtx.WorkweekStartDay">
+                            <option value="0">Sunday</option>
+                            <option value="1">Monday</option>
+                            <option value="2">Tuesday</option>
+                            <option value="3">Wednesday</option>
+                            <option value="4">Thursday</option>
+                            <option value="5">Friday</option>
+                            <option value="6">Saturday</option>
+                        </select>
+                        <span style="font-size:var(--font-size-sm);color:#6B7280">
+                            Pre-populated from the legal entity default. FLSA workweek anchor — every non-exempt employee in this group uses this day.
+                        </span>
+                    </div>
                 </div>
             }
 
@@ -287,16 +310,25 @@
     public void Dispose()
         => SessionState.OnChanged -= HandleEntityChanged;
 
-    private void ToggleNewContextForm()
+    private async Task ToggleNewContextForm()
     {
         _showNewContextForm = !_showNewContextForm;
         _contextError       = null;
         if (_showNewContextForm)
+        {
+            var entityId = SessionState.SelectedLegalEntityId ?? Guid.Empty;
+            var (otThreshold, wwStartDay) = entityId != Guid.Empty
+                ? await ContextRepo.GetLegalEntityDefaultsAsync(entityId)
+                : (null, null);
+
             _newCtx = new NewContextForm
             {
-                EffectiveStartDate = DateOnly.FromDateTime(TemporalContext.GetOperativeDate()),
-                LegalEntityId      = SessionState.SelectedLegalEntityId ?? Guid.Empty
+                EffectiveStartDate     = DateOnly.FromDateTime(TemporalContext.GetOperativeDate()),
+                LegalEntityId          = entityId,
+                OtWeeklyThresholdHours = otThreshold ?? 40.00m,
+                WorkweekStartDay       = wwStartDay  ?? 1
             };
+        }
     }
 
     private async Task CreateContextAsync()
@@ -342,6 +374,8 @@
                 PayDateOffsetDays       = _newCtx.PayDateOffsetDays,
                 CutoffOffsetDays        = _newCtx.CutoffOffsetDays,
                 ExtraPeriodPolicy       = _newCtx.ExtraPeriodPolicy,
+                OtWeeklyThresholdHours  = _newCtx.OtWeeklyThresholdHours,
+                WorkweekStartDay        = _newCtx.WorkweekStartDay,
                 CreatedBy               = _currentUserId,
                 CreationTimestamp       = now,
                 LastUpdatedBy           = _currentUserId,
@@ -395,15 +429,17 @@
 
     private sealed class NewContextForm
     {
-        public string   Code                { get; set; } = "";
-        public string   Name                { get; set; } = "";
-        public Guid     LegalEntityId       { get; set; }
-        public int      RateTypeId          { get; set; }
-        public int      PayFrequencyId      { get; set; }
-        public DateOnly EffectiveStartDate  { get; set; } = DateOnly.MinValue;
-        public string?  PayDateConvention   { get; set; }
-        public int      PayDateOffsetDays   { get; set; } = 5;
-        public int      CutoffOffsetDays    { get; set; } = 3;
-        public string   ExtraPeriodPolicy   { get; set; } = "EXTRA_SPECIAL";
+        public string   Code                   { get; set; } = "";
+        public string   Name                   { get; set; } = "";
+        public Guid     LegalEntityId          { get; set; }
+        public int      RateTypeId             { get; set; }
+        public int      PayFrequencyId         { get; set; }
+        public DateOnly EffectiveStartDate     { get; set; } = DateOnly.MinValue;
+        public string?  PayDateConvention      { get; set; }
+        public int      PayDateOffsetDays      { get; set; } = 5;
+        public int      CutoffOffsetDays       { get; set; } = 3;
+        public string   ExtraPeriodPolicy      { get; set; } = "EXTRA_SPECIAL";
+        public decimal  OtWeeklyThresholdHours { get; set; } = 40.00m;
+        public int      WorkweekStartDay        { get; set; } = 1;
     }
 }

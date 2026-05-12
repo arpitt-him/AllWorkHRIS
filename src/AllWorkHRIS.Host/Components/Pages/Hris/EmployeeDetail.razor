@@ -116,6 +116,12 @@ else
                             <div class="form-field">
                                 <label class="form-label">New Base Rate <span class="req">*</span></label>
                                 <input type="number" step="0.01" min="0" class="form-input" @bind="_compNewBaseRate" />
+                                @if (_compNewRateTypeId != 0 &&
+                                     LookupCache.GetCode(LookupTables.CompensationRateType, _compNewRateTypeId) == "SALARY" &&
+                                     LookupCache.GetCode(LookupTables.FlsaStatus, _employment!.FlsaStatusId) == "NON_EXEMPT")
+                                {
+                                    <span class="field-hint">Enter the annual salary. The hourly equivalent (annual ÷ 2080) will be derived and stored for FLSA compliance.</span>
+                                }
                             </div>
                             <div class="form-field">
                                 <label class="form-label">Pay Frequency <span class="req">*</span></label>
@@ -758,18 +764,58 @@ else
                     <AuthorizeView Roles="HrisAdmin">
                         <Authorized>
                             <div class="detail-section">
-                                <h3 class="section-title">Current Compensation</h3>
                                 @if (_compensation is not null)
                                 {
+                                    var today       = DateOnly.FromDateTime(TemporalContext.GetOperativeDate());
+                                    var isScheduled = _compensation.EffectiveStartDate > today;
+                                    var payTypeCode = _compensation.PayTypeId.HasValue
+                                        ? LookupCache.GetCode(LookupTables.PayType, _compensation.PayTypeId.Value)
+                                        : null;
+                                    <h3 class="section-title">
+                                        @(isScheduled ? "Scheduled Compensation" : "Current Compensation")
+                                    </h3>
+                                    @if (isScheduled)
+                                    {
+                                        <div class="alert-warning" style="margin-bottom:var(--space-3)">
+                                            Rate takes effect @_compensation.EffectiveStartDate.ToString("MMMM d, yyyy") — not yet applied to payroll.
+                                        </div>
+                                    }
                                     <div class="detail-grid">
-                                        <div class="detail-item">
-                                            <span class="detail-label">Rate Type</span>
-                                            <span class="detail-value">@LookupLabel(LookupTables.CompensationRateType, _compensation.RateTypeId)</span>
-                                        </div>
-                                        <div class="detail-item">
-                                            <span class="detail-label">Base Rate</span>
-                                            <span class="detail-value">@_compensation.BaseRate.ToString("C") @_compensation.RateCurrency</span>
-                                        </div>
+                                        @if (_compensation.PayTypeId.HasValue)
+                                        {
+                                            <div class="detail-item">
+                                                <span class="detail-label">Pay Type</span>
+                                                <span class="detail-value">@LookupLabel(LookupTables.PayType, _compensation.PayTypeId.Value)</span>
+                                            </div>
+                                        }
+                                        @if (payTypeCode == "SALARY" && _compensation.AnnualEquivalent.HasValue)
+                                        {
+                                            <div class="detail-item">
+                                                <span class="detail-label">Annual Salary</span>
+                                                <span class="detail-value">@_compensation.AnnualEquivalent.Value.ToString("C0")</span>
+                                            </div>
+                                        }
+                                        else if (payTypeCode == "HOURLY")
+                                        {
+                                            <div class="detail-item">
+                                                <span class="detail-label">Hourly Rate</span>
+                                                <span class="detail-value">@_compensation.BaseRate.ToString("C") @_compensation.RateCurrency</span>
+                                            </div>
+                                            @if (_compensation.AnnualEquivalent.HasValue)
+                                            {
+                                                <div class="detail-item">
+                                                    <span class="detail-label">Annualized</span>
+                                                    <span class="detail-value">@_compensation.AnnualEquivalent.Value.ToString("C0")</span>
+                                                </div>
+                                            }
+                                        }
+                                        else
+                                        {
+                                            <div class="detail-item">
+                                                <span class="detail-label">Base Rate</span>
+                                                <span class="detail-value">@_compensation.BaseRate.ToString("C") @_compensation.RateCurrency</span>
+                                            </div>
+                                        }
                                         <div class="detail-item">
                                             <span class="detail-label">Pay Frequency</span>
                                             <span class="detail-value">@LookupLabel(LookupTables.PayFrequency, _compensation.PayFrequencyId)</span>
@@ -782,9 +828,69 @@ else
                                 }
                                 else
                                 {
+                                    <h3 class="section-title">Current Compensation</h3>
                                     <p class="placeholder-text">No active compensation record.</p>
                                 }
                             </div>
+                            @if (_compensationHistory.Any(r => r.CompensationId != _compensation?.CompensationId))
+                            {
+                                <div class="detail-section" style="border-top:1px solid var(--color-border);padding-top:var(--space-3)">
+                                    <button class="history-toggle" @onclick="() => _showCompHistory = !_showCompHistory">
+                                        @(_showCompHistory ? "▲ Hide Compensation History" : "▼ Compensation History")
+                                    </button>
+                                    @if (_showCompHistory)
+                                    {
+                                        var hToday      = DateOnly.FromDateTime(TemporalContext.GetOperativeDate());
+                                        var historyRows = _compensationHistory
+                                            .Where(r => r.CompensationId != _compensation?.CompensationId)
+                                            .ToList();
+                                        @if (historyRows.Count == 0)
+                                        {
+                                            <p class="placeholder-text" style="margin-top:var(--space-2)">No prior compensation records.</p>
+                                        }
+                                        else
+                                        {
+                                            <div class="table-wrapper" style="margin-top:var(--space-3)">
+                                                <table class="data-table">
+                                                    <thead>
+                                                        <tr>
+                                                            <th>Pay Type</th>
+                                                            <th>Rate</th>
+                                                            <th>Frequency</th>
+                                                            <th>Effective</th>
+                                                            <th>Ended</th>
+                                                            <th>Status</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        @foreach (var rec in historyRows)
+                                                        {
+                                                            var hPayCode = rec.PayTypeId.HasValue
+                                                                ? LookupCache.GetCode(LookupTables.PayType, rec.PayTypeId.Value)
+                                                                : LookupCache.GetCode(LookupTables.CompensationRateType, rec.RateTypeId);
+                                                            var hRate = (hPayCode == "SALARY" && rec.AnnualEquivalent.HasValue)
+                                                                ? rec.AnnualEquivalent.Value.ToString("C0") + " / yr"
+                                                                : rec.BaseRate.ToString("C") + " / hr";
+                                                            var hStatusCode = LookupCache.GetCode(LookupTables.CompensationStatus, rec.CompensationStatusId);
+                                                            var hIsFuture   = hStatusCode == "ACTIVE" && rec.EffectiveStartDate > hToday;
+                                                            var hBadgeClass = hIsFuture ? "badge-warning" : (hStatusCode == "ACTIVE" ? "badge-success" : "badge-neutral");
+                                                            var hBadgeLabel = hIsFuture ? "Pending" : LookupLabel(LookupTables.CompensationStatus, rec.CompensationStatusId);
+                                                            <tr>
+                                                                <td>@(rec.PayTypeId.HasValue ? LookupLabel(LookupTables.PayType, rec.PayTypeId.Value) : LookupLabel(LookupTables.CompensationRateType, rec.RateTypeId))</td>
+                                                                <td>@hRate</td>
+                                                                <td>@LookupLabel(LookupTables.PayFrequency, rec.PayFrequencyId)</td>
+                                                                <td>@rec.EffectiveStartDate.ToString("yyyy-MM-dd")</td>
+                                                                <td>@(rec.EffectiveEndDate.HasValue ? rec.EffectiveEndDate.Value.ToString("yyyy-MM-dd") : "—")</td>
+                                                                <td><span class="badge @hBadgeClass">@hBadgeLabel</span></td>
+                                                            </tr>
+                                                        }
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        }
+                                    }
+                                </div>
+                            }
                         </Authorized>
                         <NotAuthorized>
                             <p class="placeholder-text">You do not have permission to view compensation details.</p>
@@ -1298,7 +1404,9 @@ else
     private Employment?       _employment;
     private Person?           _person;
     private PersonAddress?    _address;
-    private CompensationRecord? _compensation;
+    private CompensationRecord?              _compensation;
+    private IEnumerable<CompensationRecord> _compensationHistory    = [];
+    private bool                            _showCompHistory        = false;
 
     // Pending change requests (loaded with person)
     private IReadOnlyList<PersonChangeRequest> _pendingRequests = [];
@@ -1502,9 +1610,10 @@ else
             _employment = await EmploymentService.GetByIdAsync(EmploymentId);
             if (_employment is not null)
             {
-                _person       = await PersonService.GetByEmploymentIdAsync(EmploymentId);
-                _compensation = await CompensationService.GetCurrentRateAsync(
+                _person               = await PersonService.GetByEmploymentIdAsync(EmploymentId);
+                _compensation         = await CompensationService.GetCurrentRateAsync(
                     EmploymentId, DateOnly.FromDateTime(TemporalContext.GetOperativeDate()));
+                _compensationHistory  = await CompensationService.GetRateHistoryAsync(EmploymentId);
 
                 if (_person is not null)
                 {
@@ -1923,7 +2032,7 @@ else
         _compNewRateTypeId = _compensation?.RateTypeId  ?? 0;
         _compNewBaseRate   = _compensation?.BaseRate    ?? 0m;
         _compNewFreqId     = _compensation?.PayFrequencyId ?? 0;
-        _compEffectiveDt   = DateTime.Today;
+        _compEffectiveDt   = TemporalContext.GetOperativeDate();
         _compReasonCode    = "";
         _compError         = null;
         _actionMode        = ActionMode.ChangeCompensation;
@@ -1952,8 +2061,9 @@ else
                 InitiatedBy      = await GetCurrentUserIdAsync()
             };
             await CompensationService.ChangeCompensationAsync(cmd);
-            _compensation = await CompensationService.GetCurrentRateAsync(
+            _compensation        = await CompensationService.GetCurrentRateAsync(
                 EmploymentId, DateOnly.FromDateTime(TemporalContext.GetOperativeDate()));
+            _compensationHistory = await CompensationService.GetRateHistoryAsync(EmploymentId);
             _actionMode = ActionMode.None;
         }
         catch (Exception ex) { _compError = ex.Message; }
@@ -2427,6 +2537,18 @@ else
 
 <style>
     .page-container { padding: var(--space-6); }
+
+    .history-toggle {
+        background: none;
+        border: none;
+        padding: 0;
+        font-size: .8rem;
+        color: var(--color-text-secondary, #6b7280);
+        cursor: pointer;
+        text-decoration: underline;
+        text-underline-offset: 2px;
+    }
+    .history-toggle:hover { color: var(--aw-navy, #1a2e44); }
 
     .action-panel {
         background: #fffbeb;

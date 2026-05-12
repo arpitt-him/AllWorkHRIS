@@ -2,6 +2,7 @@
 @implements IDisposable
 @inject AuthenticationStateProvider AuthStateProvider
 @inject ITemporalOverrideService    TemporalOverride
+@inject NavigationManager           Nav
 
 <div class="shell-topbar">
     <div class="shell-topbar-left">
@@ -23,12 +24,15 @@
 
     <div class="shell-topbar-right">
         <span class="shell-user-name">@_displayName</span>
-        <a href="/account/logout" class="shell-logout-link">Sign out</a>
+        <a href="/account/logout" class="shell-logout-link"
+           @onclick="SignOutAsync" @onclick:preventDefault>Sign out</a>
     </div>
 </div>
 
 @code {
     private string _displayName = string.Empty;
+
+    private void SignOutAsync() => Nav.NavigateTo("/account/logout", forceLoad: true);
 
     private string AppDisplayName =>
         Environment.GetEnvironmentVariable("APP_DISPLAY_NAME") ?? "AllWorkHRIS";

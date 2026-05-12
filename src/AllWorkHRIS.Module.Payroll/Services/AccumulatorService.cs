@@ -1,3 +1,4 @@
+using AllWorkHRIS.Core.Data;
 using AllWorkHRIS.Core.Temporal;
 using AllWorkHRIS.Module.Payroll.Domain.Accumulators;
 using AllWorkHRIS.Module.Payroll.Domain.Results;
@@ -10,13 +11,15 @@ public sealed class AccumulatorService : IAccumulatorService
     private readonly IAccumulatorRepository _accumulatorRepo;
     private readonly IResultLineRepository  _resultLineRepo;
     private readonly ITemporalContext       _temporalContext;
+    private readonly IConnectionFactory     _connectionFactory;
 
     public AccumulatorService(IAccumulatorRepository accumulatorRepo, IResultLineRepository resultLineRepo,
-        ITemporalContext temporalContext)
+        ITemporalContext temporalContext, IConnectionFactory connectionFactory)
     {
-        _accumulatorRepo = accumulatorRepo;
-        _resultLineRepo  = resultLineRepo;
-        _temporalContext = temporalContext;
+        _accumulatorRepo   = accumulatorRepo;
+        _resultLineRepo    = resultLineRepo;
+        _temporalContext   = temporalContext;
+        _connectionFactory = connectionFactory;
     }
 
     public async Task ApplyAsync(EmployeePayrollResult result, Guid runId, CancellationToken ct = default)
@@ -29,11 +32,14 @@ public sealed class AccumulatorService : IAccumulatorService
         var taxLines          = await _resultLineRepo.GetTaxLinesByResultIdAsync(result.EmployeePayrollResultId);
         var contributionLines = await _resultLineRepo.GetContributionsByResultIdAsync(result.EmployeePayrollResultId);
 
+        // Single transaction for the entire employee — any mid-chain failure rolls back all layers.
+        using var uow = new UnitOfWork(_connectionFactory);
+
         foreach (var line in earningsLines.Where(l => l.AccumulatorImpactFlag))
         {
             var def = await _accumulatorRepo.GetDefinitionByCodeAsync(line.EarningsCode, asOf);
             if (def is null) continue;
-            await ApplyChainAsync(def, line.CalculatedAmount, line.EarningsResultLineId, result, runId, now);
+            await ApplyChainAsync(def, line.CalculatedAmount, line.EarningsResultLineId, result, runId, now, uow);
             ct.ThrowIfCancellationRequested();
         }
 
@@ -41,7 +47,7 @@ public sealed class AccumulatorService : IAccumulatorService
         {
             var def = await _accumulatorRepo.GetDefinitionByCodeAsync(line.DeductionCode, asOf);
             if (def is null) continue;
-            await ApplyChainAsync(def, line.CalculatedAmount, line.DeductionResultLineId, result, runId, now);
+            await ApplyChainAsync(def, line.CalculatedAmount, line.DeductionResultLineId, result, runId, now, uow);
             ct.ThrowIfCancellationRequested();
         }
 
@@ -49,7 +55,7 @@ public sealed class AccumulatorService : IAccumulatorService
         {
             var def = await _accumulatorRepo.GetDefinitionByCodeAsync(line.TaxCode, asOf);
             if (def is null) continue;
-            await ApplyChainAsync(def, line.CalculatedAmount, line.TaxResultLineId, result, runId, now);
+            await ApplyChainAsync(def, line.CalculatedAmount, line.TaxResultLineId, result, runId, now, uow);
             ct.ThrowIfCancellationRequested();
         }
 
@@ -57,13 +63,92 @@ public sealed class AccumulatorService : IAccumulatorService
         {
             var def = await _accumulatorRepo.GetDefinitionByCodeAsync(line.ContributionCode, asOf);
             if (def is null) continue;
-            await ApplyChainAsync(def, line.CalculatedAmount, line.EmployerContributionResultLineId, result, runId, now);
+            await ApplyChainAsync(def, line.CalculatedAmount, line.EmployerContributionResultLineId, result, runId, now, uow);
             ct.ThrowIfCancellationRequested();
+        }
+
+        uow.Commit();
+    }
+
+    public async Task ReverseAsync(Guid employeePayrollResultId, Guid reversedBy, CancellationToken ct = default)
+    {
+        var impacts = await _accumulatorRepo.GetImpactsByResultIdAsync(employeePayrollResultId);
+        if (impacts.Count == 0) return;
+
+        var now = DateTimeOffset.UtcNow;
+
+        // Insert a negating impact row for every original impact, linking back to it.
+        foreach (var original in impacts)
+        {
+            var reversal = new AccumulatorImpact
+            {
+                AccumulatorImpactId      = Guid.NewGuid(),
+                AccumulatorDefinitionId  = original.AccumulatorDefinitionId,
+                PayrollRunResultSetId    = original.PayrollRunResultSetId,
+                EmployeePayrollResultId  = original.EmployeePayrollResultId,
+                PayrollRunId             = original.PayrollRunId,
+                EmploymentId             = original.EmploymentId,
+                PersonId                 = original.PersonId,
+                ImpactStatusId           = 1,
+                ImpactSourceTypeId       = original.ImpactSourceTypeId,
+                SourceObjectId           = original.SourceObjectId,
+                PriorValue               = original.NewValue,
+                DeltaValue               = -original.DeltaValue,
+                NewValue                 = original.PriorValue,
+                PostingDirectionId       = original.DeltaValue >= 0 ? 2 : 1,   // flip direction
+                ScopeTypeId              = original.ScopeTypeId,
+                ScopeObjectId            = original.ScopeObjectId,
+                JurisdictionId           = original.JurisdictionId,
+                RulePackId               = null,
+                RuleVersionId            = null,
+                RetroactiveFlag          = false,
+                ReversalFlag             = true,
+                CorrectionFlag           = false,
+                PriorAccumulatorImpactId = original.AccumulatorImpactId,
+                Notes                    = $"Reversal of run cancellation by {reversedBy}",
+                ImpactTimestamp          = now,
+                CreatedTimestamp         = now,
+                UpdatedTimestamp         = now
+            };
+            await _accumulatorRepo.InsertImpactAsync(reversal);
+            ct.ThrowIfCancellationRequested();
+        }
+
+        // For each unique accumulator definition, revert the balance to the pre-run value.
+        // impacts are ordered ASC — the first impact per definition has the correct PriorValue.
+        var executionPeriodId = await ResolveExecutionPeriodIdAsync(employeePayrollResultId);
+        if (executionPeriodId is null) return;
+
+        var firstImpactPerDef = impacts
+            .GroupBy(i => i.AccumulatorDefinitionId)
+            .Select(g => g.First());
+
+        foreach (var impact in firstImpactPerDef)
+        {
+            if (impact.EmploymentId is null) continue;
+            await _accumulatorRepo.RevertBalanceAsync(
+                impact.AccumulatorDefinitionId,
+                impact.EmploymentId.Value,
+                executionPeriodId.Value,
+                impact.PriorValue,
+                impact.PayrollRunId,
+                now);
         }
     }
 
-    public Task ReverseAsync(Guid employeePayrollResultId, Guid reversedBy, CancellationToken ct = default)
-        => throw new NotImplementedException("Accumulator reversal is deferred to the correction run flow (Phase 4.6+).");
+    private async Task<Guid?> ResolveExecutionPeriodIdAsync(Guid employeePayrollResultId)
+    {
+        // The result line repository doesn't expose the result header directly, so we
+        // derive the period from any impact row's contribution record via the run context.
+        // Simplest path: read it from the first impact's run → period link isn't stored on
+        // the impact itself, so we lean on the contribution table which carries it.
+        // For now we query accumulator_contribution for the result.
+        var contributions = await _accumulatorRepo.GetContributionsByResultIdAsync(employeePayrollResultId);
+        return contributions.Count > 0 ? contributions[0].ExecutionPeriodId : null;
+    }
+
+    public Task<IReadOnlyDictionary<string, decimal>> GetYtdBalancesAsync(Guid employmentId, DateOnly asOf)
+        => _accumulatorRepo.GetYtdBalancesAsync(employmentId, asOf);
 
     // -------------------------------------------------------
     // Four-layer accumulator mutation chain (per SPEC §9):
@@ -74,7 +159,7 @@ public sealed class AccumulatorService : IAccumulatorService
 
     private async Task ApplyChainAsync(
         AccumulatorDefinition def, decimal delta, Guid sourceLineId,
-        EmployeePayrollResult result, Guid runId, DateTimeOffset now)
+        EmployeePayrollResult result, Guid runId, DateTimeOffset now, IUnitOfWork uow)
     {
         // Read current balance — if absent this is the first contribution for this scope/period
         var existingBalance = await _accumulatorRepo.GetBalanceAsync(
@@ -115,8 +200,6 @@ public sealed class AccumulatorService : IAccumulatorService
             CreatedTimestamp         = now,
             UpdatedTimestamp         = now
         };
-        await _accumulatorRepo.InsertImpactAsync(impact);
-
         // Layer 3 — AccumulatorContribution (persisted history)
         var contribution = new AccumulatorContribution
         {
@@ -140,11 +223,8 @@ public sealed class AccumulatorService : IAccumulatorService
             ContributionTypeId          = 1,      // STANDARD
             BeforeValue                 = priorValue,
             AfterValue                  = newValue,
-            ContributionTimestamp       = now,
-            CreatedTimestamp            = now
+            CreationTimestamp           = now
         };
-        await _accumulatorRepo.InsertContributionAsync(contribution);
-
         // Layer 4 — AccumulatorBalance (authoritative current state — upsert)
         var updatedBalance = new AccumulatorBalance
         {
@@ -164,6 +244,6 @@ public sealed class AccumulatorService : IAccumulatorService
             LastUpdatedResultSetId   = null,
             LastUpdateTimestamp      = now
         };
-        await _accumulatorRepo.UpsertBalanceAsync(updatedBalance);
+        await _accumulatorRepo.ApplyImpactChainAsync(impact, contribution, updatedBalance, uow);
     }
 }

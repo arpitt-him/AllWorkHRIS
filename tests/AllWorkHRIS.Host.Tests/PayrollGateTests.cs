@@ -113,8 +113,15 @@ public sealed class PayrollGateTests : IDisposable
         var contextRepo = new PayrollContextRepository(_connectionFactory, auditService);
         var queue       = Channel.CreateUnbounded<Guid>();
 
+        var resultRepo      = new EmployeePayrollResultRepository(_connectionFactory);
+        var accumulatorRepo = new AccumulatorRepository(_connectionFactory);
+        var resultLineRepo  = new ResultLineRepository(_connectionFactory);
+        var temporalCtx     = new AllWorkHRIS.Core.Temporal.SystemTemporalContext();
+        var accumulatorSvc  = new AccumulatorService(accumulatorRepo, resultLineRepo,
+                                  temporalCtx, _connectionFactory);
+
         _runService = new PayrollRunService(
-            _runRepo, contextRepo, queue,
+            _runRepo, contextRepo, resultRepo, accumulatorSvc, queue,
             NullLogger<PayrollRunService>.Instance, auditService);
     }
 

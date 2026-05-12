@@ -130,6 +130,27 @@
                     <input type="text" class="form-input" @bind="_countryCode"
                            placeholder="e.g. US" maxlength="2" style="text-transform:uppercase" />
                 </div>
+                <div class="form-field">
+                    <label class="form-label">OT Weekly Threshold (hrs)</label>
+                    <input type="number" class="form-input" @bind="_otThreshold"
+                           min="1" max="40" step="0.5"
+                           title="Hours per workweek that trigger overtime. FLSA floor is 40; set lower only if company policy is more generous." />
+                    <span style="font-size:var(--font-size-sm);color:#6B7280">Default 40.00 — applies to all payroll contexts for this entity unless overridden.</span>
+                </div>
+                <div class="form-field">
+                    <label class="form-label">Default Workweek Start Day</label>
+                    <select class="form-input" @bind="_defaultWorkweekStartDay">
+                        <option value="">— system default (Monday) —</option>
+                        <option value="0">Sunday</option>
+                        <option value="1">Monday</option>
+                        <option value="2">Tuesday</option>
+                        <option value="3">Wednesday</option>
+                        <option value="4">Thursday</option>
+                        <option value="5">Friday</option>
+                        <option value="6">Saturday</option>
+                    </select>
+                    <span style="font-size:var(--font-size-sm);color:#6B7280">Pre-populates new payroll contexts. Most employers use Monday or Sunday.</span>
+                </div>
             </div>
 
             @if (_error is not null)
@@ -184,6 +205,27 @@
                     <label class="form-label">Country Code (ISO 2-letter) <span class="required">*</span></label>
                     <input type="text" class="form-input" @bind="_editCountryCode" placeholder="e.g. US" maxlength="2" style="text-transform:uppercase" />
                 </div>
+                <div class="form-field">
+                    <label class="form-label">OT Weekly Threshold (hrs)</label>
+                    <input type="number" class="form-input" @bind="_editOtThreshold"
+                           min="1" max="40" step="0.5"
+                           title="Hours per workweek that trigger overtime. FLSA floor is 40." />
+                    <span style="font-size:var(--font-size-sm);color:#6B7280">Changing this does not automatically update existing payroll contexts.</span>
+                </div>
+                <div class="form-field">
+                    <label class="form-label">Default Workweek Start Day</label>
+                    <select class="form-input" @bind="_editDefaultWorkweekStartDay">
+                        <option value="">— system default (Monday) —</option>
+                        <option value="0">Sunday</option>
+                        <option value="1">Monday</option>
+                        <option value="2">Tuesday</option>
+                        <option value="3">Wednesday</option>
+                        <option value="4">Thursday</option>
+                        <option value="5">Friday</option>
+                        <option value="6">Saturday</option>
+                    </select>
+                    <span style="font-size:var(--font-size-sm);color:#6B7280">Changing this does not automatically update existing payroll contexts.</span>
+                </div>
             </div>
 
             @if (_editError is not null)
@@ -216,18 +258,22 @@
     private string   _taxId        = "";
     private string   _stateOfInc   = "";
     private string   _countryCode  = "";
+    private decimal  _otThreshold                = 40.00m;
+    private string   _defaultWorkweekStartDay    = "";
     private string?  _error;
     private bool     _saving       = false;
 
     // Edit panel
-    private bool     _showEditPanel  = false;
+    private bool     _showEditPanel    = false;
     private OrgUnit? _editingEntity;
-    private string   _editName        = "";
-    private string   _editCode        = "";
+    private string   _editName         = "";
+    private string   _editCode         = "";
     private string   _editEntityTypeId = "";
-    private string   _editTaxId       = "";
-    private string   _editStateOfInc  = "";
-    private string   _editCountryCode = "";
+    private string   _editTaxId        = "";
+    private string   _editStateOfInc   = "";
+    private string   _editCountryCode  = "";
+    private decimal  _editOtThreshold              = 40.00m;
+    private string   _editDefaultWorkweekStartDay  = "";
     private string?  _editError;
 
     protected override async Task OnInitializedAsync()
@@ -250,9 +296,11 @@
     private void OpenAddPanel()
     {
         _name = _code = _entityTypeId = _taxId = _stateOfInc = _countryCode = "";
-        _effectiveDt = TemporalContext.GetOperativeDate();
-        _error = null;
-        _showPanel = true;
+        _effectiveDt  = TemporalContext.GetOperativeDate();
+        _otThreshold              = 40.00m;
+        _defaultWorkweekStartDay  = "";
+        _error                    = null;
+        _showPanel    = true;
     }
 
     private void ClosePanel() => _showPanel = false;
@@ -274,14 +322,16 @@
             var command = new CreateOrgUnitCommand
             {
                 OrgUnitTypeCode       = "LEGAL_ENTITY",
-                OrgUnitCode           = _code.Trim().ToUpper(),
-                OrgUnitName           = _name.Trim(),
-                LegalEntityTypeId     = int.TryParse(_entityTypeId, out var tid) ? tid : null,
-                TaxRegistrationNumber = _taxId,
-                StateOfIncorporation  = _stateOfInc,
-                CountryCode           = _countryCode,
-                EffectiveStartDate    = DateOnly.FromDateTime(_effectiveDt),
-                InitiatedBy           = actorId
+                OrgUnitCode              = _code.Trim().ToUpper(),
+                OrgUnitName              = _name.Trim(),
+                LegalEntityTypeId        = int.TryParse(_entityTypeId, out var tid) ? tid : null,
+                TaxRegistrationNumber    = _taxId,
+                StateOfIncorporation     = _stateOfInc,
+                CountryCode              = _countryCode,
+                OtWeeklyThresholdHours   = _otThreshold,
+                DefaultWorkweekStartDay  = int.TryParse(_defaultWorkweekStartDay, out var wsd) ? wsd : null,
+                EffectiveStartDate       = DateOnly.FromDateTime(_effectiveDt),
+                InitiatedBy              = actorId
             };
 
             await OrgStructureService.CreateOrgUnitAsync(command);
@@ -301,7 +351,9 @@
         _editTaxId        = entity.TaxRegistrationNumber ?? "";
         _editStateOfInc   = entity.StateOfIncorporation  ?? "";
         _editCountryCode  = entity.CountryCode            ?? "";
-        _editError        = null;
+        _editOtThreshold             = entity.OtWeeklyThresholdHours ?? 40.00m;
+        _editDefaultWorkweekStartDay = entity.DefaultWorkweekStartDay?.ToString() ?? "";
+        _editError                   = null;
         _showEditPanel    = true;
     }
 
@@ -324,14 +376,16 @@
 
             var command = new UpdateOrgUnitCommand
             {
-                OrgUnitId             = _editingEntity.OrgUnitId,
-                OrgUnitCode           = _editCode,
-                OrgUnitName           = _editName,
-                LegalEntityTypeId     = int.TryParse(_editEntityTypeId, out var tid) ? tid : null,
-                TaxRegistrationNumber = _editTaxId,
-                StateOfIncorporation  = _editStateOfInc,
-                CountryCode           = _editCountryCode,
-                UpdatedBy             = actorId
+                OrgUnitId                = _editingEntity.OrgUnitId,
+                OrgUnitCode              = _editCode,
+                OrgUnitName              = _editName,
+                LegalEntityTypeId        = int.TryParse(_editEntityTypeId, out var tid) ? tid : null,
+                TaxRegistrationNumber    = _editTaxId,
+                StateOfIncorporation     = _editStateOfInc,
+                CountryCode              = _editCountryCode,
+                OtWeeklyThresholdHours   = _editOtThreshold,
+                DefaultWorkweekStartDay  = int.TryParse(_editDefaultWorkweekStartDay, out var ewsd) ? ewsd : null,
+                UpdatedBy                = actorId
             };
 
             await OrgStructureService.UpdateOrgUnitAsync(command);

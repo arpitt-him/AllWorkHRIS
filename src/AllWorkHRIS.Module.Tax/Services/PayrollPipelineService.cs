@@ -157,7 +157,7 @@ public sealed class PayrollPipelineService : IPayrollPipelineService
             GrossPayPeriod    = request.GrossPayPeriod,
             AnnualizedGross   = request.GrossPayPeriod * request.PayPeriodsPerYear,
             IncomeTaxableWages = request.GrossPayPeriod,
-            FicaTaxableWages   = request.GrossPayPeriod,
+            FicaTaxableWages   = request.FicaTaxableWages ?? request.GrossPayPeriod,
             DisposableIncome   = 0m,
 
             ComputedTax  = 0m,

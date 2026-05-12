@@ -1,7 +1,7 @@
 @page "/payroll/tax-profiles"
 @layout MainLayout
 @rendermode InteractiveServer
-@attribute [Authorize(Roles = "PayrollAdmin,PayrollOperator")]
+@attribute [Authorize(Roles = "TaxAdmin,PayrollAdmin,PayrollOperator")]
 @implements IDisposable
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Components.Authorization
@@ -266,6 +266,54 @@
                                     }
                                 </div>
                                 <button class="btn-secondary" @onclick="() => EnterEditMode(jCode, profile!)">Edit / New Election</button>
+
+                                @* Election History *@
+                                <div style="margin-top:.75rem;border-top:1px solid var(--color-border,#e5e7eb);padding-top:.75rem;">
+                                    <button class="history-toggle" @onclick="() => ToggleHistoryAsync(jCode)">
+                                        @(_historyExpanded[jCode] ? "▲ Hide Election History" : "▼ Election History")
+                                    </button>
+                                    @if (_historyExpanded[jCode])
+                                    {
+                                        @if (_history[jCode] is null)
+                                        {
+                                            <p style="font-size:.8rem;color:var(--color-text-secondary);margin-top:.5rem;">Loading…</p>
+                                        }
+                                        else if (_history[jCode]!.Count == 0)
+                                        {
+                                            <p style="font-size:.8rem;color:var(--color-text-secondary);margin-top:.5rem;">No prior elections on file.</p>
+                                        }
+                                        else
+                                        {
+                                            <table style="width:100%;border-collapse:collapse;font-size:.8rem;margin-top:.5rem;">
+                                                <thead>
+                                                    <tr style="border-bottom:1px solid var(--color-border,#e5e7eb);">
+                                                        <th style="padding:.3rem .5rem;text-align:left;font-size:.75rem;color:var(--color-text-secondary);">Form</th>
+                                                        <th style="padding:.3rem .5rem;text-align:left;font-size:.75rem;color:var(--color-text-secondary);">Effective From</th>
+                                                        <th style="padding:.3rem .5rem;text-align:left;font-size:.75rem;color:var(--color-text-secondary);">Effective To</th>
+                                                        <th style="padding:.3rem .5rem;text-align:left;font-size:.75rem;color:var(--color-text-secondary);">Filing Status</th>
+                                                        <th style="padding:.3rem .5rem;text-align:left;font-size:.75rem;color:var(--color-text-secondary);">Allowances</th>
+                                                        <th style="padding:.3rem .5rem;text-align:left;font-size:.75rem;color:var(--color-text-secondary);">Exempt</th>
+                                                        <th style="padding:.3rem .5rem;text-align:left;font-size:.75rem;color:var(--color-text-secondary);">Recorded By</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    @foreach (var hRow in _history[jCode]!)
+                                                    {
+                                                        <tr style="border-bottom:1px solid #f3f4f6;">
+                                                            <td style="padding:.3rem .5rem;">@hRow.FormTypeCode</td>
+                                                            <td style="padding:.3rem .5rem;">@hRow.EffectiveFrom.ToString("yyyy-MM-dd")</td>
+                                                            <td style="padding:.3rem .5rem;">@hRow.EffectiveTo.ToString("yyyy-MM-dd")</td>
+                                                            <td style="padding:.3rem .5rem;">@(hRow.FilingStatusCode ?? "—")</td>
+                                                            <td style="padding:.3rem .5rem;">@(hRow.AllowanceCount > 0 ? hRow.AllowanceCount.ToString() : "—")</td>
+                                                            <td style="padding:.3rem .5rem;">@(hRow.ExemptFlag ? "Yes" : "No")</td>
+                                                            <td style="padding:.3rem .5rem;">@hRow.CreatedBy</td>
+                                                        </tr>
+                                                    }
+                                                </tbody>
+                                            </table>
+                                        }
+                                    }
+                                </div>
                             }
 
                             @* Edit form *@
@@ -454,9 +502,11 @@
     private Dictionary<string, bool>                      _editMode       = [];
     private Dictionary<string, bool>                      _expanded       = [];
     private Dictionary<string, DateOnly>                  _effectiveDates = [];
-    private Dictionary<string, bool>                      _saving         = [];
-    private Dictionary<string, string?>                   _saveErrors     = [];
-    private Dictionary<string, bool>                      _saveSuccess    = [];
+    private Dictionary<string, bool>                                       _saving          = [];
+    private Dictionary<string, string?>                                   _saveErrors      = [];
+    private Dictionary<string, bool>                                       _saveSuccess     = [];
+    private Dictionary<string, bool>                                       _historyExpanded = [];
+    private Dictionary<string, IReadOnlyList<ElectionHistoryRow>?>         _history         = [];
 
     // ── Lifecycle ────────────────────────────────────────────────
     protected override async Task OnInitializedAsync()
@@ -557,17 +607,21 @@
         _saving.Clear();
         _saveErrors.Clear();
         _saveSuccess.Clear();
+        _historyExpanded.Clear();
+        _history.Clear();
         foreach (var jur in _jurisdictions)
         {
             var code = jur.JurisdictionCode;
-            _profiles[code]       = null;
-            _forms[code]          = new TaxProfileSaveModel();
-            _editMode[code]       = false;
-            _expanded[code]       = false;
-            _effectiveDates[code] = jur.PendingEffectiveDate ?? today;
-            _saving[code]         = false;
-            _saveErrors[code]     = null;
-            _saveSuccess[code]    = false;
+            _profiles[code]        = null;
+            _forms[code]           = new TaxProfileSaveModel();
+            _editMode[code]        = false;
+            _expanded[code]        = false;
+            _effectiveDates[code]  = jur.PendingEffectiveDate ?? today;
+            _saving[code]          = false;
+            _saveErrors[code]      = null;
+            _saveSuccess[code]     = false;
+            _historyExpanded[code] = false;
+            _history[code]         = null;
         }
     }
 
@@ -656,6 +710,16 @@
     // ── UI helpers ───────────────────────────────────────────────
     private void ToggleExpand(string code) => _expanded[code] = !_expanded[code];
 
+    private async Task ToggleHistoryAsync(string jCode)
+    {
+        _historyExpanded[jCode] = !_historyExpanded[jCode];
+        if (_historyExpanded[jCode] && _history[jCode] is null)
+        {
+            StateHasChanged();
+            _history[jCode] = await TaxRepo.GetElectionHistoryAsync(_selectedEmploymentId, jCode);
+        }
+    }
+
     private void EnterEditMode(string code, TaxProfileRow profile)
     {
         _forms[code]       = ProfileToForm(profile);
@@ -721,7 +785,7 @@
         try
         {
             var authState = await AuthState.GetAuthenticationStateAsync();
-            var userName  = authState.User.Identity?.Name ?? "system";
+            var userName  = authState.User.GetDisplayName();
             var form      = _forms[jurisdictionCode];
             var effFrom   = _effectiveDates[jurisdictionCode];
 
@@ -754,8 +818,10 @@
             var asOf = DateOnly.FromDateTime(TemporalContext.GetOperativeDate());
             _profiles[jurisdictionCode] = await TaxRepo.GetActiveProfileAsync(
                 _selectedEmploymentId, jurisdictionCode, asOf);
-            _editMode[jurisdictionCode]    = false;
-            _saveSuccess[jurisdictionCode] = true;
+            _editMode[jurisdictionCode]        = false;
+            _saveSuccess[jurisdictionCode]     = true;
+            _historyExpanded[jurisdictionCode] = false;
+            _history[jurisdictionCode]         = null;
             await LoadNotReadyAsync();
         }
         catch (Exception ex)
@@ -819,4 +885,16 @@
 
     .emp-result-item:last-child { border-bottom: none; }
     .emp-result-item:hover { background: #f3f4f6; }
+
+    .history-toggle {
+        background: none;
+        border: none;
+        padding: 0;
+        font-size: .8rem;
+        color: var(--color-text-secondary, #6b7280);
+        cursor: pointer;
+        text-decoration: underline;
+        text-underline-offset: 2px;
+    }
+    .history-toggle:hover { color: var(--aw-navy, #1a2e44); }
 </style>

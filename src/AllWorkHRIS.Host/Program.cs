@@ -533,8 +533,10 @@ app.MapGet("/account/login", async (HttpContext ctx, string? returnUrl) =>
 app.MapGet("/account/logout", async (HttpContext ctx) =>
 {
     await ctx.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-    await ctx.SignOutAsync(OpenIdConnectDefaults.AuthenticationScheme);
-});
+    await ctx.SignOutAsync(OpenIdConnectDefaults.AuthenticationScheme,
+        new AuthenticationProperties { RedirectUri = "/" });
+})
+.AllowAnonymous();
 
 // ---------------------------------------------------------------------------
 // 13. Blazor — .NET 9 style

@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using AllWorkHRIS.Core.Pipeline;
 using AllWorkHRIS.Module.Payroll.Domain.Results;
 using AllWorkHRIS.Module.Payroll.Repositories;
+using AllWorkHRIS.Module.TimeAttendance.Repositories;
 
 namespace AllWorkHRIS.Module.Payroll.Services;
 
@@ -11,6 +12,8 @@ public sealed partial class CalculationEngine : ICalculationEngine
     private readonly IPayrollPipelineService       _pipeline;
     private readonly IEmploymentJurisdictionLookup _jurisdictionLookup;
     private readonly IBenefitStepProvider          _benefitStepProvider;
+    private readonly IAccumulatorService           _accumulatorService;
+    private readonly ITimeEntryRepository          _timeEntryRepo;
     private readonly ILogger<CalculationEngine>    _logger;
 
     public CalculationEngine(
@@ -18,14 +21,21 @@ public sealed partial class CalculationEngine : ICalculationEngine
         IPayrollPipelineService       pipeline,
         IEmploymentJurisdictionLookup jurisdictionLookup,
         IBenefitStepProvider          benefitStepProvider,
+        IAccumulatorService           accumulatorService,
+        ITimeEntryRepository          timeEntryRepo,
         ILogger<CalculationEngine>    logger)
     {
         _resultLineRepo      = resultLineRepo;
         _pipeline            = pipeline;
         _jurisdictionLookup  = jurisdictionLookup;
         _benefitStepProvider = benefitStepProvider;
+        _accumulatorService  = accumulatorService;
+        _timeEntryRepo       = timeEntryRepo;
         _logger              = logger;
     }
+
+    // Carries hours and rate for NON_EXEMPT employees through both earnings steps.
+    private sealed record NonExemptPayData(decimal RegHours, decimal OtHours, decimal HourlyRate);
 
     [LoggerMessage(Level = LogLevel.Debug,
         Message = "Calculating pay for employment {EmploymentId} (result {EmployeePayrollResultId})")]
@@ -46,15 +56,18 @@ public sealed partial class CalculationEngine : ICalculationEngine
 
         try
         {
+            // Resolve non-exempt pay data once — shared by Steps 1 and 2.
+            var nonExemptData = await ResolveNonExemptDataAsync(input, ct);
+
             // Step 1 — Base earnings (regular/salary)
-            var baseEarnings = await StepBaseEarningsAsync(input, employeePayrollResultId, ct);
+            var baseEarnings = await StepBaseEarningsAsync(input, employeePayrollResultId, nonExemptData, ct);
             foreach (var line in baseEarnings)
                 await _resultLineRepo.InsertEarningsLineAsync(line);
 
             ct.ThrowIfCancellationRequested();
 
-            // Step 2 — Premium earnings (overtime, holiday, shift differential)
-            var premiumEarnings = await StepPremiumEarningsAsync(input, employeePayrollResultId, ct);
+            // Step 2 — Premium earnings (overtime premium at 0.5× rate for NON_EXEMPT)
+            var premiumEarnings = await StepPremiumEarningsAsync(input, employeePayrollResultId, nonExemptData, ct);
             foreach (var line in premiumEarnings)
                 await _resultLineRepo.InsertEarningsLineAsync(line);
 
@@ -129,10 +142,23 @@ public sealed partial class CalculationEngine : ICalculationEngine
             // negative net pay — the excess is flagged as NET_PAY_FLOOR_APPLIED.
             var taxableWages = Math.Max(grossPay - preTaxTotal, 0m);
 
+            // Stage 1 floor detection (Phase 10.6): pre-tax deductions consumed all earnings.
+            // The tax pipeline receives 0 income-taxable wages; net pay will be clamped at Stage 2.
+            if (benefitCtx.IncomeTaxableWages < 0m)
+                _logger.LogWarning(
+                    "NET_PAY_FLOOR (pre-tax) for employment {EmploymentId}: " +
+                    "IncomeTaxableWages={IncomeTaxableWages:F4} — clamped to 0 for tax pipeline",
+                    input.EmploymentId, benefitCtx.IncomeTaxableWages);
+
             ct.ThrowIfCancellationRequested();
 
             // Step 6 — Tax withholdings (federal, state, local)
-            var taxLines = await StepTaxWithholdingsAsync(input, employeePayrollResultId, taxableWages, ct);
+            // benefitCtx.FicaTaxableWages reflects gross minus only FICA-exempt deductions;
+            // taxableWages (income-taxable) reflects gross minus all pre-tax deductions.
+            // Both are passed separately so the FICA steps use the correct wage base.
+            // Guard against negative FICA base in the unlikely event FICA-exempt deductions exceed gross.
+            var ficaTaxableWages = Math.Max(benefitCtx.FicaTaxableWages + (grossPay - cashGross), 0m);
+            var taxLines = await StepTaxWithholdingsAsync(input, employeePayrollResultId, taxableWages, ficaTaxableWages, ct);
             foreach (var line in taxLines)
                 await _resultLineRepo.InsertTaxLineAsync(line);
 
@@ -207,42 +233,131 @@ public sealed partial class CalculationEngine : ICalculationEngine
 
     // ── Earnings steps ───────────────────────────────────────────────────────
 
-    private Task<IReadOnlyList<EarningsResultLine>> StepBaseEarningsAsync(
-        CalculationInput input, Guid resultId, CancellationToken ct)
+    private async Task<NonExemptPayData?> ResolveNonExemptDataAsync(
+        CalculationInput input, CancellationToken ct)
     {
-        if (input.AnnualEquivalent is null or 0m || input.PeriodsPerYear == 0)
+        if (input.FlsaStatusCode != "NON_EXEMPT") return null;
+
+        var entries = await _timeEntryRepo.GetApprovedHoursByEmploymentAndPeriodAsync(
+            input.EmploymentId, input.PayPeriodStart, input.PayPeriodEnd);
+
+        var (regHours, otHours) = ComputeOtSplit(entries, input.OtWeeklyThresholdHours, input.WorkWeekStartDay);
+
+        // base_rate is always the operative hourly rate — set at hire/comp-change time.
+        // For salaried non-exempt employees it is pre-computed as annual_equivalent ÷ 2080.
+        var hourlyRate = input.BaseRate;
+
+        _logger.LogDebug(
+            "NON_EXEMPT hours for employment {EmploymentId}: reg={RegHours:F4} ot={OtHours:F4} rate={Rate:F4}",
+            input.EmploymentId, regHours, otHours, hourlyRate);
+
+        return new NonExemptPayData(regHours, otHours, hourlyRate);
+    }
+
+    private static (decimal RegHours, decimal OtHours) ComputeOtSplit(
+        IReadOnlyList<(DateOnly WorkDate, decimal Hours)> entries, decimal otThreshold, int weekStartDay)
+    {
+        var regHours = 0m;
+        var otHours  = 0m;
+
+        // Group by FLSA workweek using the context-configured anchor day
+        foreach (var weekTotal in entries
+                     .GroupBy(e => GetWeekStart(e.WorkDate, weekStartDay))
+                     .Select(g => g.Sum(e => e.Hours)))
+        {
+            regHours += Math.Min(weekTotal, otThreshold);
+            otHours  += Math.Max(weekTotal - otThreshold, 0m);
+        }
+
+        return (regHours, otHours);
+    }
+
+    // Returns the date of the anchor day that starts the FLSA workweek containing the given date.
+    // weekStartDay: 0=Sunday, 1=Monday, … 6=Saturday (matches DayOfWeek integer values).
+    private static DateOnly GetWeekStart(DateOnly date, int weekStartDay)
+    {
+        var dow  = (int)date.DayOfWeek;
+        var diff = ((dow - weekStartDay) + 7) % 7;
+        return date.AddDays(-diff);
+    }
+
+    private Task<IReadOnlyList<EarningsResultLine>> StepBaseEarningsAsync(
+        CalculationInput input, Guid resultId, NonExemptPayData? nonExempt, CancellationToken ct)
+    {
+        var now   = DateTimeOffset.UtcNow;
+        var lines = new List<EarningsResultLine>();
+
+        if (nonExempt is not null)
+        {
+            // NON_EXEMPT: hours-based pay at the employee's hourly rate
+            if (nonExempt.HourlyRate > 0m && (nonExempt.RegHours > 0m || nonExempt.OtHours > 0m))
+            {
+                if (nonExempt.RegHours > 0m)
+                    lines.Add(MakeEarningsLine(resultId, input.EmploymentId, "REG", "Regular",
+                        nonExempt.RegHours, nonExempt.HourlyRate,
+                        Math.Round(nonExempt.RegHours * nonExempt.HourlyRate, 4, MidpointRounding.AwayFromZero),
+                        now));
+
+                if (nonExempt.OtHours > 0m)
+                    lines.Add(MakeEarningsLine(resultId, input.EmploymentId, "OT", "Overtime",
+                        nonExempt.OtHours, nonExempt.HourlyRate,
+                        Math.Round(nonExempt.OtHours * nonExempt.HourlyRate, 4, MidpointRounding.AwayFromZero),
+                        now));
+            }
+        }
+        else
+        {
+            // SALARY + EXEMPT: fixed period amount; time entries irrelevant
+            if (input.AnnualEquivalent is not null and not 0m && input.PeriodsPerYear > 0)
+            {
+                var amount = Math.Round(input.AnnualEquivalent.Value / input.PeriodsPerYear, 4,
+                                 MidpointRounding.AwayFromZero);
+                lines.Add(MakeEarningsLine(resultId, input.EmploymentId, "REG", "Regular Salary",
+                    null, input.AnnualEquivalent.Value, amount, now));
+            }
+        }
+
+        return Task.FromResult<IReadOnlyList<EarningsResultLine>>(lines);
+    }
+
+    private Task<IReadOnlyList<EarningsResultLine>> StepPremiumEarningsAsync(
+        CalculationInput input, Guid resultId, NonExemptPayData? nonExempt, CancellationToken ct)
+    {
+        if (nonExempt is null || nonExempt.OtHours <= 0m || nonExempt.HourlyRate <= 0m)
             return Task.FromResult<IReadOnlyList<EarningsResultLine>>([]);
 
-        var periodAmount = Math.Round(input.AnnualEquivalent.Value / input.PeriodsPerYear, 4,
-                               MidpointRounding.AwayFromZero);
+        // OT premium: 0.5× rate × OT hours (the extra half-time above straight pay)
+        var premAmount = Math.Round(nonExempt.OtHours * nonExempt.HourlyRate * 0.5m, 4,
+                             MidpointRounding.AwayFromZero);
 
         IReadOnlyList<EarningsResultLine> lines =
         [
-            new EarningsResultLine
-            {
-                EarningsResultLineId    = Guid.NewGuid(),
-                EmployeePayrollResultId = resultId,
-                EmploymentId            = input.EmploymentId,
-                EarningsCode            = "REG",
-                EarningsDescription     = "Regular Salary",
-                Quantity                = null,
-                Rate                    = input.AnnualEquivalent.Value,
-                CalculatedAmount        = periodAmount,
-                JurisdictionSplitFlag   = false,
-                TaxableFlag             = true,
-                AccumulatorImpactFlag   = true,
-                SourceRuleVersionId     = null,
-                CorrectionFlag          = false,
-                CorrectsLineId          = null,
-                CreationTimestamp       = DateTimeOffset.UtcNow
-            }
+            MakeEarningsLine(resultId, input.EmploymentId, "OT_PREM", "Overtime Premium",
+                nonExempt.OtHours, nonExempt.HourlyRate * 0.5m, premAmount, DateTimeOffset.UtcNow)
         ];
         return Task.FromResult(lines);
     }
 
-    private Task<IReadOnlyList<EarningsResultLine>> StepPremiumEarningsAsync(
-        CalculationInput input, Guid resultId, CancellationToken ct)
-        => Task.FromResult<IReadOnlyList<EarningsResultLine>>([]);
+    private static EarningsResultLine MakeEarningsLine(
+        Guid resultId, Guid employmentId, string code, string description,
+        decimal? quantity, decimal rate, decimal amount, DateTimeOffset now) => new()
+    {
+        EarningsResultLineId    = Guid.NewGuid(),
+        EmployeePayrollResultId = resultId,
+        EmploymentId            = employmentId,
+        EarningsCode            = code,
+        EarningsDescription     = description,
+        Quantity                = quantity,
+        Rate                    = rate,
+        CalculatedAmount        = amount,
+        JurisdictionSplitFlag   = false,
+        TaxableFlag             = true,
+        AccumulatorImpactFlag   = true,
+        SourceRuleVersionId     = null,
+        CorrectionFlag          = false,
+        CorrectsLineId          = null,
+        CreationTimestamp       = now
+    };
 
     private Task<IReadOnlyList<EarningsResultLine>> StepImputedIncomeAsync(
         CalculationInput input, Guid resultId, CancellationToken ct)
@@ -336,7 +451,9 @@ public sealed partial class CalculationEngine : ICalculationEngine
                 ContributionCode                 = code,
                 ContributionDescription          = code,
                 CalculatedAmount                 = amount,
-                AccumulatorImpactFlag            = true,
+                // BOTH-step codes (e.g. US_FED_SS, US_FED_MEDICARE) are already accumulated
+                // via the employee tax_result_line. Suppress here to avoid double-counting.
+                AccumulatorImpactFlag            = !benefitCtx.BothStepCodes.Contains(code),
                 SourceRuleVersionId              = null,
                 CorrectionFlag                   = false,
                 CorrectsLineId                   = null,
@@ -350,12 +467,14 @@ public sealed partial class CalculationEngine : ICalculationEngine
     // ── Tax step ─────────────────────────────────────────────────────────────
 
     private async Task<IReadOnlyList<TaxResultLine>> StepTaxWithholdingsAsync(
-        CalculationInput input, Guid resultId, decimal taxableWages, CancellationToken ct)
+        CalculationInput input, Guid resultId, decimal taxableWages, decimal ficaTaxableWages, CancellationToken ct)
     {
         var jurisdictions = await _jurisdictionLookup.GetJurisdictionsAsync(
             input.EmploymentId, input.PayDate, ct);
 
         if (jurisdictions.Count == 0) return [];
+
+        var ytdBalances = await _accumulatorService.GetYtdBalancesAsync(input.EmploymentId, input.PayDate);
 
         var lines = new List<TaxResultLine>();
         var now   = DateTimeOffset.UtcNow;
@@ -370,8 +489,10 @@ public sealed partial class CalculationEngine : ICalculationEngine
                 PeriodId          = input.PeriodId,
                 PayDate           = input.PayDate,
                 GrossPayPeriod    = taxableWages,
+                FicaTaxableWages  = ficaTaxableWages,
                 PayPeriodsPerYear = input.PeriodsPerYear,
                 JurisdictionCode  = jur.JurisdictionCode,
+                YtdBalances       = ytdBalances,
                 SkipBenefitSteps  = true
             };
 
@@ -418,7 +539,11 @@ public sealed partial class CalculationEngine : ICalculationEngine
                     TaxableWagesAmount      = taxableWages,
                     CalculatedAmount        = amount,
                     EmployerFlag            = true,
-                    AccumulatorImpactFlag   = true,
+                    // Employer-side tax lines share the same code as the employee side (e.g. US_FED_SS).
+                    // There are no employer-side accumulator definitions yet, so suppress to prevent
+                    // double-counting against the employee accumulator. Re-enable when US_FED_SS_ER
+                    // definitions and distinct ER codes are introduced.
+                    AccumulatorImpactFlag   = false,
                     SourceRuleVersionId     = null,
                     CorrectionFlag          = false,
                     CorrectsLineId          = null,

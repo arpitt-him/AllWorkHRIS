@@ -20,4 +20,12 @@ public interface ITimeEntryRepository
     Task<string?>                 GetPeriodStatusAsync(Guid payrollPeriodId);
     Task<string?>                 GetFlsaStatusAsync(Guid employmentId);
     Task<bool>                    IsCategoryWorkedTimeAsync(string categoryCode);
+
+    /// <summary>
+    /// Returns total approved/locked worked hours per calendar date for an employment within a
+    /// pay period date range. Used by the payroll engine to compute hours-based pay and FLSA
+    /// overtime for non-exempt employees.
+    /// </summary>
+    Task<IReadOnlyList<(DateOnly WorkDate, decimal Hours)>> GetApprovedHoursByEmploymentAndPeriodAsync(
+        Guid employmentId, DateOnly periodStart, DateOnly periodEnd);
 }

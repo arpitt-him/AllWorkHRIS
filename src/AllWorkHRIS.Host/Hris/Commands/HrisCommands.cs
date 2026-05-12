@@ -243,20 +243,24 @@ public sealed record CreateOrgUnitCommand
     public string?           TaxRegistrationNumber  { get; init; }
     public string?           StateOfIncorporation   { get; init; }
     public string?           CountryCode            { get; init; }
-    public required DateOnly EffectiveStartDate     { get; init; }
-    public required Guid     InitiatedBy            { get; init; }
+    public decimal?          OtWeeklyThresholdHours   { get; init; }
+    public int?              DefaultWorkweekStartDay  { get; init; }
+    public required DateOnly EffectiveStartDate       { get; init; }
+    public required Guid     InitiatedBy              { get; init; }
 }
 
 public sealed record UpdateOrgUnitCommand
 {
-    public required Guid     OrgUnitId              { get; init; }
-    public required string   OrgUnitCode            { get; init; }
-    public required string   OrgUnitName            { get; init; }
-    public int?              LegalEntityTypeId      { get; init; }
-    public string?           TaxRegistrationNumber  { get; init; }
-    public string?           StateOfIncorporation   { get; init; }
-    public string?           CountryCode            { get; init; }
-    public required Guid     UpdatedBy              { get; init; }
+    public required Guid     OrgUnitId                { get; init; }
+    public required string   OrgUnitCode              { get; init; }
+    public required string   OrgUnitName              { get; init; }
+    public int?              LegalEntityTypeId        { get; init; }
+    public string?           TaxRegistrationNumber    { get; init; }
+    public string?           StateOfIncorporation     { get; init; }
+    public string?           CountryCode              { get; init; }
+    public decimal?          OtWeeklyThresholdHours   { get; init; }
+    public int?              DefaultWorkweekStartDay  { get; init; }
+    public required Guid     UpdatedBy                { get; init; }
 }
 
 // ============================================================

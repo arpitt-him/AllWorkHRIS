@@ -10,24 +10,30 @@ namespace AllWorkHRIS.Module.Payroll.Services;
 
 public sealed class PayrollRunService : IPayrollRunService
 {
-    private readonly IPayrollRunRepository      _runRepo;
-    private readonly IPayrollContextRepository  _contextRepo;
-    private readonly Channel<Guid>              _queue;
-    private readonly ILogger<PayrollRunService> _logger;
-    private readonly IAuditService              _auditService;
+    private readonly IPayrollRunRepository              _runRepo;
+    private readonly IPayrollContextRepository          _contextRepo;
+    private readonly IEmployeePayrollResultRepository   _resultRepo;
+    private readonly IAccumulatorService                _accumulatorService;
+    private readonly Channel<Guid>                      _queue;
+    private readonly ILogger<PayrollRunService>         _logger;
+    private readonly IAuditService                      _auditService;
 
     public PayrollRunService(
-        IPayrollRunRepository      runRepo,
-        IPayrollContextRepository  contextRepo,
-        Channel<Guid>              queue,
-        ILogger<PayrollRunService> logger,
-        IAuditService              auditService)
+        IPayrollRunRepository            runRepo,
+        IPayrollContextRepository        contextRepo,
+        IEmployeePayrollResultRepository resultRepo,
+        IAccumulatorService              accumulatorService,
+        Channel<Guid>                    queue,
+        ILogger<PayrollRunService>       logger,
+        IAuditService                    auditService)
     {
-        _runRepo      = runRepo;
-        _contextRepo  = contextRepo;
-        _queue        = queue;
-        _logger       = logger;
-        _auditService = auditService;
+        _runRepo            = runRepo;
+        _contextRepo        = contextRepo;
+        _resultRepo         = resultRepo;
+        _accumulatorService = accumulatorService;
+        _queue              = queue;
+        _logger             = logger;
+        _auditService       = auditService;
     }
 
     public async Task<Guid> InitiateRunAsync(InitiatePayrollRunCommand command)
@@ -122,9 +128,29 @@ public sealed class PayrollRunService : IPayrollRunService
             throw new InvalidOperationException(
                 $"Run {command.RunId} cannot be cancelled from status {run.RunStatusId}.");
 
+        var wasCalculated = run.RunStatusId == (int)PayrollRunStatus.Calculated;
+
         await _runRepo.UpdateStatusAsync(command.RunId, (int)PayrollRunStatus.Cancelled, command.CancelledBy);
         _logger.LogInformation("Run {RunId} cancelled by {UserId}: {Reason}",
             command.RunId, command.CancelledBy, command.Reason);
+
+        if (wasCalculated)
+        {
+            var results = await _resultRepo.GetByRunIdAsync(command.RunId);
+            foreach (var result in results)
+            {
+                try
+                {
+                    await _accumulatorService.ReverseAsync(result.EmployeePayrollResultId, command.CancelledBy);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex,
+                        "Accumulator reversal failed for result {ResultId} after cancelling run {RunId} — cancellation stands",
+                        result.EmployeePayrollResultId, command.RunId);
+                }
+            }
+        }
 
         await _auditService.LogAsync(new AuditEventRecord(
             EventType:       "STATUS_CHANGE",

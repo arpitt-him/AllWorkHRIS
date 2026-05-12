@@ -1,0 +1,279 @@
+@page "/payroll/tax-setup/jurisdictions"
+@layout MainLayout
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = "TaxAdmin,PayrollAdmin")]
+@implements IDisposable
+@using Microsoft.AspNetCore.Authorization
+@using AllWorkHRIS.Host.Payroll.Tax
+@inject ITaxProfileRepository TaxRepo
+@inject IHrisSessionState     SessionState
+
+<PageTitle>Tax Jurisdictions — AllWork HRIS</PageTitle>
+
+<div class="page-container">
+
+    <div class="page-header">
+        <h2 class="page-title">Tax Jurisdictions</h2>
+        @if (SessionState.HasEntity)
+        {
+            <span class="page-subtitle">@SessionState.SelectedLegalEntityName</span>
+        }
+    </div>
+
+    @if (!SessionState.HasEntity)
+    {
+        <div class="alert-info">Select a legal entity from the header to manage its tax jurisdictions.</div>
+    }
+    else if (_loading)
+    {
+        <p>Loading…</p>
+    }
+    else
+    {
+        @if (_error is not null)
+        {
+            <div class="alert-error">@_error</div>
+        }
+
+        <div class="jurisdiction-panels">
+
+            <!-- ── Assigned panel ── -->
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title">Assigned (@_assigned.Count)</h3>
+                </div>
+                <div class="card-body">
+                    @if (_assigned.Count == 0)
+                    {
+                        <p class="text-muted">No jurisdictions assigned. Assign at least US-FED before running payroll.</p>
+                    }
+                    else
+                    {
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Jurisdiction</th>
+                                    <th>Code</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var j in _assigned)
+                                {
+                                    var isFederal = j.JurisdictionCode.EndsWith("-FED", StringComparison.OrdinalIgnoreCase);
+                                    var isConfirming = _confirmRemoveCode == j.JurisdictionCode;
+
+                                    <tr>
+                                        <td>@j.JurisdictionName</td>
+                                        <td><code>@j.JurisdictionCode</code></td>
+                                        <td class="action-cell">
+                                            @if (isFederal)
+                                            {
+                                                <span class="badge badge-info">Federal — required</span>
+                                            }
+                                            else if (isConfirming)
+                                            {
+                                                <span class="confirm-inline">
+                                                    @if (_affectedCount > 0)
+                                                    {
+                                                        <span class="confirm-warning">@_affectedCount employee(s) have active elections in this jurisdiction.</span>
+                                                    }
+                                                    <span>Remove @j.JurisdictionCode?</span>
+                                                    <button class="btn-danger btn-sm" disabled="@_saving"
+                                                            @onclick="() => ConfirmRemoveAsync(j.JurisdictionCode)">
+                                                        @(_saving ? "Removing…" : "Confirm Remove")
+                                                    </button>
+                                                    <button class="btn-secondary btn-sm" @onclick="CancelConfirm">Cancel</button>
+                                                </span>
+                                            }
+                                            else
+                                            {
+                                                <button class="btn-secondary btn-sm"
+                                                        @onclick="() => StartRemoveAsync(j.JurisdictionCode)">
+                                                    Remove
+                                                </button>
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+                </div>
+            </div>
+
+            <!-- ── Available panel ── -->
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title">Available (@_available.Count)</h3>
+                </div>
+                <div class="card-body">
+                    @if (_available.Count == 0)
+                    {
+                        <p class="text-muted">All active jurisdictions are already assigned.</p>
+                    }
+                    else
+                    {
+                        <div class="panel-actions">
+                            <button class="btn-primary btn-sm" disabled="@(_selected.Count == 0 || _saving)"
+                                    @onclick="AssignSelectedAsync">
+                                @(_saving ? "Assigning…" : $"Assign Selected ({_selected.Count})")
+                            </button>
+                        </div>
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th><input type="checkbox" @onchange="ToggleSelectAll" checked="@(_selected.Count == _available.Count && _available.Count > 0)" /></th>
+                                    <th>Jurisdiction</th>
+                                    <th>Code</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var j in _available)
+                                {
+                                    var isChecked = _selected.Contains(j.JurisdictionCode);
+                                    <tr>
+                                        <td><input type="checkbox" checked="@isChecked"
+                                                   @onchange="e => ToggleSelect(j.JurisdictionCode, (bool)(e.Value ?? false))" /></td>
+                                        <td>@j.JurisdictionName</td>
+                                        <td><code>@j.JurisdictionCode</code></td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+                </div>
+            </div>
+
+        </div>
+    }
+
+</div>
+
+@code {
+    private IReadOnlyList<TaxJurisdictionRow> _assigned  = [];
+    private IReadOnlyList<TaxJurisdictionRow> _all       = [];
+    private HashSet<string>                   _selected  = [];
+    private string?  _confirmRemoveCode;
+    private long     _affectedCount;
+    private bool     _loading = true;
+    private bool     _saving;
+    private string?  _error;
+
+    private List<TaxJurisdictionRow> _available =>
+        _all.Where(j => !_assigned.Any(a => a.JurisdictionCode == j.JurisdictionCode)).ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        SessionState.OnChanged += OnEntityChanged;
+        await LoadAsync();
+    }
+
+    public void Dispose() => SessionState.OnChanged -= OnEntityChanged;
+
+    private void OnEntityChanged()
+    {
+        _selected.Clear();
+        _confirmRemoveCode = null;
+        InvokeAsync(async () =>
+        {
+            await LoadAsync();
+            StateHasChanged();
+        });
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _error   = null;
+        try
+        {
+            _all = await TaxRepo.GetAllJurisdictionsAsync();
+            _assigned = SessionState.HasEntity
+                ? await TaxRepo.GetJurisdictionsByLegalEntityAsync(SessionState.SelectedLegalEntityId!.Value)
+                : [];
+        }
+        catch (Exception ex)
+        {
+            _error = $"Failed to load jurisdictions: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task AssignSelectedAsync()
+    {
+        if (!SessionState.HasEntity || _selected.Count == 0) return;
+        _saving = true;
+        _error  = null;
+        try
+        {
+            await TaxRepo.AssignJurisdictionsAsync(SessionState.SelectedLegalEntityId!.Value, _selected);
+            _selected.Clear();
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = $"Failed to assign jurisdictions: {ex.Message}";
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task StartRemoveAsync(string jurisdictionCode)
+    {
+        _confirmRemoveCode = jurisdictionCode;
+        _affectedCount     = 0;
+        _error             = null;
+        if (SessionState.HasEntity)
+        {
+            _affectedCount = await TaxRepo.GetEmployeesInJurisdictionScopeCountAsync(
+                SessionState.SelectedLegalEntityId!.Value, jurisdictionCode);
+        }
+    }
+
+    private async Task ConfirmRemoveAsync(string jurisdictionCode)
+    {
+        if (!SessionState.HasEntity) return;
+        _saving = true;
+        _error  = null;
+        try
+        {
+            await TaxRepo.RemoveJurisdictionAsync(SessionState.SelectedLegalEntityId!.Value, jurisdictionCode);
+            _confirmRemoveCode = null;
+            _selected.Remove(jurisdictionCode);
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = $"Failed to remove jurisdiction: {ex.Message}";
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private void CancelConfirm()
+    {
+        _confirmRemoveCode = null;
+        _affectedCount     = 0;
+    }
+
+    private void ToggleSelect(string code, bool isChecked)
+    {
+        if (isChecked) _selected.Add(code);
+        else           _selected.Remove(code);
+    }
+
+    private void ToggleSelectAll(ChangeEventArgs e)
+    {
+        var check = (bool)(e.Value ?? false);
+        if (check) foreach (var j in _available) _selected.Add(j.JurisdictionCode);
+        else       _selected.Clear();
+    }
+}

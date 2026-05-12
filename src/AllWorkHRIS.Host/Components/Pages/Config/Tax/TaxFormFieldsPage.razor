@@ -132,7 +132,7 @@ else if (_fields.Count > 0)
         try
         {
             var auth  = await AuthState.GetAuthenticationStateAsync();
-            var actor = auth.User.Identity?.Name ?? "system";
+            var actor = auth.User.GetDisplayName();
             await TaxConfig.UpdateFormFieldRequiredAsync(field.FieldDefinitionId, isRequired, actor);
             await LoadFieldsAsync();
         }
@@ -149,7 +149,7 @@ else if (_fields.Count > 0)
         try
         {
             var auth  = await AuthState.GetAuthenticationStateAsync();
-            var actor = auth.User.Identity?.Name ?? "system";
+            var actor = auth.User.GetDisplayName();
             await TaxConfig.UpdateFormFieldStatusAsync(
                 field.FieldDefinitionId, field.FieldKey, field.StatusCode, newStatus, actor);
             await LoadFieldsAsync();

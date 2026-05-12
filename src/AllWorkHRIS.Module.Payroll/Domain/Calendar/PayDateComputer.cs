@@ -52,6 +52,18 @@ public static class PayDateComputer
         return date;
     }
 
+    // Step forward one day at a time until a business day is reached.
+    // Used to find the earliest valid business day on or after a given date.
+    public static DateOnly ShiftForwardToBusinessDay(DateOnly date, IReadOnlySet<DateOnly>? holidays = null)
+    {
+        while (date.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday ||
+               (holidays is not null && holidays.Contains(date)))
+        {
+            date = date.AddDays(1);
+        }
+        return date;
+    }
+
     /// <summary>
     /// Subtracts <paramref name="bankingDays"/> business days from <paramref name="date"/>,
     /// skipping weekends and any supplied holidays.

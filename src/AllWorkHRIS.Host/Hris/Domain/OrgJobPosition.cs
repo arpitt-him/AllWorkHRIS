@@ -11,10 +11,12 @@ public sealed record OrgUnit
     public int OrgStatusId { get; init; }
     public DateOnly EffectiveStartDate { get; init; }
     public DateOnly? EffectiveEndDate { get; init; }
-    public string? TaxRegistrationNumber { get; init; }
-    public string? CountryCode { get; init; }
-    public string? StateOfIncorporation { get; init; }
-    public int? LegalEntityTypeId { get; init; }
+    public string?  TaxRegistrationNumber   { get; init; }
+    public string?  CountryCode             { get; init; }
+    public string?  StateOfIncorporation    { get; init; }
+    public int?     LegalEntityTypeId       { get; init; }
+    public decimal? OtWeeklyThresholdHours      { get; init; }
+  public int?     DefaultWorkweekStartDay     { get; init; }
     public string? AddressLine1 { get; init; }
     public string? AddressLine2 { get; init; }
     public string? City { get; init; }

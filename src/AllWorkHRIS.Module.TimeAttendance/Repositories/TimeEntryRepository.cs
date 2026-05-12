@@ -280,4 +280,36 @@ public sealed class TimeEntryRepository : ITimeEntryRepository
             "SELECT is_worked_time FROM lkp_time_category WHERE code = @Code",
             new { Code = categoryCode });
     }
+
+    public async Task<IReadOnlyList<(DateOnly WorkDate, decimal Hours)>> GetApprovedHoursByEmploymentAndPeriodAsync(
+        Guid employmentId, DateOnly periodStart, DateOnly periodEnd)
+    {
+        const string sql = """
+            SELECT te.work_date, SUM(te.duration) AS hours
+            FROM   time_entry          te
+            JOIN   lkp_time_entry_status s ON s.id = te.status_id
+            WHERE  te.employment_id = @EmploymentId
+              AND  te.work_date >= @PeriodStart
+              AND  te.work_date <= @PeriodEnd
+              AND  s.code IN ('APPROVED', 'LOCKED')
+            GROUP BY te.work_date
+            ORDER BY te.work_date
+            """;
+
+        using var conn = _connectionFactory.CreateConnection();
+        var rows = await conn.QueryAsync<WorkedDayRow>(sql, new
+        {
+            EmploymentId = employmentId,
+            PeriodStart  = periodStart.ToDateTime(TimeOnly.MinValue),
+            PeriodEnd    = periodEnd.ToDateTime(TimeOnly.MinValue)
+        });
+
+        return rows.Select(r => (r.WorkDate, r.Hours)).ToList();
+    }
+
+    private sealed record WorkedDayRow
+    {
+        public DateOnly WorkDate { get; init; }
+        public decimal  Hours    { get; init; }
+    }
 }

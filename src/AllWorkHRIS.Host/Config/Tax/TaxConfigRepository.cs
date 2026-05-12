@@ -67,6 +67,65 @@ public sealed record AuditLogRow
     public string?  ApprovalNote    { get; init; }
 }
 
+// ── Rate admin domain types ──────────────────────────────────────────
+
+public sealed record FlatRateDetailRow(
+    int       FlatRateId,
+    DateOnly  EffectiveFrom,
+    DateOnly? EffectiveTo,
+    decimal   Rate,
+    decimal?  WageBase,
+    decimal?  PeriodCap,
+    decimal?  AnnualCap,
+    string?   DependsOnStepCode);
+
+public sealed record BracketDetailRow(
+    int       BracketId,
+    DateOnly  EffectiveFrom,
+    DateOnly? EffectiveTo,
+    string?   FilingStatusCode,
+    decimal   LowerLimit,
+    decimal?  UpperLimit,
+    decimal   Rate);
+
+public sealed record AllowanceDetailRow(
+    int       AllowanceId,
+    DateOnly  EffectiveFrom,
+    DateOnly? EffectiveTo,
+    string?   FilingStatusCode,
+    decimal   AnnualAmount);
+
+public sealed record TieredBracketDetailRow(
+    int       TieredBracketId,
+    DateOnly  EffectiveFrom,
+    DateOnly? EffectiveTo,
+    decimal   LowerLimit,
+    decimal?  UpperLimit,
+    decimal   Rate,
+    decimal?  PeriodCap,
+    decimal?  AnnualCap);
+
+public sealed record CreditDetailRow(
+    int       CreditId,
+    DateOnly  EffectiveFrom,
+    DateOnly? EffectiveTo,
+    decimal   AnnualAmount,
+    decimal   CreditRate,
+    bool      IsRefundable);
+
+public sealed record BracketInput(
+    string?  FilingStatusCode,
+    decimal  LowerLimit,
+    decimal? UpperLimit,
+    decimal  Rate);
+
+public sealed record TieredBracketInput(
+    decimal  LowerLimit,
+    decimal? UpperLimit,
+    decimal  Rate,
+    decimal? PeriodCap,
+    decimal? AnnualCap);
+
 // ── Interface ───────────────────────────────────────────────────────
 
 public interface ITaxConfigRepository
@@ -81,6 +140,34 @@ public interface ITaxConfigRepository
     Task UpdateStepStatusAsync(int stepId, string stepCode, string priorStatus, string newStatus, string actor, string? note = null);
     Task UpdateFormFieldRequiredAsync(int fieldId, bool isRequired, string actor);
     Task UpdateFormFieldStatusAsync(int fieldId, string fieldKey, string priorStatus, string newStatus, string actor, string? note = null);
+
+    // ── Rate admin reads ─────────────────────────────────────────────
+    Task<IReadOnlyList<FlatRateDetailRow>>      GetFlatRatesAsync(string stepCode);
+    Task<IReadOnlyList<BracketDetailRow>>       GetBracketsDetailAsync(string stepCode);
+    Task<IReadOnlyList<AllowanceDetailRow>>     GetAllowancesDetailAsync(string stepCode);
+    Task<IReadOnlyList<TieredBracketDetailRow>> GetTieredBracketsDetailAsync(string stepCode);
+    Task<IReadOnlyList<CreditDetailRow>>        GetCreditsDetailAsync(string stepCode);
+    Task<IReadOnlySet<string>>                  GetExpiringStepCodesAsync(DateOnly asOf, int daysAhead = 120);
+
+    // ── Rate admin writes — flat rate ────────────────────────────────
+    Task InsertFlatRateAsync(string stepCode, DateOnly effectiveFrom, decimal rate, decimal? wageBase, decimal? periodCap, decimal? annualCap, string actor);
+    Task CloseFlatRateAsync(int flatRateId, DateOnly effectiveTo, string actor);
+
+    // ── Rate admin writes — brackets ─────────────────────────────────
+    Task InsertBracketSetAsync(string stepCode, DateOnly effectiveFrom, IReadOnlyList<BracketInput> rows, string actor);
+    Task CloseBracketSetAsync(string stepCode, DateOnly effectiveFrom, DateOnly effectiveTo, string actor);
+
+    // ── Rate admin writes — allowances ───────────────────────────────
+    Task InsertAllowanceAsync(string stepCode, DateOnly effectiveFrom, string? filingStatusCode, decimal annualAmount, string actor);
+    Task CloseAllowanceAsync(int allowanceId, DateOnly effectiveTo, string actor);
+
+    // ── Rate admin writes — tiered brackets ──────────────────────────
+    Task InsertTieredBracketSetAsync(string stepCode, DateOnly effectiveFrom, IReadOnlyList<TieredBracketInput> rows, string actor);
+    Task CloseTieredBracketSetAsync(string stepCode, DateOnly effectiveFrom, DateOnly effectiveTo, string actor);
+
+    // ── Rate admin writes — credits ──────────────────────────────────
+    Task InsertCreditAsync(string stepCode, DateOnly effectiveFrom, decimal annualAmount, decimal creditRate, bool isRefundable, string actor);
+    Task CloseCreditAsync(int creditId, DateOnly effectiveTo, string actor);
 }
 
 // ── Implementation ──────────────────────────────────────────────────
@@ -418,6 +505,394 @@ public sealed class TaxConfigRepository : ITaxConfigRepository
             new { EntityId = fieldId.ToString(), ActionCode = action, PriorStatus = priorStatus,
                   NewStatus = newStatus, Actor = actor, Now = DateTime.UtcNow, Note = note }, tx);
         tx.Commit();
+    }
+
+    // ── Rate admin reads ─────────────────────────────────────────────
+
+    public async Task<IReadOnlyList<FlatRateDetailRow>> GetFlatRatesAsync(string stepCode)
+    {
+        const string sql = """
+            SELECT flat_rate_id       AS FlatRateId,
+                   effective_from     AS EffectiveFrom,
+                   effective_to       AS EffectiveTo,
+                   rate               AS Rate,
+                   wage_base          AS WageBase,
+                   period_cap_amount  AS PeriodCap,
+                   annual_cap_amount  AS AnnualCap,
+                   depends_on_step_code AS DependsOnStepCode
+            FROM   tax_flat_rates
+            WHERE  step_code = @StepCode
+            ORDER  BY effective_from DESC
+            """;
+        using var conn = _db.CreateConnection();
+        return (await conn.QueryAsync<FlatRateDetailRow>(sql, new { StepCode = stepCode })).AsList();
+    }
+
+    public async Task<IReadOnlyList<BracketDetailRow>> GetBracketsDetailAsync(string stepCode)
+    {
+        const string sql = """
+            SELECT bracket_id         AS BracketId,
+                   effective_from     AS EffectiveFrom,
+                   effective_to       AS EffectiveTo,
+                   filing_status_code AS FilingStatusCode,
+                   lower_limit        AS LowerLimit,
+                   upper_limit        AS UpperLimit,
+                   rate               AS Rate
+            FROM   tax_brackets
+            WHERE  step_code = @StepCode
+            ORDER  BY effective_from DESC, lower_limit
+            """;
+        using var conn = _db.CreateConnection();
+        return (await conn.QueryAsync<BracketDetailRow>(sql, new { StepCode = stepCode })).AsList();
+    }
+
+    public async Task<IReadOnlyList<AllowanceDetailRow>> GetAllowancesDetailAsync(string stepCode)
+    {
+        const string sql = """
+            SELECT allowance_id       AS AllowanceId,
+                   effective_from     AS EffectiveFrom,
+                   effective_to       AS EffectiveTo,
+                   filing_status_code AS FilingStatusCode,
+                   annual_amount      AS AnnualAmount
+            FROM   tax_allowances
+            WHERE  step_code = @StepCode
+            ORDER  BY effective_from DESC
+            """;
+        using var conn = _db.CreateConnection();
+        return (await conn.QueryAsync<AllowanceDetailRow>(sql, new { StepCode = stepCode })).AsList();
+    }
+
+    public async Task<IReadOnlyList<TieredBracketDetailRow>> GetTieredBracketsDetailAsync(string stepCode)
+    {
+        const string sql = """
+            SELECT tiered_bracket_id  AS TieredBracketId,
+                   effective_from     AS EffectiveFrom,
+                   effective_to       AS EffectiveTo,
+                   lower_limit        AS LowerLimit,
+                   upper_limit        AS UpperLimit,
+                   rate               AS Rate,
+                   period_cap_amount  AS PeriodCap,
+                   annual_cap_amount  AS AnnualCap
+            FROM   tax_tiered_brackets
+            WHERE  step_code = @StepCode
+            ORDER  BY effective_from DESC, lower_limit
+            """;
+        using var conn = _db.CreateConnection();
+        return (await conn.QueryAsync<TieredBracketDetailRow>(sql, new { StepCode = stepCode })).AsList();
+    }
+
+    public async Task<IReadOnlyList<CreditDetailRow>> GetCreditsDetailAsync(string stepCode)
+    {
+        const string sql = """
+            SELECT credit_id       AS CreditId,
+                   effective_from  AS EffectiveFrom,
+                   effective_to    AS EffectiveTo,
+                   annual_amount   AS AnnualAmount,
+                   credit_rate     AS CreditRate,
+                   is_refundable   AS IsRefundable
+            FROM   tax_credits
+            WHERE  step_code = @StepCode
+            ORDER  BY effective_from DESC
+            """;
+        using var conn = _db.CreateConnection();
+        return (await conn.QueryAsync<CreditDetailRow>(sql, new { StepCode = stepCode })).AsList();
+    }
+
+    public async Task<IReadOnlySet<string>> GetExpiringStepCodesAsync(DateOnly asOf, int daysAhead = 120)
+    {
+        var threshold = asOf.AddDays(daysAhead);
+        const string sql = """
+            SELECT DISTINCT step_code FROM (
+                SELECT f.step_code FROM tax_flat_rates f
+                WHERE  f.effective_to IS NOT NULL
+                  AND  f.effective_to >= @Today
+                  AND  f.effective_to <= @Threshold
+                  AND  NOT EXISTS (SELECT 1 FROM tax_flat_rates f2
+                                   WHERE f2.step_code = f.step_code AND f2.effective_to IS NULL)
+                UNION ALL
+                SELECT b.step_code FROM tax_brackets b
+                WHERE  b.effective_to IS NOT NULL
+                  AND  b.effective_to >= @Today
+                  AND  b.effective_to <= @Threshold
+                  AND  NOT EXISTS (SELECT 1 FROM tax_brackets b2
+                                   WHERE b2.step_code = b.step_code AND b2.effective_to IS NULL)
+                UNION ALL
+                SELECT a.step_code FROM tax_allowances a
+                WHERE  a.effective_to IS NOT NULL
+                  AND  a.effective_to >= @Today
+                  AND  a.effective_to <= @Threshold
+                  AND  NOT EXISTS (SELECT 1 FROM tax_allowances a2
+                                   WHERE a2.step_code = a.step_code AND a2.effective_to IS NULL)
+                UNION ALL
+                SELECT t.step_code FROM tax_tiered_brackets t
+                WHERE  t.effective_to IS NOT NULL
+                  AND  t.effective_to >= @Today
+                  AND  t.effective_to <= @Threshold
+                  AND  NOT EXISTS (SELECT 1 FROM tax_tiered_brackets t2
+                                   WHERE t2.step_code = t.step_code AND t2.effective_to IS NULL)
+                UNION ALL
+                SELECT c.step_code FROM tax_credits c
+                WHERE  c.effective_to IS NOT NULL
+                  AND  c.effective_to >= @Today
+                  AND  c.effective_to <= @Threshold
+                  AND  NOT EXISTS (SELECT 1 FROM tax_credits c2
+                                   WHERE c2.step_code = c.step_code AND c2.effective_to IS NULL)
+            ) expiring
+            """;
+        using var conn = _db.CreateConnection();
+        var codes = await conn.QueryAsync<string>(sql, new { Today = asOf, Threshold = threshold });
+        return codes.ToHashSet();
+    }
+
+    // ── Rate admin writes — flat rate ─────────────────────────────────
+
+    public async Task InsertFlatRateAsync(
+        string stepCode, DateOnly effectiveFrom, decimal rate,
+        decimal? wageBase, decimal? periodCap, decimal? annualCap, string actor)
+    {
+        var effFrom = effectiveFrom.ToDateTime(TimeOnly.MinValue);
+        using var conn = _db.CreateConnection();
+
+        var openCount = await conn.ExecuteScalarAsync<long>(
+            "SELECT COUNT(*) FROM tax_flat_rates WHERE step_code = @StepCode AND effective_to IS NULL",
+            new { StepCode = stepCode });
+        if (openCount > 0)
+            throw new InvalidOperationException("Close the current open rate row before inserting a new one.");
+
+        var conflictCount = await conn.ExecuteScalarAsync<long>(
+            "SELECT COUNT(*) FROM tax_flat_rates WHERE step_code = @StepCode AND effective_from >= @NewFrom",
+            new { StepCode = stepCode, NewFrom = effectiveFrom });
+        if (conflictCount > 0)
+            throw new InvalidOperationException("New effective_from must be later than all existing rows.");
+
+        var overlapCount = await conn.ExecuteScalarAsync<long>(
+            "SELECT COUNT(*) FROM tax_flat_rates WHERE step_code = @StepCode AND effective_to IS NOT NULL AND effective_to >= @NewFrom",
+            new { StepCode = stepCode, NewFrom = effectiveFrom });
+        if (overlapCount > 0)
+            throw new InvalidOperationException("New effective_from overlaps a closed row — start the new rate the day after that row's close date.");
+
+        const string sql = """
+            INSERT INTO tax_flat_rates
+              (step_code, effective_from, rate, wage_base, period_cap_amount, annual_cap_amount)
+            VALUES
+              (@StepCode, @EffectiveFrom, @Rate, @WageBase, @PeriodCap, @AnnualCap)
+            """;
+        await conn.ExecuteAsync(sql, new
+        {
+            StepCode      = stepCode,
+            EffectiveFrom = effFrom,
+            Rate          = rate,
+            WageBase      = wageBase,
+            PeriodCap     = periodCap,
+            AnnualCap     = annualCap
+        });
+    }
+
+    public async Task CloseFlatRateAsync(int flatRateId, DateOnly effectiveTo, string actor)
+    {
+        using var conn = _db.CreateConnection();
+        await conn.ExecuteAsync(
+            "UPDATE tax_flat_rates SET effective_to = @EffectiveTo WHERE flat_rate_id = @Id",
+            new { EffectiveTo = effectiveTo.ToDateTime(TimeOnly.MinValue), Id = flatRateId });
+    }
+
+    // ── Rate admin writes — brackets ──────────────────────────────────
+
+    public async Task InsertBracketSetAsync(
+        string stepCode, DateOnly effectiveFrom,
+        IReadOnlyList<BracketInput> rows, string actor)
+    {
+        if (rows.Count == 0) throw new InvalidOperationException("At least one bracket row is required.");
+        var effFrom = effectiveFrom.ToDateTime(TimeOnly.MinValue);
+        using var conn = _db.CreateConnection();
+
+        var openCount = await conn.ExecuteScalarAsync<long>(
+            "SELECT COUNT(*) FROM tax_brackets WHERE step_code = @StepCode AND effective_to IS NULL",
+            new { StepCode = stepCode });
+        if (openCount > 0)
+            throw new InvalidOperationException("Close the current open bracket set before inserting a new one.");
+
+        var conflictCount = await conn.ExecuteScalarAsync<long>(
+            "SELECT COUNT(*) FROM tax_brackets WHERE step_code = @StepCode AND effective_from >= @NewFrom",
+            new { StepCode = stepCode, NewFrom = effectiveFrom });
+        if (conflictCount > 0)
+            throw new InvalidOperationException("New effective_from must be later than all existing rows.");
+
+        var overlapCount = await conn.ExecuteScalarAsync<long>(
+            "SELECT COUNT(*) FROM tax_brackets WHERE step_code = @StepCode AND effective_to IS NOT NULL AND effective_to >= @NewFrom",
+            new { StepCode = stepCode, NewFrom = effectiveFrom });
+        if (overlapCount > 0)
+            throw new InvalidOperationException("New effective_from overlaps a closed row — start the new bracket set the day after that row's close date.");
+
+        const string sql = """
+            INSERT INTO tax_brackets
+              (step_code, filing_status_code, effective_from, lower_limit, upper_limit, rate)
+            VALUES
+              (@StepCode, @FilingStatusCode, @EffectiveFrom, @LowerLimit, @UpperLimit, @Rate)
+            """;
+        using var tx = conn.BeginTransaction();
+        foreach (var r in rows)
+            await conn.ExecuteAsync(sql, new
+            {
+                StepCode          = stepCode,
+                FilingStatusCode  = r.FilingStatusCode,
+                EffectiveFrom     = effFrom,
+                LowerLimit        = r.LowerLimit,
+                UpperLimit        = r.UpperLimit,
+                Rate              = r.Rate
+            }, tx);
+        tx.Commit();
+    }
+
+    public async Task CloseBracketSetAsync(
+        string stepCode, DateOnly effectiveFrom, DateOnly effectiveTo, string actor)
+    {
+        var effFrom = effectiveFrom.ToDateTime(TimeOnly.MinValue);
+        var effTo   = effectiveTo.ToDateTime(TimeOnly.MinValue);
+        using var conn = _db.CreateConnection();
+        await conn.ExecuteAsync(
+            "UPDATE tax_brackets SET effective_to = @EffectiveTo WHERE step_code = @StepCode AND effective_from = @EffectiveFrom AND effective_to IS NULL",
+            new { StepCode = stepCode, EffectiveFrom = effFrom, EffectiveTo = effTo });
+    }
+
+    // ── Rate admin writes — allowances ────────────────────────────────
+
+    public async Task InsertAllowanceAsync(
+        string stepCode, DateOnly effectiveFrom,
+        string? filingStatusCode, decimal annualAmount, string actor)
+    {
+        var effFrom = effectiveFrom.ToDateTime(TimeOnly.MinValue);
+        using var conn = _db.CreateConnection();
+
+        var openCount = await conn.ExecuteScalarAsync<long>(
+            "SELECT COUNT(*) FROM tax_allowances WHERE step_code = @StepCode AND effective_to IS NULL",
+            new { StepCode = stepCode });
+        if (openCount > 0)
+            throw new InvalidOperationException("Close the current open allowance row before inserting a new one.");
+
+        var conflictCount = await conn.ExecuteScalarAsync<long>(
+            "SELECT COUNT(*) FROM tax_allowances WHERE step_code = @StepCode AND effective_from >= @NewFrom",
+            new { StepCode = stepCode, NewFrom = effectiveFrom });
+        if (conflictCount > 0)
+            throw new InvalidOperationException("New effective_from must be later than all existing rows.");
+
+        var overlapCount = await conn.ExecuteScalarAsync<long>(
+            "SELECT COUNT(*) FROM tax_allowances WHERE step_code = @StepCode AND effective_to IS NOT NULL AND effective_to >= @NewFrom",
+            new { StepCode = stepCode, NewFrom = effectiveFrom });
+        if (overlapCount > 0)
+            throw new InvalidOperationException("New effective_from overlaps a closed row — start the new allowance the day after that row's close date.");
+
+        await conn.ExecuteAsync(
+            "INSERT INTO tax_allowances (step_code, filing_status_code, effective_from, annual_amount) VALUES (@StepCode, @FilingStatusCode, @EffectiveFrom, @AnnualAmount)",
+            new { StepCode = stepCode, FilingStatusCode = filingStatusCode, EffectiveFrom = effFrom, AnnualAmount = annualAmount });
+    }
+
+    public async Task CloseAllowanceAsync(int allowanceId, DateOnly effectiveTo, string actor)
+    {
+        using var conn = _db.CreateConnection();
+        await conn.ExecuteAsync(
+            "UPDATE tax_allowances SET effective_to = @EffectiveTo WHERE allowance_id = @Id",
+            new { EffectiveTo = effectiveTo.ToDateTime(TimeOnly.MinValue), Id = allowanceId });
+    }
+
+    // ── Rate admin writes — tiered brackets ───────────────────────────
+
+    public async Task InsertTieredBracketSetAsync(
+        string stepCode, DateOnly effectiveFrom,
+        IReadOnlyList<TieredBracketInput> rows, string actor)
+    {
+        if (rows.Count == 0) throw new InvalidOperationException("At least one tier row is required.");
+        var effFrom = effectiveFrom.ToDateTime(TimeOnly.MinValue);
+        using var conn = _db.CreateConnection();
+
+        var openCount = await conn.ExecuteScalarAsync<long>(
+            "SELECT COUNT(*) FROM tax_tiered_brackets WHERE step_code = @StepCode AND effective_to IS NULL",
+            new { StepCode = stepCode });
+        if (openCount > 0)
+            throw new InvalidOperationException("Close the current open tiered bracket set before inserting a new one.");
+
+        var conflictCount = await conn.ExecuteScalarAsync<long>(
+            "SELECT COUNT(*) FROM tax_tiered_brackets WHERE step_code = @StepCode AND effective_from >= @NewFrom",
+            new { StepCode = stepCode, NewFrom = effectiveFrom });
+        if (conflictCount > 0)
+            throw new InvalidOperationException("New effective_from must be later than all existing rows.");
+
+        var overlapCount = await conn.ExecuteScalarAsync<long>(
+            "SELECT COUNT(*) FROM tax_tiered_brackets WHERE step_code = @StepCode AND effective_to IS NOT NULL AND effective_to >= @NewFrom",
+            new { StepCode = stepCode, NewFrom = effectiveFrom });
+        if (overlapCount > 0)
+            throw new InvalidOperationException("New effective_from overlaps a closed row — start the new tier set the day after that row's close date.");
+
+        const string sql = """
+            INSERT INTO tax_tiered_brackets
+              (step_code, effective_from, lower_limit, upper_limit, rate, period_cap_amount, annual_cap_amount)
+            VALUES
+              (@StepCode, @EffectiveFrom, @LowerLimit, @UpperLimit, @Rate, @PeriodCap, @AnnualCap)
+            """;
+        using var tx = conn.BeginTransaction();
+        foreach (var r in rows)
+            await conn.ExecuteAsync(sql, new
+            {
+                StepCode      = stepCode,
+                EffectiveFrom = effFrom,
+                LowerLimit    = r.LowerLimit,
+                UpperLimit    = r.UpperLimit,
+                Rate          = r.Rate,
+                PeriodCap     = r.PeriodCap,
+                AnnualCap     = r.AnnualCap
+            }, tx);
+        tx.Commit();
+    }
+
+    public async Task CloseTieredBracketSetAsync(
+        string stepCode, DateOnly effectiveFrom, DateOnly effectiveTo, string actor)
+    {
+        var effFrom = effectiveFrom.ToDateTime(TimeOnly.MinValue);
+        var effTo   = effectiveTo.ToDateTime(TimeOnly.MinValue);
+        using var conn = _db.CreateConnection();
+        await conn.ExecuteAsync(
+            "UPDATE tax_tiered_brackets SET effective_to = @EffectiveTo WHERE step_code = @StepCode AND effective_from = @EffectiveFrom AND effective_to IS NULL",
+            new { StepCode = stepCode, EffectiveFrom = effFrom, EffectiveTo = effTo });
+    }
+
+    // ── Rate admin writes — credits ───────────────────────────────────
+
+    public async Task InsertCreditAsync(
+        string stepCode, DateOnly effectiveFrom,
+        decimal annualAmount, decimal creditRate, bool isRefundable, string actor)
+    {
+        var effFrom = effectiveFrom.ToDateTime(TimeOnly.MinValue);
+        using var conn = _db.CreateConnection();
+
+        var openCount = await conn.ExecuteScalarAsync<long>(
+            "SELECT COUNT(*) FROM tax_credits WHERE step_code = @StepCode AND effective_to IS NULL",
+            new { StepCode = stepCode });
+        if (openCount > 0)
+            throw new InvalidOperationException("Close the current open credit row before inserting a new one.");
+
+        var conflictCount = await conn.ExecuteScalarAsync<long>(
+            "SELECT COUNT(*) FROM tax_credits WHERE step_code = @StepCode AND effective_from >= @NewFrom",
+            new { StepCode = stepCode, NewFrom = effectiveFrom });
+        if (conflictCount > 0)
+            throw new InvalidOperationException("New effective_from must be later than all existing rows.");
+
+        var overlapCount = await conn.ExecuteScalarAsync<long>(
+            "SELECT COUNT(*) FROM tax_credits WHERE step_code = @StepCode AND effective_to IS NOT NULL AND effective_to >= @NewFrom",
+            new { StepCode = stepCode, NewFrom = effectiveFrom });
+        if (overlapCount > 0)
+            throw new InvalidOperationException("New effective_from overlaps a closed row — start the new credit the day after that row's close date.");
+
+        await conn.ExecuteAsync(
+            "INSERT INTO tax_credits (step_code, effective_from, annual_amount, credit_rate, is_refundable) VALUES (@StepCode, @EffectiveFrom, @AnnualAmount, @CreditRate, @IsRefundable)",
+            new { StepCode = stepCode, EffectiveFrom = effFrom, AnnualAmount = annualAmount, CreditRate = creditRate, IsRefundable = isRefundable });
+    }
+
+    public async Task CloseCreditAsync(int creditId, DateOnly effectiveTo, string actor)
+    {
+        using var conn = _db.CreateConnection();
+        await conn.ExecuteAsync(
+            "UPDATE tax_credits SET effective_to = @EffectiveTo WHERE credit_id = @Id",
+            new { EffectiveTo = effectiveTo.ToDateTime(TimeOnly.MinValue), Id = creditId });
     }
 
     private static string StatusToAction(string priorStatus, string newStatus) =>

@@ -300,4 +300,7 @@ file sealed class NullTaxProfileRepository : ITaxProfileRepository
     public Task<TaxProfileRow?>                            GetActiveProfileAsync(Guid employmentId, string jurisdictionCode, DateOnly asOfDate)                      => Task.FromResult<TaxProfileRow?>(null);
     public Task                                            SaveProfileAsync(Guid employmentId, string jurisdictionCode, TaxProfileSaveModel model, string createdBy, DateOnly effectiveFrom) => Task.CompletedTask;
     public Task                                            AssignJurisdictionsAsync(Guid legalEntityId, IEnumerable<string> jurisdictionCodes)                       => Task.CompletedTask;
+    public Task                                            RemoveJurisdictionAsync(Guid legalEntityId, string jurisdictionCode)                                       => Task.CompletedTask;
+    public Task<long>                                      GetEmployeesInJurisdictionScopeCountAsync(Guid legalEntityId, string jurisdictionCode)                     => Task.FromResult(0L);
+    public Task<IReadOnlyList<ElectionHistoryRow>>         GetElectionHistoryAsync(Guid employmentId, string jurisdictionCode)                                        => Task.FromResult<IReadOnlyList<ElectionHistoryRow>>([]);
 }

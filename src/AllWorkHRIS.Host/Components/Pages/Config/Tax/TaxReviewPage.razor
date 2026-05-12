@@ -119,7 +119,7 @@ else
         try
         {
             var auth  = await AuthState.GetAuthenticationStateAsync();
-            var actor = auth.User.Identity?.Name ?? "system";
+            var actor = auth.User.GetDisplayName();
             if (item.EntityType == "step")
                 await TaxConfig.UpdateStepStatusAsync(int.Parse(item.EntityId), item.EntityName,
                     "PENDING_REVIEW", "APPROVED", actor, (string.IsNullOrWhiteSpace(_reviewNote) ? null : _reviewNote));
@@ -137,7 +137,7 @@ else
         try
         {
             var auth  = await AuthState.GetAuthenticationStateAsync();
-            var actor = auth.User.Identity?.Name ?? "system";
+            var actor = auth.User.GetDisplayName();
             if (item.EntityType == "step")
                 await TaxConfig.UpdateStepStatusAsync(int.Parse(item.EntityId), item.EntityName,
                     "PENDING_REVIEW", "DRAFT", actor, (string.IsNullOrWhiteSpace(_reviewNote) ? null : _reviewNote));

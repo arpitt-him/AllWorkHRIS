@@ -13,6 +13,7 @@
   <ItemGroup>
     <ProjectReference Include="..\AllWorkHRIS.Core\AllWorkHRIS.Core.csproj" />
     <ProjectReference Include="..\AllWorkHRIS.Host.SharedUI\AllWorkHRIS.Host.SharedUI.csproj" />
+    <ProjectReference Include="..\AllWorkHRIS.Module.TimeAttendance\AllWorkHRIS.Module.TimeAttendance.csproj" />
   </ItemGroup>
 
   <ItemGroup>

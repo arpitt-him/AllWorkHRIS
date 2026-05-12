@@ -70,6 +70,15 @@ public sealed class TaxProfileSaveModel
     public decimal  AdditionalTaxAmount   { get; set; }
 }
 
+public sealed record ElectionHistoryRow(
+    DateOnly EffectiveFrom,
+    DateOnly EffectiveTo,
+    string   FormTypeCode,
+    string?  FilingStatusCode,
+    int      AllowanceCount,
+    bool     ExemptFlag,
+    string   CreatedBy);
+
 // ============================================================
 // INTERFACE
 // ============================================================
@@ -84,6 +93,9 @@ public interface ITaxProfileRepository
     Task<TaxProfileRow?>                   GetActiveProfileAsync(Guid employmentId, string jurisdictionCode, DateOnly asOfDate);
     Task                                   SaveProfileAsync(Guid employmentId, string jurisdictionCode, TaxProfileSaveModel model, string createdBy, DateOnly effectiveFrom);
     Task                                   AssignJurisdictionsAsync(Guid legalEntityId, IEnumerable<string> jurisdictionCodes);
+    Task                                   RemoveJurisdictionAsync(Guid legalEntityId, string jurisdictionCode);
+    Task<long>                             GetEmployeesInJurisdictionScopeCountAsync(Guid legalEntityId, string jurisdictionCode);
+    Task<IReadOnlyList<ElectionHistoryRow>> GetElectionHistoryAsync(Guid employmentId, string jurisdictionCode);
 }
 
 // ============================================================
@@ -300,10 +312,18 @@ public sealed class TaxProfileRepository : ITaxProfileRepository
                    pc.payroll_context_id   AS PayrollContextId,
                    pc.payroll_context_name AS PayrollContextName
             FROM   missing_by_employee mbe
-            JOIN   employment     e   ON e.employment_id      = mbe.employment_id
-            JOIN   person         p   ON p.person_id          = e.person_id
-            LEFT JOIN payroll_profile pp  ON pp.employment_id = e.employment_id
-                                         AND pp.enrollment_status = 'ACTIVE'
+            JOIN   employment     e   ON e.employment_id = mbe.employment_id
+            JOIN   person         p   ON p.person_id     = e.person_id
+            LEFT JOIN (
+                SELECT employment_id, payroll_context_id
+                FROM   (
+                    SELECT employment_id, payroll_context_id,
+                           ROW_NUMBER() OVER (PARTITION BY employment_id ORDER BY payroll_context_id) AS rn
+                    FROM   payroll_profile
+                    WHERE  enrollment_status = 'ACTIVE'
+                ) ranked
+                WHERE rn = 1
+            )                    pp  ON pp.employment_id       = e.employment_id
             LEFT JOIN payroll_context pc  ON pc.payroll_context_id = pp.payroll_context_id
             ORDER BY pc.payroll_context_name NULLS LAST, p.legal_last_name, p.legal_first_name
             OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY
@@ -363,7 +383,8 @@ public sealed class TaxProfileRepository : ITaxProfileRepository
               AND  j.jurisdiction_code  = @JurisdictionCode
               AND  s.effective_from    <= @AsOfDate
               AND  (s.effective_to     IS NULL OR s.effective_to >= @AsOfDate)
-            LIMIT  1
+            ORDER BY s.effective_from DESC
+            FETCH FIRST 1 ROWS ONLY
             """;
         using var conn = _db.CreateConnection();
         return await conn.QuerySingleOrDefaultAsync<TaxProfileRow>(sql,
@@ -471,6 +492,64 @@ public sealed class TaxProfileRepository : ITaxProfileRepository
             await conn.ExecuteAsync(
                 "INSERT INTO legal_entity_jurisdiction (legal_entity_id, jurisdiction_id) VALUES (@LegalEntityId, @JurisdictionId)",
                 new { LegalEntityId = legalEntityId, JurisdictionId = id });
+    }
+
+    public async Task RemoveJurisdictionAsync(Guid legalEntityId, string jurisdictionCode)
+    {
+        if (jurisdictionCode.EndsWith("-FED", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"Federal jurisdiction '{jurisdictionCode}' cannot be removed.");
+
+        const string sql = """
+            DELETE FROM legal_entity_jurisdiction
+            WHERE legal_entity_id = @LegalEntityId
+              AND jurisdiction_id = (
+                  SELECT jurisdiction_id FROM tax_jurisdiction
+                  WHERE  jurisdiction_code = @JurisdictionCode
+              )
+            """;
+        using var conn = _db.CreateConnection();
+        await conn.ExecuteAsync(sql, new { LegalEntityId = legalEntityId, JurisdictionCode = jurisdictionCode });
+    }
+
+    public async Task<long> GetEmployeesInJurisdictionScopeCountAsync(Guid legalEntityId, string jurisdictionCode)
+    {
+        const string sql = """
+            SELECT COUNT(DISTINCT e.employment_id)
+            FROM   employment                   e
+            JOIN   employee_tax_form_submission s ON s.employment_id   = e.employment_id
+            JOIN   tax_jurisdiction             j ON j.jurisdiction_id = s.jurisdiction_id
+            WHERE  e.legal_entity_id   = @LegalEntityId
+              AND  j.jurisdiction_code = @JurisdictionCode
+              AND  s.effective_to IS NULL
+            """;
+        using var conn = _db.CreateConnection();
+        return await conn.ExecuteScalarAsync<long>(sql, new { LegalEntityId = legalEntityId, JurisdictionCode = jurisdictionCode });
+    }
+
+    public async Task<IReadOnlyList<ElectionHistoryRow>> GetElectionHistoryAsync(
+        Guid employmentId, string jurisdictionCode)
+    {
+        const string sql = """
+            SELECT s.effective_from     AS EffectiveFrom,
+                   s.effective_to       AS EffectiveTo,
+                   t.code               AS FormTypeCode,
+                   d.filing_status_code AS FilingStatusCode,
+                   d.allowance_count    AS AllowanceCount,
+                   s.exempt_flag        AS ExemptFlag,
+                   s.created_by         AS CreatedBy
+            FROM   employee_tax_form_submission s
+            JOIN   tax_jurisdiction             j ON j.jurisdiction_id = s.jurisdiction_id
+            JOIN   lkp_tax_form_type            t ON t.id = s.form_type_id
+            JOIN   employee_tax_form_detail     d ON d.submission_id   = s.submission_id
+            WHERE  s.employment_id     = @EmploymentId
+              AND  j.jurisdiction_code = @JurisdictionCode
+              AND  s.effective_to      IS NOT NULL
+            ORDER  BY s.effective_from DESC, s.creation_timestamp DESC
+            """;
+        using var conn = _db.CreateConnection();
+        var rows = await conn.QueryAsync<ElectionHistoryRow>(sql,
+            new { EmploymentId = employmentId, JurisdictionCode = jurisdictionCode });
+        return rows.AsList();
     }
 
     private async Task<int> ResolveJurisdictionIdAsync(string jurisdictionCode)

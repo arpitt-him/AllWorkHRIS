@@ -18,6 +18,7 @@ public sealed class BenefitElectionRepository : IBenefitElectionRepository
         SELECT e.election_id, e.employment_id, e.deduction_id,
                d.code             AS deduction_code,
                d.calculation_mode AS calculation_mode,
+               d.fit_exempt, d.fica_exempt, d.futa_exempt, d.suta_exempt,
                e.tax_treatment, e.employee_amount, e.employer_contribution_amount,
                e.contribution_pct, e.employer_contribution_pct, e.coverage_tier,
                e.annual_coverage_amount, e.annual_election_amount, e.monthly_election_amount,

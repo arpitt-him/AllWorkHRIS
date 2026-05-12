@@ -16,6 +16,7 @@ public static class LookupTables
     public const string AssignmentStatus       = "lkp_assignment_status";
     public const string CompensationRateType   = "lkp_compensation_rate_type";
     public const string CompensationStatus     = "lkp_compensation_status";
+    public const string PayType                = "lkp_pay_type";
     public const string PayFrequency           = "lkp_pay_frequency";
     public const string PayrollImpactType      = "lkp_payroll_impact_type";
     public const string ApprovalStatus         = "lkp_approval_status";

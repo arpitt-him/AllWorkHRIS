@@ -6,6 +6,10 @@ public sealed record Deduction
     public string         Code               { get; init; } = string.Empty;
     public string         Description        { get; init; } = string.Empty;
     public string         TaxTreatment       { get; init; } = string.Empty;
+    public bool           FitExempt          { get; init; }
+    public bool           FicaExempt         { get; init; }
+    public bool           FutaExempt         { get; init; }
+    public bool           SutaExempt         { get; init; }
     public string         Status             { get; init; } = string.Empty;
     public string         CalculationMode    { get; init; } = Codes.CalculationMode.FixedPerPeriod;
     public string?        WageBase           { get; init; }

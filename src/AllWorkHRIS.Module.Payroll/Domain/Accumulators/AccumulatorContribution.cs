@@ -22,6 +22,5 @@ public sealed record AccumulatorContribution
     public int         ContributionTypeId           { get; init; }
     public decimal?    BeforeValue                  { get; init; }
     public decimal?    AfterValue                   { get; init; }
-    public DateTimeOffset ContributionTimestamp     { get; init; }
-    public DateTimeOffset CreatedTimestamp          { get; init; }
+    public DateTimeOffset CreationTimestamp          { get; init; }
 }

@@ -15,4 +15,10 @@ public interface IAccumulatorService
     /// Used during correction and reprocessing flows.
     /// </summary>
     Task ReverseAsync(Guid employeePayrollResultId, Guid reversedBy, CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns YTD balances for all CALENDAR_YEAR accumulators prior to <paramref name="asOf"/>,
+    /// keyed by accumulator_code (same key as pipeline step codes).
+    /// </summary>
+    Task<IReadOnlyDictionary<string, decimal>> GetYtdBalancesAsync(Guid employmentId, DateOnly asOf);
 }

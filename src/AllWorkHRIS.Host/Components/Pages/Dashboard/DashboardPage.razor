@@ -84,6 +84,7 @@
     private List<DashboardItem> _taskItems = [];
     private bool                _loading   = true;
     private string?             _returnUrl;
+    private List<string>        _userRoles = [];
 
     [SupplyParameterFromQuery(Name = "returnUrl")]
     public string? ReturnUrl { get; set; }
@@ -97,6 +98,7 @@
         var authState = await AuthStateProvider.GetAuthenticationStateAsync();
         var user      = authState.User;
         var userRoles = user.GetRoles().ToList();
+        _userRoles    = userRoles;
 
         _entities = (await OrgService.GetLegalEntitiesAsync()).ToList();
 
@@ -121,10 +123,21 @@
 
         var destination = !string.IsNullOrWhiteSpace(_returnUrl)
             ? Uri.UnescapeDataString(_returnUrl)
-            : "/hris/employees";
+            : RoleHomePage(_userRoles);
 
         Nav.NavigateTo(destination);
         await Task.CompletedTask;
+    }
+
+    private static string RoleHomePage(IReadOnlyList<string> roles)
+    {
+        if (roles.Contains("HrisViewer") || roles.Contains("HrisAdmin") || roles.Contains("HrisOperator"))
+            return "/hris/employees";
+        if (roles.Contains("TaxAdmin") || roles.Contains("PayrollAdmin") || roles.Contains("PayrollOperator"))
+            return "/payroll/tax-profiles";
+        if (roles.Contains("ComplianceReviewer"))
+            return "/config/tax/review";
+        return "/";
     }
 }
 

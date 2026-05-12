@@ -15,7 +15,12 @@ public sealed record CalculationInput
 
     // Compensation snapshot — populated by PayrollRunJob before engine is called
     public decimal? AnnualEquivalent { get; init; }
-    public int      PeriodsPerYear   { get; init; }
+    public decimal  BaseRate         { get; init; }
+    public string?  FlsaStatusCode          { get; init; }
+    public string?  RateTypeCode            { get; init; }
+    public decimal  OtWeeklyThresholdHours  { get; init; } = 40.00m;
+    public int      WorkWeekStartDay        { get; init; } = 1;
+    public int      PeriodsPerYear          { get; init; }
 
     // Pay period boundaries — passed through to the benefit step provider for proration
     public DateOnly PayPeriodStart    { get; init; }

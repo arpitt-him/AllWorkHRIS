@@ -64,6 +64,7 @@
             <option value="ALL">All</option>
             <option value="RELEASED">Released</option>
             <option value="CANCELLED">Cancelled</option>
+            <option value="FAILED">Failed</option>
         </select>
     </div>
 
@@ -247,13 +248,14 @@
     private string                           _statusFilter  = "ACTIVE";
 
     // Terminal statuses excluded from the "Active" filter view
-    private static readonly HashSet<int> TerminalStatuses = [8, 9, 11]; // Released, Closed, Cancelled
+    private static readonly HashSet<int> TerminalStatuses = [8, 9, 10, 11]; // Released, Closed, Failed, Cancelled
 
     private List<PayrollRun> _filteredRuns => _statusFilter switch
     {
         "ACTIVE"    => _runs.Where(r => !TerminalStatuses.Contains(r.RunStatusId)).ToList(),
         "RELEASED"  => _runs.Where(r => r.RunStatusId == 8).ToList(),
         "CANCELLED" => _runs.Where(r => r.RunStatusId == 11).ToList(),
+        "FAILED"    => _runs.Where(r => r.RunStatusId == 10).ToList(),
         _           => _runs
     };
 
@@ -352,11 +354,16 @@
         }
 
         _selectedPeriod = _openPeriods.FirstOrDefault(p => p.PeriodId == _newRun.PeriodId);
-        if (_selectedPeriod is not null && _selectedPeriod.PayDate > DateOnly.FromDateTime(TemporalContext.GetOperativeDate()))
+        if (_selectedPeriod is not null)
         {
-            _confirmEarlyRun = true;
-            _newRunError     = null;
-            return;
+            var today         = DateOnly.FromDateTime(TemporalContext.GetOperativeDate());
+            var runThreshold  = _selectedPeriod.CalculationDate ?? _selectedPeriod.PayDate;
+            if (today < runThreshold)
+            {
+                _confirmEarlyRun = true;
+                _newRunError     = null;
+                return;
+            }
         }
 
         await SubmitRunAsync();

@@ -607,10 +607,20 @@
                 var (start, end) = spans[i];
                 var payDate      = PayDateComputer.Compute(
                     end, freqCode, _genForm.Convention, _genForm.PayDateOffsetDays);
-                var cutoff       = PayDateComputer.ShiftToBusinessDay(
-                    payDate.AddDays(-_genForm.CutoffOffsetDays));
+
+                // Cutoff: N calendar days before pay date, but never before the period ends.
+                var rawCutoff    = payDate.AddDays(-_genForm.CutoffOffsetDays);
+                var minCutoff    = PayDateComputer.ShiftForwardToBusinessDay(end.AddDays(1));
+                var cutoff       = rawCutoff <= end
+                    ? minCutoff
+                    : PayDateComputer.ShiftToBusinessDay(rawCutoff);
+
+                // Run date: N banking days before pay date, but never before the cutoff.
+                var rawRunDate   = PayDateComputer.SubtractBankingDays(payDate, _genForm.CalculationLeadDays);
+                var minRunDate   = PayDateComputer.ShiftForwardToBusinessDay(cutoff.AddDays(1));
+                var runDate      = rawRunDate < minRunDate ? minRunDate : rawRunDate;
+
                 var transmission = PayDateComputer.SubtractBankingDays(payDate, 2);
-                var runDate      = PayDateComputer.SubtractBankingDays(payDate, _genForm.CalculationLeadDays);
                 var status       = end < today ? "CLOSED" : "OPEN";
 
                 await ContextRepo.InsertPeriodAsync(new PayrollPeriod

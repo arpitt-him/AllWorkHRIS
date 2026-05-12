@@ -117,6 +117,7 @@ public sealed record CompensationRecord
     public Guid CompensationId { get; init; }
     public Guid EmploymentId { get; init; }
     public int RateTypeId { get; init; }
+    public int? PayTypeId { get; init; }
     public decimal BaseRate { get; init; }
     public string RateCurrency { get; init; } = "USD";
     public decimal? AnnualEquivalent { get; init; }
@@ -139,15 +140,35 @@ public sealed record CompensationRecord
     {
         var now          = DateTimeOffset.UtcNow;
         var rateTypeCode = lookupCache.GetCode(LookupTables.CompensationRateType, command.RateTypeId);
+        var flsaCode     = lookupCache.GetCode(LookupTables.FlsaStatus,           command.FlsaStatusId);
         var freqCode     = lookupCache.GetCode(LookupTables.PayFrequency,          command.PayFrequencyId);
+
+        int      effectiveRateTypeId;
+        decimal  effectiveBaseRate;
+        decimal? annualEquivalent;
+        if (rateTypeCode == "SALARY" && flsaCode == "NON_EXEMPT")
+        {
+            // Salaried non-exempt: engine uses base_rate as hourly, so derive it from the entered annual salary.
+            effectiveRateTypeId = lookupCache.GetId(LookupTables.CompensationRateType, "HOURLY");
+            annualEquivalent    = command.BaseRate;
+            effectiveBaseRate   = Math.Round(command.BaseRate / 2080m, 4, MidpointRounding.AwayFromZero);
+        }
+        else
+        {
+            effectiveRateTypeId = command.RateTypeId;
+            effectiveBaseRate   = command.BaseRate;
+            annualEquivalent    = ComputeAnnualEquivalent(rateTypeCode, command.BaseRate, freqCode);
+        }
+
         return new CompensationRecord
         {
             CompensationId       = Guid.NewGuid(),
             EmploymentId         = employmentId,
-            RateTypeId           = command.RateTypeId,
-            BaseRate             = command.BaseRate,
+            RateTypeId           = effectiveRateTypeId,
+            PayTypeId            = ResolvePayTypeId(rateTypeCode, lookupCache),
+            BaseRate             = effectiveBaseRate,
             RateCurrency         = "USD",
-            AnnualEquivalent     = ComputeAnnualEquivalent(rateTypeCode, command.BaseRate, freqCode),
+            AnnualEquivalent     = annualEquivalent,
             PayFrequencyId       = command.PayFrequencyId,
             EffectiveStartDate   = command.EmploymentStartDate,
             CompensationStatusId = lookupCache.GetId(LookupTables.CompensationStatus, "ACTIVE"),
@@ -160,6 +181,14 @@ public sealed record CompensationRecord
             LastUpdateTimestamp  = now
         };
     }
+
+    // Maps the user-selected rate type code to the display-layer pay type.
+    // Uses the original code (before SALARY+NON_EXEMPT normalization) so the stored
+    // pay_type always reflects what the user intended, not the internal calculation mechanism.
+    public static int? ResolvePayTypeId(string rateTypeCode, ILookupCache lookupCache)
+        => lookupCache.GetAll(LookupTables.PayType)
+               .FirstOrDefault(e => string.Equals(e.Code, rateTypeCode, StringComparison.OrdinalIgnoreCase))
+               ?.Id;
 
     public static decimal? ComputeAnnualEquivalent(string rateTypeCode, decimal baseRate, string payFrequencyCode)
         => rateTypeCode switch

@@ -1,3 +1,4 @@
+using Dapper;
 using AllWorkHRIS.Core.Data;
 using AllWorkHRIS.Core.Events;
 using AllWorkHRIS.Core.Lookups;
@@ -239,15 +240,34 @@ public sealed class EmploymentService : IEmploymentService
             await _assignmentRepository.InsertAsync(assignment, uow);
 
             var rateTypeCode = _lookupCache.GetCode(LookupTables.CompensationRateType, command.RateTypeId);
+            var flsaCode     = _lookupCache.GetCode(LookupTables.FlsaStatus,           command.FlsaStatusId);
             var freqCode     = _lookupCache.GetCode(LookupTables.PayFrequency,          command.PayFrequencyId);
+
+            int      effectiveRateTypeId;
+            decimal  effectiveBaseRate;
+            decimal? annualEquivalent;
+            if (rateTypeCode == "SALARY" && flsaCode == "NON_EXEMPT")
+            {
+                effectiveRateTypeId = _lookupCache.GetId(LookupTables.CompensationRateType, "HOURLY");
+                annualEquivalent    = command.BaseRate;
+                effectiveBaseRate   = Math.Round(command.BaseRate / 2080m, 4, MidpointRounding.AwayFromZero);
+            }
+            else
+            {
+                effectiveRateTypeId = command.RateTypeId;
+                effectiveBaseRate   = command.BaseRate;
+                annualEquivalent    = CompensationRecord.ComputeAnnualEquivalent(rateTypeCode, command.BaseRate, freqCode);
+            }
+
             var compensation = new CompensationRecord
             {
                 CompensationId       = Guid.NewGuid(),
                 EmploymentId         = employmentId,
-                RateTypeId           = command.RateTypeId,
-                BaseRate             = command.BaseRate,
+                RateTypeId           = effectiveRateTypeId,
+                PayTypeId            = CompensationRecord.ResolvePayTypeId(rateTypeCode, _lookupCache),
+                BaseRate             = effectiveBaseRate,
                 RateCurrency         = "USD",
-                AnnualEquivalent     = CompensationRecord.ComputeAnnualEquivalent(rateTypeCode, command.BaseRate, freqCode),
+                AnnualEquivalent     = annualEquivalent,
                 PayFrequencyId       = command.PayFrequencyId,
                 EffectiveStartDate   = command.EmploymentStartDate,
                 CompensationStatusId = _activeCompStatusId,
@@ -700,25 +720,55 @@ public sealed class CompensationService : ICompensationService
         var operativeDate = DateOnly.FromDateTime(_temporalContext.GetOperativeDate());
         var isRetroactive = command.EffectiveDate < operativeDate;
 
+        // Normalize SALARY+NON_EXEMPT before entering the transaction — needs DB read for FLSA status.
+        var rateTypeCode = _lookupCache.GetCode(LookupTables.CompensationRateType, command.RateTypeId);
+        var freqCode     = _lookupCache.GetCode(LookupTables.PayFrequency,          command.PayFrequencyId);
+        var flsaCode     = await GetEmploymentFlsaCodeAsync(command.EmploymentId);
+
+        int      effectiveRateTypeId;
+        decimal  effectiveBaseRate;
+        decimal? annualEquivalent;
+        if (rateTypeCode == "SALARY" && flsaCode == "NON_EXEMPT")
+        {
+            effectiveRateTypeId = _lookupCache.GetId(LookupTables.CompensationRateType, "HOURLY");
+            annualEquivalent    = command.NewBaseRate;
+            effectiveBaseRate   = Math.Round(command.NewBaseRate / 2080m, 4, MidpointRounding.AwayFromZero);
+        }
+        else
+        {
+            effectiveRateTypeId = command.RateTypeId;
+            effectiveBaseRate   = command.NewBaseRate;
+            annualEquivalent    = CompensationRecord.ComputeAnnualEquivalent(rateTypeCode, command.NewBaseRate, freqCode);
+        }
+
+        // Check for a future-scheduled record so we can cap the new record's end date
+        // rather than closing the scheduled record when the new date precedes it.
+        var scheduledRecord = await _compensationRepository.GetNextScheduledByEmploymentIdAsync(
+            command.EmploymentId, operativeDate);
+        var newRecordEndDate = (scheduledRecord is not null
+            && command.EffectiveDate < scheduledRecord.EffectiveStartDate)
+            ? scheduledRecord.EffectiveStartDate.AddDays(-1)
+            : (DateOnly?)null;
+
         using var uow = new UnitOfWork(_connectionFactory);
         try
         {
             await _compensationRepository.CloseCurrentAsync(
-                command.EmploymentId, command.EffectiveDate.AddDays(-1), uow);
+                command.EmploymentId, command.EffectiveDate.AddDays(-1), command.EffectiveDate, uow);
 
-            var now          = DateTimeOffset.UtcNow;
-            var rateTypeCode = _lookupCache.GetCode(LookupTables.CompensationRateType, command.RateTypeId);
-            var freqCode     = _lookupCache.GetCode(LookupTables.PayFrequency,          command.PayFrequencyId);
+            var now       = DateTimeOffset.UtcNow;
             var newRecord = new CompensationRecord
             {
                 CompensationId       = Guid.NewGuid(),
                 EmploymentId         = command.EmploymentId,
-                RateTypeId           = command.RateTypeId,
-                BaseRate             = command.NewBaseRate,
+                RateTypeId           = effectiveRateTypeId,
+                PayTypeId            = CompensationRecord.ResolvePayTypeId(rateTypeCode, _lookupCache),
+                BaseRate             = effectiveBaseRate,
                 RateCurrency         = "USD",
-                AnnualEquivalent     = CompensationRecord.ComputeAnnualEquivalent(rateTypeCode, command.NewBaseRate, freqCode),
+                AnnualEquivalent     = annualEquivalent,
                 PayFrequencyId       = command.PayFrequencyId,
                 EffectiveStartDate   = command.EffectiveDate,
+                EffectiveEndDate     = newRecordEndDate,
                 CompensationStatusId = _activeCompStatusId,
                 ChangeReasonCode     = command.ChangeReasonCode,
                 ApprovalStatusId     = _approvedApprovalStatusId,
@@ -760,10 +810,23 @@ public sealed class CompensationService : ICompensationService
     }
 
     public async Task<CompensationRecord?> GetCurrentRateAsync(Guid employmentId, DateOnly asOf)
-        => await _compensationRepository.GetActiveByEmploymentIdAsync(employmentId, asOf);
+        => await _compensationRepository.GetActiveByEmploymentIdAsync(employmentId, asOf)
+           ?? await _compensationRepository.GetNextScheduledByEmploymentIdAsync(employmentId, asOf);
 
     public async Task<IEnumerable<CompensationRecord>> GetRateHistoryAsync(Guid employmentId)
         => await _compensationRepository.GetHistoryByEmploymentIdAsync(employmentId);
+
+    private async Task<string?> GetEmploymentFlsaCodeAsync(Guid employmentId)
+    {
+        const string sql = """
+            SELECT lf.code
+            FROM   employment       e
+            JOIN   lkp_flsa_status  lf ON lf.id = e.flsa_status_id
+            WHERE  e.employment_id = @EmploymentId
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        return await conn.ExecuteScalarAsync<string>(sql, new { EmploymentId = employmentId });
+    }
 }
 
 // ============================================================
@@ -952,7 +1015,9 @@ public sealed class OrgStructureService : IOrgStructureService
             TaxRegistrationNumber   = string.IsNullOrWhiteSpace(command.TaxRegistrationNumber) ? null : command.TaxRegistrationNumber.Trim(),
             StateOfIncorporation    = string.IsNullOrWhiteSpace(command.StateOfIncorporation)   ? null : command.StateOfIncorporation.Trim(),
             CountryCode             = string.IsNullOrWhiteSpace(command.CountryCode)            ? null : command.CountryCode.Trim().ToUpper(),
-            OrgStatusId             = _activeStatusId,
+            OtWeeklyThresholdHours   = command.OtWeeklyThresholdHours,
+            DefaultWorkweekStartDay  = command.DefaultWorkweekStartDay,
+            OrgStatusId              = _activeStatusId,
             EffectiveStartDate      = command.EffectiveStartDate,
             CreatedBy               = command.InitiatedBy,
             CreationTimestamp       = now,

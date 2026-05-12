@@ -1,0 +1,978 @@
+@page "/payroll/tax/rates"
+@layout MainLayout
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = "TaxAdmin,SystemAdmin,PayrollAdmin")]
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using AllWorkHRIS.Host.Config.Tax
+@using AllWorkHRIS.Core.Security
+@using AllWorkHRIS.Core.Temporal
+@using Syncfusion.Blazor.Calendars
+@inject ITaxConfigRepository        TaxConfig
+@inject AuthenticationStateProvider AuthState
+@inject ITemporalContext             TemporalContext
+
+<PageTitle>Rate Tables — Tax</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h2 class="page-title">Rate Tables</h2>
+        <p class="page-subtitle">@(_readOnly ? "Read-only view (PayrollAdmin)." : "Manage effective-date rate data per calculation step.")</p>
+    </div>
+    <button class="btn-secondary" @onclick="LoadAsync">Refresh</button>
+</div>
+
+@if (_loading)
+{
+    <p class="loading-text">Loading…</p>
+}
+else
+{
+    @foreach (var jur in _stepsByJurisdiction)
+    {
+        <div class="jur-section">
+            <h3 class="jur-heading">@jur.Key</h3>
+            @foreach (var step in jur.Value)
+            {
+                var s  = step;
+                var sc = s.StepCode;
+                var exp = _expanded.TryGetValue(sc, out var exv) && exv;
+
+                <div class="step-card @(exp ? "step-card--open" : "")">
+                    <div class="step-hdr" @onclick="() => ToggleAsync(s)">
+                        <div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;">
+                            <span class="seq">@s.SequenceNumber</span>
+                            <code class="mono">@sc</code>
+                            <span>@s.StepName</span>
+                            <span class="type-badge type-@(s.StepType.ToLower().Replace('_','-'))">@StepTypeLabel(s.StepType)</span>
+                            @if (_expiring.Contains(sc))
+                            {
+                                <span class="expiry-badge">Expires soon</span>
+                            }
+                        </div>
+                        <span class="arrow">@(exp ? "▲" : "▼")</span>
+                    </div>
+
+                    @if (exp)
+                    {
+                        <div class="step-body">
+                            @{
+                                _stepDetail.TryGetValue(sc, out var det);
+                                _pendingClose.TryGetValue(sc, out var pc);
+                                _flatIns.TryGetValue(sc, out var fi);
+                                _bracketIns.TryGetValue(sc, out var bi);
+                                _allowIns.TryGetValue(sc, out var ai);
+                                _tieredIns.TryGetValue(sc, out var ti);
+                                _creditIns.TryGetValue(sc, out var ci);
+                                var bSets = det?.Brackets?.GroupBy(b => b.EffectiveFrom).OrderByDescending(g => g.Key).ToList()
+                                            ?? new System.Collections.Generic.List<System.Linq.IGrouping<DateOnly, BracketDetailRow>>();
+                                var tSets = det?.TieredBrackets?.GroupBy(t => t.EffectiveFrom).OrderByDescending(g => g.Key).ToList()
+                                            ?? new System.Collections.Generic.List<System.Linq.IGrouping<DateOnly, TieredBracketDetailRow>>();
+                                var hasOpenFlat    = det?.FlatRates?.Any(r => r.EffectiveTo is null) == true;
+                                var hasOpenAllow   = det?.Allowances?.Any(r => r.EffectiveTo is null) == true;
+                                var hasOpenCredit  = det?.Credits?.Any(r => r.EffectiveTo is null) == true;
+                                var hasOpenBracket = bSets.Any(g => g.Any(b => b.EffectiveTo is null));
+                                var hasOpenTiered  = tSets.Any(g => g.Any(t => t.EffectiveTo is null));
+                            }
+                            @if (det is null)
+                            {
+                                <p class="loading-text">Loading…</p>
+                            }
+
+                            @* ── FLAT RATE ─────────────────────────────────────────── *@
+                            else if (s.StepType == "FLAT_RATE")
+                            {
+                                @if (det.FlatRates is null || det.FlatRates.Count == 0)
+                                {
+                                    <p class="empty-msg">No rate rows yet.</p>
+                                }
+                                else
+                                {
+                                    <table class="data-table" style="margin-bottom:.75rem;">
+                                        <thead>
+                                            <tr>
+                                                <th>Effective From</th><th>To</th><th>Rate</th>
+                                                <th>Wage Base</th><th>Period Cap</th><th>Annual Cap</th>
+                                                @if (!_readOnly) { <th></th> }
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @foreach (var r in det.FlatRates)
+                                            {
+                                                var row = r;
+                                                var isRowCurrent = row.EffectiveFrom <= _operativeDate
+                                                                && (row.EffectiveTo is null || row.EffectiveTo >= _operativeDate);
+                                                <tr class="@(isRowCurrent ? "row-current" : row.EffectiveTo is null ? "row-open" : "")">
+                                                    <td class="mono">@row.EffectiveFrom.ToString("yyyy-MM-dd")</td>
+                                                    <td class="mono">@(row.EffectiveTo?.ToString("yyyy-MM-dd") ?? "open")</td>
+                                                    <td class="mono">@row.Rate.ToString("P4")</td>
+                                                    <td class="mono">@(row.WageBase?.ToString("N2") ?? "—")</td>
+                                                    <td class="mono">@(row.PeriodCap?.ToString("N2") ?? "—")</td>
+                                                    <td class="mono">@(row.AnnualCap?.ToString("N2") ?? "—")</td>
+                                                    @if (!_readOnly)
+                                                    {
+                                                        <td>
+                                                            @if (row.EffectiveTo is null)
+                                                            {
+                                                                <button class="btn-close" @onclick="() => StartCloseFlatRate(sc, row.FlatRateId)">Close</button>
+                                                            }
+                                                        </td>
+                                                    }
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                }
+                                @if (pc is not null)
+                                {
+                                    <div class="close-panel">
+                                        <span>Effective To: </span>
+                                        <SfDatePicker CssClass="form-control" Width="160px" @bind-Value="pc.EffectiveTo" />
+                                        <button class="btn-action btn-action--danger" @onclick="() => ConfirmCloseAsync(sc)">Confirm Close</button>
+                                        <button class="btn-action" @onclick="() => CancelClose(sc)">Cancel</button>
+                                        @if (pc.Error is not null) { <span class="inline-err">@pc.Error</span> }
+                                    </div>
+                                }
+                                @if (!_readOnly)
+                                {
+                                    @if (fi is null || !fi.ShowForm)
+                                    {
+                                        @if (hasOpenFlat)
+                                        {
+                                            <p class="hint-msg">Close the open row before adding a new one.</p>
+                                        }
+                                        else
+                                        {
+                                            <button class="btn-add" @onclick="() => ShowFlatInsert(sc)">+ Add Rate Row</button>
+                                        }
+                                    }
+                                    else
+                                    {
+                                        <div class="insert-panel">
+                                            <h4 class="insert-heading">New Flat Rate Row</h4>
+                                            <div class="ins-grid">
+                                                <label>Effective From <span class="req">*</span></label>
+                                                <SfDatePicker CssClass="form-control" @bind-Value="fi.EffectiveFrom" />
+                                                <label>Rate (decimal, e.g. 0.0765) <span class="req">*</span></label>
+                                                <input type="number" class="form-control" step="0.000001" min="0" @bind="fi.Rate" />
+                                                <label>Wage Base (optional)</label>
+                                                <input type="number" class="form-control" step="0.01" min="0" @bind="fi.WageBase" />
+                                                <label>Period Cap (optional)</label>
+                                                <input type="number" class="form-control" step="0.01" min="0" @bind="fi.PeriodCap" />
+                                                <label>Annual Cap (optional)</label>
+                                                <input type="number" class="form-control" step="0.01" min="0" @bind="fi.AnnualCap" />
+                                            </div>
+                                            @if (fi.Error is not null) { <p class="form-error">@fi.Error</p> }
+                                            <div style="display:flex;gap:.5rem;margin-top:.75rem;">
+                                                <button class="btn-primary" @onclick="() => SaveFlatRateAsync(sc)" disabled="@fi.Working">@(fi.Working ? "Saving…" : "Save")</button>
+                                                <button class="btn-action" @onclick="() => HideFlatInsert(sc)">Cancel</button>
+                                            </div>
+                                        </div>
+                                    }
+                                }
+                            }
+
+                            @* ── PROGRESSIVE BRACKET ──────────────────────────────── *@
+                            else if (s.StepType == "PROGRESSIVE_BRACKET")
+                            {
+                                @if (bSets.Count == 0)
+                                {
+                                    <p class="empty-msg">No bracket sets yet.</p>
+                                }
+                                @foreach (var bset in bSets)
+                                {
+                                    var bss      = bset;
+                                    var bFrom    = bss.Key;
+                                    var bOpen    = bss.Any(b => b.EffectiveTo is null);
+                                    var bTo      = bss.First().EffectiveTo;
+                                    var bCurrent = bFrom <= _operativeDate && (bTo is null || bTo >= _operativeDate);
+                                    <div class="rate-set">
+                                        <div class="rate-set-hdr">
+                                            <span class="set-label">Set @bFrom.ToString("yyyy-MM-dd")</span>
+                                            @if (bCurrent) { <span class="current-badge">Active</span> }
+                                            @if (bOpen) { <span class="open-badge">Open</span> }
+                                            else { <span class="closed-badge">Closed @bTo?.ToString("yyyy-MM-dd")</span> }
+                                            @if (!_readOnly && bOpen)
+                                            {
+                                                <button class="btn-close" @onclick="() => StartCloseBracketSet(sc, bFrom)">Close Set</button>
+                                            }
+                                        </div>
+                                        <table class="data-table data-table--nested">
+                                            <thead><tr><th>Filing Status</th><th>Lower</th><th>Upper</th><th>Rate</th></tr></thead>
+                                            <tbody>
+                                                @foreach (var b in bss.OrderBy(x => x.LowerLimit))
+                                                {
+                                                    <tr>
+                                                        <td>@(b.FilingStatusCode ?? "—")</td>
+                                                        <td class="mono">@b.LowerLimit.ToString("N2")</td>
+                                                        <td class="mono">@(b.UpperLimit?.ToString("N2") ?? "∞")</td>
+                                                        <td class="mono">@b.Rate.ToString("P4")</td>
+                                                    </tr>
+                                                }
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                }
+                                @if (pc is not null)
+                                {
+                                    <div class="close-panel">
+                                        <span>Close bracket set — Effective To: </span>
+                                        <SfDatePicker CssClass="form-control" Width="160px" @bind-Value="pc.EffectiveTo" />
+                                        <button class="btn-action btn-action--danger" @onclick="() => ConfirmCloseAsync(sc)">Confirm Close</button>
+                                        <button class="btn-action" @onclick="() => CancelClose(sc)">Cancel</button>
+                                        @if (pc.Error is not null) { <span class="inline-err">@pc.Error</span> }
+                                    </div>
+                                }
+                                @if (!_readOnly)
+                                {
+                                    @if (bi is null || !bi.ShowForm)
+                                    {
+                                        @if (hasOpenBracket)
+                                        {
+                                            <p class="hint-msg">Close the open bracket set before adding a new one.</p>
+                                        }
+                                        else
+                                        {
+                                            <button class="btn-add" @onclick="() => ShowBracketInsert(sc)">+ Add Bracket Set</button>
+                                        }
+                                    }
+                                    else
+                                    {
+                                        <div class="insert-panel">
+                                            <h4 class="insert-heading">New Bracket Set</h4>
+                                            <div style="margin-bottom:.75rem;">
+                                                <label class="form-label">Effective From <span class="req">*</span></label>
+                                                <SfDatePicker CssClass="form-control" Width="200px" @bind-Value="bi.EffectiveFrom" />
+                                            </div>
+                                            <table class="data-table" style="margin-bottom:.5rem;">
+                                                <thead><tr><th>Filing Status</th><th>Lower</th><th>Upper (blank=∞)</th><th>Rate (decimal)</th><th></th></tr></thead>
+                                                <tbody>
+                                                    @for (int i = 0; i < bi.Rows.Count; i++)
+                                                    {
+                                                        var idx = i;
+                                                        var br  = bi.Rows[idx];
+                                                        <tr>
+                                                            <td><input class="form-control" placeholder="SINGLE…" @bind="br.FilingStatus" /></td>
+                                                            <td><input type="number" class="form-control" step="0.01" @bind="br.LowerLimit" /></td>
+                                                            <td><input class="form-control" placeholder="blank=∞" @bind="br.UpperLimitStr" /></td>
+                                                            <td><input type="number" class="form-control" step="0.000001" @bind="br.Rate" /></td>
+                                                            <td><button class="btn-close" @onclick="() => bi.Rows.RemoveAt(idx)">✕</button></td>
+                                                        </tr>
+                                                    }
+                                                </tbody>
+                                            </table>
+                                            <button class="btn-action" style="margin-bottom:.75rem;" @onclick="() => bi.Rows.Add(new())">+ Row</button>
+                                            @if (bi.Error is not null) { <p class="form-error">@bi.Error</p> }
+                                            <div style="display:flex;gap:.5rem;">
+                                                <button class="btn-primary" @onclick="() => SaveBracketSetAsync(sc)" disabled="@bi.Working">@(bi.Working ? "Saving…" : "Save Set")</button>
+                                                <button class="btn-action" @onclick="() => HideBracketInsert(sc)">Cancel</button>
+                                            </div>
+                                        </div>
+                                    }
+                                }
+                            }
+
+                            @* ── ALLOWANCE ────────────────────────────────────────── *@
+                            else if (s.StepType == "ALLOWANCE")
+                            {
+                                @if (det.Allowances is null || det.Allowances.Count == 0)
+                                {
+                                    <p class="empty-msg">No allowance rows yet.</p>
+                                }
+                                else
+                                {
+                                    <table class="data-table" style="margin-bottom:.75rem;">
+                                        <thead>
+                                            <tr><th>From</th><th>To</th><th>Filing Status</th><th>Annual Amount</th>@if (!_readOnly){<th></th>}</tr>
+                                        </thead>
+                                        <tbody>
+                                            @foreach (var r in det.Allowances)
+                                            {
+                                                var row = r;
+                                                var isRowCurrent = row.EffectiveFrom <= _operativeDate
+                                                                && (row.EffectiveTo is null || row.EffectiveTo >= _operativeDate);
+                                                <tr class="@(isRowCurrent ? "row-current" : row.EffectiveTo is null ? "row-open" : "")">
+                                                    <td class="mono">@row.EffectiveFrom.ToString("yyyy-MM-dd")</td>
+                                                    <td class="mono">@(row.EffectiveTo?.ToString("yyyy-MM-dd") ?? "open")</td>
+                                                    <td>@(row.FilingStatusCode ?? "—")</td>
+                                                    <td class="mono">@row.AnnualAmount.ToString("N2")</td>
+                                                    @if (!_readOnly)
+                                                    {
+                                                        <td>@if (row.EffectiveTo is null){<button class="btn-close" @onclick="() => StartCloseAllowance(sc, row.AllowanceId)">Close</button>}</td>
+                                                    }
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                }
+                                @if (pc is not null)
+                                {
+                                    <div class="close-panel">
+                                        <span>Effective To: </span>
+                                        <SfDatePicker CssClass="form-control" Width="160px" @bind-Value="pc.EffectiveTo" />
+                                        <button class="btn-action btn-action--danger" @onclick="() => ConfirmCloseAsync(sc)">Confirm Close</button>
+                                        <button class="btn-action" @onclick="() => CancelClose(sc)">Cancel</button>
+                                        @if (pc.Error is not null) { <span class="inline-err">@pc.Error</span> }
+                                    </div>
+                                }
+                                @if (!_readOnly)
+                                {
+                                    @if (ai is null || !ai.ShowForm)
+                                    {
+                                        @if (hasOpenAllow)
+                                        {
+                                            <p class="hint-msg">Close the open row before adding a new one.</p>
+                                        }
+                                        else
+                                        {
+                                            <button class="btn-add" @onclick="() => ShowAllowInsert(sc)">+ Add Allowance Row</button>
+                                        }
+                                    }
+                                    else
+                                    {
+                                        <div class="insert-panel">
+                                            <h4 class="insert-heading">New Allowance Row</h4>
+                                            <div class="ins-grid">
+                                                <label>Effective From <span class="req">*</span></label>
+                                                <SfDatePicker CssClass="form-control" @bind-Value="ai.EffectiveFrom" />
+                                                <label>Filing Status (optional)</label>
+                                                <input class="form-control" placeholder="e.g. SINGLE, MFJ" @bind="ai.FilingStatus" />
+                                                <label>Annual Amount <span class="req">*</span></label>
+                                                <input type="number" class="form-control" step="0.01" min="0" @bind="ai.AnnualAmount" />
+                                            </div>
+                                            @if (ai.Error is not null) { <p class="form-error">@ai.Error</p> }
+                                            <div style="display:flex;gap:.5rem;margin-top:.75rem;">
+                                                <button class="btn-primary" @onclick="() => SaveAllowanceAsync(sc)" disabled="@ai.Working">@(ai.Working ? "Saving…" : "Save")</button>
+                                                <button class="btn-action" @onclick="() => HideAllowInsert(sc)">Cancel</button>
+                                            </div>
+                                        </div>
+                                    }
+                                }
+                            }
+
+                            @* ── TIERED FLAT ──────────────────────────────────────── *@
+                            else if (s.StepType == "TIERED_FLAT")
+                            {
+                                @if (tSets.Count == 0)
+                                {
+                                    <p class="empty-msg">No tier sets yet.</p>
+                                }
+                                @foreach (var tset in tSets)
+                                {
+                                    var tss      = tset;
+                                    var tFrom    = tss.Key;
+                                    var tOpen    = tss.Any(t => t.EffectiveTo is null);
+                                    var tTo      = tss.First().EffectiveTo;
+                                    var tCurrent = tFrom <= _operativeDate && (tTo is null || tTo >= _operativeDate);
+                                    <div class="rate-set">
+                                        <div class="rate-set-hdr">
+                                            <span class="set-label">Set @tFrom.ToString("yyyy-MM-dd")</span>
+                                            @if (tCurrent) { <span class="current-badge">Active</span> }
+                                            @if (tOpen) { <span class="open-badge">Open</span> }
+                                            else { <span class="closed-badge">Closed @tTo?.ToString("yyyy-MM-dd")</span> }
+                                            @if (!_readOnly && tOpen)
+                                            {
+                                                <button class="btn-close" @onclick="() => StartCloseTieredSet(sc, tFrom)">Close Set</button>
+                                            }
+                                        </div>
+                                        <table class="data-table data-table--nested">
+                                            <thead><tr><th>Lower</th><th>Upper</th><th>Rate</th><th>Period Cap</th><th>Annual Cap</th></tr></thead>
+                                            <tbody>
+                                                @foreach (var t in tss.OrderBy(x => x.LowerLimit))
+                                                {
+                                                    <tr>
+                                                        <td class="mono">@t.LowerLimit.ToString("N2")</td>
+                                                        <td class="mono">@(t.UpperLimit?.ToString("N2") ?? "∞")</td>
+                                                        <td class="mono">@t.Rate.ToString("P4")</td>
+                                                        <td class="mono">@(t.PeriodCap?.ToString("N2") ?? "—")</td>
+                                                        <td class="mono">@(t.AnnualCap?.ToString("N2") ?? "—")</td>
+                                                    </tr>
+                                                }
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                }
+                                @if (pc is not null)
+                                {
+                                    <div class="close-panel">
+                                        <span>Close tier set — Effective To: </span>
+                                        <SfDatePicker CssClass="form-control" Width="160px" @bind-Value="pc.EffectiveTo" />
+                                        <button class="btn-action btn-action--danger" @onclick="() => ConfirmCloseAsync(sc)">Confirm Close</button>
+                                        <button class="btn-action" @onclick="() => CancelClose(sc)">Cancel</button>
+                                        @if (pc.Error is not null) { <span class="inline-err">@pc.Error</span> }
+                                    </div>
+                                }
+                                @if (!_readOnly)
+                                {
+                                    @if (ti is null || !ti.ShowForm)
+                                    {
+                                        @if (hasOpenTiered)
+                                        {
+                                            <p class="hint-msg">Close the open tier set before adding a new one.</p>
+                                        }
+                                        else
+                                        {
+                                            <button class="btn-add" @onclick="() => ShowTieredInsert(sc)">+ Add Tier Set</button>
+                                        }
+                                    }
+                                    else
+                                    {
+                                        <div class="insert-panel">
+                                            <h4 class="insert-heading">New Tier Set</h4>
+                                            <div style="margin-bottom:.75rem;">
+                                                <label class="form-label">Effective From <span class="req">*</span></label>
+                                                <SfDatePicker CssClass="form-control" Width="200px" @bind-Value="ti.EffectiveFrom" />
+                                            </div>
+                                            <table class="data-table" style="margin-bottom:.5rem;">
+                                                <thead><tr><th>Lower</th><th>Upper (blank=∞)</th><th>Rate (decimal)</th><th>Period Cap</th><th>Annual Cap</th><th></th></tr></thead>
+                                                <tbody>
+                                                    @for (int i = 0; i < ti.Rows.Count; i++)
+                                                    {
+                                                        var idx = i;
+                                                        var tr2 = ti.Rows[idx];
+                                                        <tr>
+                                                            <td><input type="number" class="form-control" step="0.01" @bind="tr2.LowerLimit" /></td>
+                                                            <td><input class="form-control" placeholder="blank=∞" @bind="tr2.UpperLimitStr" /></td>
+                                                            <td><input type="number" class="form-control" step="0.000001" @bind="tr2.Rate" /></td>
+                                                            <td><input type="number" class="form-control" step="0.01" @bind="tr2.PeriodCap" /></td>
+                                                            <td><input type="number" class="form-control" step="0.01" @bind="tr2.AnnualCap" /></td>
+                                                            <td><button class="btn-close" @onclick="() => ti.Rows.RemoveAt(idx)">✕</button></td>
+                                                        </tr>
+                                                    }
+                                                </tbody>
+                                            </table>
+                                            <button class="btn-action" style="margin-bottom:.75rem;" @onclick="() => ti.Rows.Add(new())">+ Row</button>
+                                            @if (ti.Error is not null) { <p class="form-error">@ti.Error</p> }
+                                            <div style="display:flex;gap:.5rem;">
+                                                <button class="btn-primary" @onclick="() => SaveTieredSetAsync(sc)" disabled="@ti.Working">@(ti.Working ? "Saving…" : "Save Set")</button>
+                                                <button class="btn-action" @onclick="() => HideTieredInsert(sc)">Cancel</button>
+                                            </div>
+                                        </div>
+                                    }
+                                }
+                            }
+
+                            @* ── CREDIT ───────────────────────────────────────────── *@
+                            else if (s.StepType == "CREDIT")
+                            {
+                                @if (det.Credits is null || det.Credits.Count == 0)
+                                {
+                                    <p class="empty-msg">No credit rows yet.</p>
+                                }
+                                else
+                                {
+                                    <table class="data-table" style="margin-bottom:.75rem;">
+                                        <thead>
+                                            <tr><th>From</th><th>To</th><th>Annual Amount</th><th>Credit Rate</th><th>Refundable</th>@if (!_readOnly){<th></th>}</tr>
+                                        </thead>
+                                        <tbody>
+                                            @foreach (var r in det.Credits)
+                                            {
+                                                var row = r;
+                                                var isRowCurrent = row.EffectiveFrom <= _operativeDate
+                                                                && (row.EffectiveTo is null || row.EffectiveTo >= _operativeDate);
+                                                <tr class="@(isRowCurrent ? "row-current" : row.EffectiveTo is null ? "row-open" : "")">
+                                                    <td class="mono">@row.EffectiveFrom.ToString("yyyy-MM-dd")</td>
+                                                    <td class="mono">@(row.EffectiveTo?.ToString("yyyy-MM-dd") ?? "open")</td>
+                                                    <td class="mono">@row.AnnualAmount.ToString("N2")</td>
+                                                    <td class="mono">@row.CreditRate.ToString("P4")</td>
+                                                    <td>@(row.IsRefundable ? "Yes" : "No")</td>
+                                                    @if (!_readOnly)
+                                                    {
+                                                        <td>@if (row.EffectiveTo is null){<button class="btn-close" @onclick="() => StartCloseCredit(sc, row.CreditId)">Close</button>}</td>
+                                                    }
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                }
+                                @if (pc is not null)
+                                {
+                                    <div class="close-panel">
+                                        <span>Effective To: </span>
+                                        <SfDatePicker CssClass="form-control" Width="160px" @bind-Value="pc.EffectiveTo" />
+                                        <button class="btn-action btn-action--danger" @onclick="() => ConfirmCloseAsync(sc)">Confirm Close</button>
+                                        <button class="btn-action" @onclick="() => CancelClose(sc)">Cancel</button>
+                                        @if (pc.Error is not null) { <span class="inline-err">@pc.Error</span> }
+                                    </div>
+                                }
+                                @if (!_readOnly)
+                                {
+                                    @if (ci is null || !ci.ShowForm)
+                                    {
+                                        @if (hasOpenCredit)
+                                        {
+                                            <p class="hint-msg">Close the open row before adding a new one.</p>
+                                        }
+                                        else
+                                        {
+                                            <button class="btn-add" @onclick="() => ShowCreditInsert(sc)">+ Add Credit Row</button>
+                                        }
+                                    }
+                                    else
+                                    {
+                                        <div class="insert-panel">
+                                            <h4 class="insert-heading">New Credit Row</h4>
+                                            <div class="ins-grid">
+                                                <label>Effective From <span class="req">*</span></label>
+                                                <SfDatePicker CssClass="form-control" @bind-Value="ci.EffectiveFrom" />
+                                                <label>Annual Amount <span class="req">*</span></label>
+                                                <input type="number" class="form-control" step="0.01" min="0" @bind="ci.AnnualAmount" />
+                                                <label>Credit Rate (decimal) <span class="req">*</span></label>
+                                                <input type="number" class="form-control" step="0.000001" min="0" @bind="ci.CreditRate" />
+                                                <label>Refundable</label>
+                                                <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;">
+                                                    <input type="checkbox" @bind="ci.IsRefundable" /> Yes
+                                                </label>
+                                            </div>
+                                            @if (ci.Error is not null) { <p class="form-error">@ci.Error</p> }
+                                            <div style="display:flex;gap:.5rem;margin-top:.75rem;">
+                                                <button class="btn-primary" @onclick="() => SaveCreditAsync(sc)" disabled="@ci.Working">@(ci.Working ? "Saving…" : "Save")</button>
+                                                <button class="btn-action" @onclick="() => HideCreditInsert(sc)">Cancel</button>
+                                            </div>
+                                        </div>
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                <p class="empty-msg" style="color:#6b7280;">No rate editor for step type "@s.StepType".</p>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    }
+}
+
+@code {
+    // ── State ────────────────────────────────────────────────────────
+    private bool _loading  = true;
+    private bool _readOnly = false;
+
+    private Dictionary<string, List<TaxStepConfigRow>> _stepsByJurisdiction = [];
+    private IReadOnlySet<string>                        _expiring            = new HashSet<string>();
+    private DateOnly                                    _operativeDate;
+    private Dictionary<string, bool>                    _expanded            = [];
+    private Dictionary<string, StepDetail?>             _stepDetail          = [];
+    private Dictionary<string, PendingClose?>           _pendingClose        = [];
+    private Dictionary<string, FlatInsert>              _flatIns             = [];
+    private Dictionary<string, BracketInsert>           _bracketIns          = [];
+    private Dictionary<string, AllowInsert>             _allowIns            = [];
+    private Dictionary<string, TieredInsert>            _tieredIns           = [];
+    private Dictionary<string, CreditInsert>            _creditIns           = [];
+
+    // ── Inner types ───────────────────────────────────────────────────
+    private sealed class StepDetail
+    {
+        public IReadOnlyList<FlatRateDetailRow>?      FlatRates      { get; set; }
+        public IReadOnlyList<BracketDetailRow>?       Brackets       { get; set; }
+        public IReadOnlyList<AllowanceDetailRow>?     Allowances     { get; set; }
+        public IReadOnlyList<TieredBracketDetailRow>? TieredBrackets { get; set; }
+        public IReadOnlyList<CreditDetailRow>?        Credits        { get; set; }
+    }
+
+    private sealed class PendingClose
+    {
+        public enum Kind { Flat, Bracket, Allowance, Tiered, Credit }
+        public Kind      CloseKind    { get; set; }
+        public int?      RowId        { get; set; }
+        public DateOnly? SetFrom      { get; set; }
+        public DateTime  EffectiveTo  { get; set; } = DateTime.Today;
+        public string?   Error        { get; set; }
+    }
+
+    private sealed class FlatInsert
+    {
+        public bool     ShowForm      { get; set; }
+        public DateTime EffectiveFrom { get; set; } = DateTime.Today;
+        public decimal  Rate          { get; set; }
+        public decimal? WageBase      { get; set; }
+        public decimal? PeriodCap     { get; set; }
+        public decimal? AnnualCap     { get; set; }
+        public string?  Error         { get; set; }
+        public bool     Working       { get; set; }
+    }
+
+    private sealed class BracketInsert
+    {
+        public bool     ShowForm      { get; set; }
+        public DateTime EffectiveFrom { get; set; } = DateTime.Today;
+        public List<BracketRow> Rows  { get; set; } = [new()];
+        public string?  Error         { get; set; }
+        public bool     Working       { get; set; }
+
+        public sealed class BracketRow
+        {
+            public string?  FilingStatus  { get; set; }
+            public decimal  LowerLimit    { get; set; }
+            public string   UpperLimitStr { get; set; } = string.Empty;
+            public decimal  Rate          { get; set; }
+        }
+    }
+
+    private sealed class AllowInsert
+    {
+        public bool     ShowForm      { get; set; }
+        public DateTime EffectiveFrom { get; set; } = DateTime.Today;
+        public string?  FilingStatus  { get; set; }
+        public decimal  AnnualAmount  { get; set; }
+        public string?  Error         { get; set; }
+        public bool     Working       { get; set; }
+    }
+
+    private sealed class TieredInsert
+    {
+        public bool     ShowForm      { get; set; }
+        public DateTime EffectiveFrom { get; set; } = DateTime.Today;
+        public List<TierRow> Rows     { get; set; } = [new()];
+        public string?  Error         { get; set; }
+        public bool     Working       { get; set; }
+
+        public sealed class TierRow
+        {
+            public decimal  LowerLimit    { get; set; }
+            public string   UpperLimitStr { get; set; } = string.Empty;
+            public decimal  Rate          { get; set; }
+            public decimal? PeriodCap     { get; set; }
+            public decimal? AnnualCap     { get; set; }
+        }
+    }
+
+    private sealed class CreditInsert
+    {
+        public bool     ShowForm      { get; set; }
+        public DateTime EffectiveFrom { get; set; } = DateTime.Today;
+        public decimal  AnnualAmount  { get; set; }
+        public decimal  CreditRate    { get; set; }
+        public bool     IsRefundable  { get; set; }
+        public string?  Error         { get; set; }
+        public bool     Working       { get; set; }
+    }
+
+    // ── Lifecycle ─────────────────────────────────────────────────────
+    protected override async Task OnInitializedAsync()
+    {
+        var auth  = await AuthState.GetAuthenticationStateAsync();
+        _readOnly = !auth.User.HasAnyRole("TaxAdmin", "SystemAdmin");
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _expanded.Clear();
+        _stepDetail.Clear();
+        _pendingClose.Clear();
+        _flatIns.Clear(); _bracketIns.Clear(); _allowIns.Clear(); _tieredIns.Clear(); _creditIns.Clear();
+        StateHasChanged();
+
+        var steps = await TaxConfig.GetAllActiveStepsAsync();
+        _stepsByJurisdiction = steps
+            .GroupBy(s => $"{s.JurisdictionName} ({s.JurisdictionCode})")
+            .ToDictionary(g => g.Key, g => g.ToList());
+
+        _operativeDate = DateOnly.FromDateTime(TemporalContext.GetOperativeDate());
+        _expiring      = await TaxConfig.GetExpiringStepCodesAsync(_operativeDate, 120);
+        _loading  = false;
+    }
+
+    // ── Expand / collapse ─────────────────────────────────────────────
+    private async Task ToggleAsync(TaxStepConfigRow step)
+    {
+        var sc = step.StepCode;
+        var was = _expanded.TryGetValue(sc, out var e) && e;
+        _expanded[sc] = !was;
+        if (!was && !_stepDetail.ContainsKey(sc))
+            await LoadStepDetailAsync(step);
+    }
+
+    private async Task LoadStepDetailAsync(TaxStepConfigRow step)
+    {
+        var sc = step.StepCode;
+        _stepDetail[sc] = null;
+        StateHasChanged();
+        var det = new StepDetail();
+        switch (step.StepType)
+        {
+            case "FLAT_RATE":           det.FlatRates      = await TaxConfig.GetFlatRatesAsync(sc);          break;
+            case "PROGRESSIVE_BRACKET": det.Brackets       = await TaxConfig.GetBracketsDetailAsync(sc);     break;
+            case "ALLOWANCE":           det.Allowances     = await TaxConfig.GetAllowancesDetailAsync(sc);   break;
+            case "TIERED_FLAT":         det.TieredBrackets = await TaxConfig.GetTieredBracketsDetailAsync(sc);break;
+            case "CREDIT":              det.Credits        = await TaxConfig.GetCreditsDetailAsync(sc);      break;
+        }
+        _stepDetail[sc] = det;
+    }
+
+    private async Task ReloadDetailAsync(string sc)
+    {
+        var step = _stepsByJurisdiction.SelectMany(j => j.Value).FirstOrDefault(s => s.StepCode == sc);
+        if (step is not null) await LoadStepDetailAsync(step);
+    }
+
+    // ── Close confirm ─────────────────────────────────────────────────
+    private void StartCloseFlatRate(string sc, int id)
+        => _pendingClose[sc] = new PendingClose { CloseKind = PendingClose.Kind.Flat, RowId = id };
+
+    private void StartCloseBracketSet(string sc, DateOnly from)
+        => _pendingClose[sc] = new PendingClose { CloseKind = PendingClose.Kind.Bracket, SetFrom = from };
+
+    private void StartCloseAllowance(string sc, int id)
+        => _pendingClose[sc] = new PendingClose { CloseKind = PendingClose.Kind.Allowance, RowId = id };
+
+    private void StartCloseTieredSet(string sc, DateOnly from)
+        => _pendingClose[sc] = new PendingClose { CloseKind = PendingClose.Kind.Tiered, SetFrom = from };
+
+    private void StartCloseCredit(string sc, int id)
+        => _pendingClose[sc] = new PendingClose { CloseKind = PendingClose.Kind.Credit, RowId = id };
+
+    private void CancelClose(string sc) => _pendingClose.Remove(sc);
+
+    private async Task ConfirmCloseAsync(string sc)
+    {
+        if (!_pendingClose.TryGetValue(sc, out var pc) || pc is null) return;
+        pc.Error = null;
+        var auth  = await AuthState.GetAuthenticationStateAsync();
+        var actor = auth.User.GetDisplayName();
+        var effTo = DateOnly.FromDateTime(pc.EffectiveTo);
+        try
+        {
+            switch (pc.CloseKind)
+            {
+                case PendingClose.Kind.Flat:
+                    await TaxConfig.CloseFlatRateAsync(pc.RowId!.Value, effTo, actor);
+                    break;
+                case PendingClose.Kind.Bracket:
+                    await TaxConfig.CloseBracketSetAsync(sc, pc.SetFrom!.Value, effTo, actor);
+                    break;
+                case PendingClose.Kind.Allowance:
+                    await TaxConfig.CloseAllowanceAsync(pc.RowId!.Value, effTo, actor);
+                    break;
+                case PendingClose.Kind.Tiered:
+                    await TaxConfig.CloseTieredBracketSetAsync(sc, pc.SetFrom!.Value, effTo, actor);
+                    break;
+                case PendingClose.Kind.Credit:
+                    await TaxConfig.CloseCreditAsync(pc.RowId!.Value, effTo, actor);
+                    break;
+            }
+            _pendingClose.Remove(sc);
+            await ReloadDetailAsync(sc);
+        }
+        catch (Exception ex) { pc.Error = ex.Message; }
+    }
+
+    // ── Flat rate insert ──────────────────────────────────────────────
+    private void ShowFlatInsert(string sc)
+    {
+        _flatIns[sc] = new FlatInsert { ShowForm = true };
+        _pendingClose.Remove(sc);
+    }
+    private void HideFlatInsert(string sc) => _flatIns.Remove(sc);
+
+    private async Task SaveFlatRateAsync(string sc)
+    {
+        if (!_flatIns.TryGetValue(sc, out var fi)) return;
+        fi.Working = true; fi.Error = null;
+        try
+        {
+            var auth  = await AuthState.GetAuthenticationStateAsync();
+            var actor = auth.User.GetDisplayName();
+            await TaxConfig.InsertFlatRateAsync(sc, DateOnly.FromDateTime(fi.EffectiveFrom),
+                fi.Rate, fi.WageBase, fi.PeriodCap, fi.AnnualCap, actor);
+            _flatIns.Remove(sc);
+            await ReloadDetailAsync(sc);
+        }
+        catch (Exception ex) { fi.Error = ex.Message; fi.Working = false; }
+    }
+
+    // ── Bracket insert ────────────────────────────────────────────────
+    private void ShowBracketInsert(string sc)
+    {
+        _bracketIns[sc] = new BracketInsert { ShowForm = true };
+        _pendingClose.Remove(sc);
+    }
+    private void HideBracketInsert(string sc) => _bracketIns.Remove(sc);
+
+    private async Task SaveBracketSetAsync(string sc)
+    {
+        if (!_bracketIns.TryGetValue(sc, out var bi)) return;
+        bi.Working = true; bi.Error = null;
+        try
+        {
+            var rows = bi.Rows.Select(r => new BracketInput(
+                string.IsNullOrWhiteSpace(r.FilingStatus) ? null : r.FilingStatus.Trim().ToUpperInvariant(),
+                r.LowerLimit,
+                string.IsNullOrWhiteSpace(r.UpperLimitStr) ? null : decimal.Parse(r.UpperLimitStr),
+                r.Rate)).ToList();
+            var auth  = await AuthState.GetAuthenticationStateAsync();
+            var actor = auth.User.GetDisplayName();
+            await TaxConfig.InsertBracketSetAsync(sc, DateOnly.FromDateTime(bi.EffectiveFrom), rows, actor);
+            _bracketIns.Remove(sc);
+            await ReloadDetailAsync(sc);
+        }
+        catch (Exception ex) { bi.Error = ex.Message; bi.Working = false; }
+    }
+
+    // ── Allowance insert ──────────────────────────────────────────────
+    private void ShowAllowInsert(string sc)
+    {
+        _allowIns[sc] = new AllowInsert { ShowForm = true };
+        _pendingClose.Remove(sc);
+    }
+    private void HideAllowInsert(string sc) => _allowIns.Remove(sc);
+
+    private async Task SaveAllowanceAsync(string sc)
+    {
+        if (!_allowIns.TryGetValue(sc, out var ai)) return;
+        ai.Working = true; ai.Error = null;
+        try
+        {
+            var auth  = await AuthState.GetAuthenticationStateAsync();
+            var actor = auth.User.GetDisplayName();
+            var fs    = string.IsNullOrWhiteSpace(ai.FilingStatus) ? null : ai.FilingStatus.Trim().ToUpperInvariant();
+            await TaxConfig.InsertAllowanceAsync(sc, DateOnly.FromDateTime(ai.EffectiveFrom), fs, ai.AnnualAmount, actor);
+            _allowIns.Remove(sc);
+            await ReloadDetailAsync(sc);
+        }
+        catch (Exception ex) { ai.Error = ex.Message; ai.Working = false; }
+    }
+
+    // ── Tiered insert ─────────────────────────────────────────────────
+    private void ShowTieredInsert(string sc)
+    {
+        _tieredIns[sc] = new TieredInsert { ShowForm = true };
+        _pendingClose.Remove(sc);
+    }
+    private void HideTieredInsert(string sc) => _tieredIns.Remove(sc);
+
+    private async Task SaveTieredSetAsync(string sc)
+    {
+        if (!_tieredIns.TryGetValue(sc, out var ti)) return;
+        ti.Working = true; ti.Error = null;
+        try
+        {
+            var rows = ti.Rows.Select(r => new TieredBracketInput(
+                r.LowerLimit,
+                string.IsNullOrWhiteSpace(r.UpperLimitStr) ? null : decimal.Parse(r.UpperLimitStr),
+                r.Rate, r.PeriodCap, r.AnnualCap)).ToList();
+            var auth  = await AuthState.GetAuthenticationStateAsync();
+            var actor = auth.User.GetDisplayName();
+            await TaxConfig.InsertTieredBracketSetAsync(sc, DateOnly.FromDateTime(ti.EffectiveFrom), rows, actor);
+            _tieredIns.Remove(sc);
+            await ReloadDetailAsync(sc);
+        }
+        catch (Exception ex) { ti.Error = ex.Message; ti.Working = false; }
+    }
+
+    // ── Credit insert ─────────────────────────────────────────────────
+    private void ShowCreditInsert(string sc)
+    {
+        _creditIns[sc] = new CreditInsert { ShowForm = true };
+        _pendingClose.Remove(sc);
+    }
+    private void HideCreditInsert(string sc) => _creditIns.Remove(sc);
+
+    private async Task SaveCreditAsync(string sc)
+    {
+        if (!_creditIns.TryGetValue(sc, out var ci)) return;
+        ci.Working = true; ci.Error = null;
+        try
+        {
+            var auth  = await AuthState.GetAuthenticationStateAsync();
+            var actor = auth.User.GetDisplayName();
+            await TaxConfig.InsertCreditAsync(sc, DateOnly.FromDateTime(ci.EffectiveFrom),
+                ci.AnnualAmount, ci.CreditRate, ci.IsRefundable, actor);
+            _creditIns.Remove(sc);
+            await ReloadDetailAsync(sc);
+        }
+        catch (Exception ex) { ci.Error = ex.Message; ci.Working = false; }
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────
+    private static string StepTypeLabel(string t) => t switch
+    {
+        "PROGRESSIVE_BRACKET" => "Progressive",
+        "FLAT_RATE"           => "Flat Rate",
+        "TIERED_FLAT"         => "Tiered",
+        "ALLOWANCE"           => "Allowance",
+        "CREDIT"              => "Credit",
+        "STANDARD_DEDUCTION"  => "Std Deduction",
+        "PERCENTAGE_OF_PRIOR" => "% of Prior",
+        _                     => t
+    };
+}
+
+<style>
+    .page-header   { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:1.5rem; gap:1rem; }
+    .page-title    { font-size:var(--font-size-lg); font-weight:600; color:var(--aw-navy); margin:0 0 .25rem; }
+    .page-subtitle { font-size:var(--font-size-sm); color:#6b7280; margin:0; }
+    .loading-text  { color:#6b7280; font-style:italic; }
+
+    .jur-section  { margin-bottom:2rem; }
+    .jur-heading  { font-size:var(--font-size-sm); font-weight:600; color:var(--aw-navy); text-transform:uppercase; letter-spacing:.05em; margin:0 0 .75rem; }
+
+    .step-card { background:white; border-radius:var(--radius-lg); box-shadow:var(--shadow-sm); margin-bottom:.5rem; overflow:hidden; }
+    .step-card--open { box-shadow:var(--shadow-md, 0 4px 12px rgba(0,0,0,.1)); }
+
+    .step-hdr { display:flex; justify-content:space-between; align-items:center; padding:var(--space-3) var(--space-4); cursor:pointer; user-select:none; }
+    .step-hdr:hover { background:#f9fafb; }
+
+    .seq { font-size:.7rem; font-weight:600; color:#9ca3af; background:#f3f4f6; border-radius:3px; padding:1px 5px; font-family:monospace; }
+    .mono { font-family:monospace; font-size:.85rem; }
+    .arrow { color:#9ca3af; font-size:.75rem; }
+
+    .type-badge { display:inline-block; padding:1px 6px; border-radius:4px; font-size:.75rem; font-weight:500; background:#e0f2fe; color:#0369a1; }
+    .expiry-badge { display:inline-block; padding:1px 6px; border-radius:4px; font-size:.75rem; font-weight:600; background:#fef9c3; color:#854d0e; }
+
+    .step-body { padding:var(--space-4); border-top:1px solid #f3f4f6; }
+
+    .data-table { width:100%; border-collapse:collapse; font-size:var(--font-size-sm); }
+    .data-table th { background:#f9fafb; padding:var(--space-2) var(--space-3); text-align:left; font-weight:500; color:#6b7280; border-bottom:1px solid #e5e7eb; white-space:nowrap; font-size:.8rem; }
+    .data-table td { padding:var(--space-2) var(--space-3); border-bottom:1px solid #f3f4f6; color:var(--aw-navy); vertical-align:middle; }
+    .data-table tr:last-child td { border-bottom:none; }
+    .data-table--nested { margin-left:0; font-size:.8rem; }
+    .data-table--nested th { background:#f3f4f6; }
+    .row-open td    { background:#f0fdf4; }
+    .row-current td { background:#eff6ff; }
+
+    .rate-set { margin-bottom:1rem; }
+    .rate-set-hdr { display:flex; align-items:center; gap:.6rem; margin-bottom:.3rem; }
+    .set-label { font-size:.8rem; font-weight:600; color:#374151; font-family:monospace; }
+    .open-badge    { display:inline-block; padding:1px 6px; border-radius:9999px; font-size:.7rem; font-weight:600; background:#d1fae5; color:#065f46; }
+    .closed-badge  { display:inline-block; padding:1px 6px; border-radius:9999px; font-size:.7rem; font-weight:600; background:#f3f4f6; color:#6b7280; }
+    .current-badge { display:inline-block; padding:1px 6px; border-radius:9999px; font-size:.7rem; font-weight:600; background:#dbeafe; color:#1e40af; }
+
+    .close-panel { display:flex; align-items:center; flex-wrap:wrap; gap:.5rem; background:#fff7ed; border:1px solid #fed7aa; border-radius:var(--radius-md); padding:var(--space-3); margin-bottom:.75rem; font-size:.85rem; }
+    .inline-err { color:#dc2626; font-size:.8rem; }
+
+    .empty-msg { color:#6b7280; font-size:.85rem; font-style:italic; margin:0 0 .75rem; }
+    .hint-msg  { color:#92400e; font-size:.8rem; background:#fef3c7; border:1px solid #fcd34d; border-radius:4px; padding:4px 10px; display:inline-block; margin:0 0 .5rem; }
+    .form-error { color:#dc2626; font-size:.85rem; margin:.25rem 0 0; }
+    .req { color:#dc2626; }
+
+    .btn-add { display:inline-block; padding:4px 12px; border-radius:4px; font-size:.8rem; cursor:pointer; border:1px dashed #d1d5db; background:white; color:#374151; }
+    .btn-add:hover { background:#f9fafb; border-color:#9ca3af; }
+
+    .btn-close { padding:2px 7px; border-radius:4px; font-size:.75rem; cursor:pointer; border:1px solid #fca5a5; background:#fee2e2; color:#991b1b; }
+    .btn-close:hover { background:#fecaca; }
+
+    .btn-action { padding:3px 10px; border-radius:4px; font-size:.8rem; cursor:pointer; border:1px solid #d1d5db; background:white; color:var(--aw-navy); }
+    .btn-action:hover { background:#f9fafb; }
+    .btn-action--danger { background:#fee2e2; border-color:#fca5a5; color:#991b1b; }
+
+    .btn-primary { background:var(--aw-teal); color:white; border:none; border-radius:var(--radius-md); padding:var(--space-2) var(--space-4); font-size:var(--font-size-sm); font-weight:500; cursor:pointer; }
+    .btn-primary:hover:not(:disabled) { opacity:.9; }
+    .btn-primary:disabled { opacity:.5; cursor:not-allowed; }
+
+    .btn-secondary { background:white; color:#374151; border:1px solid #d1d5db; border-radius:var(--radius-md); padding:var(--space-2) var(--space-4); font-size:var(--font-size-sm); font-weight:500; cursor:pointer; }
+    .btn-secondary:hover { background:#f9fafb; }
+
+    .insert-panel { background:#f9fafb; border:1px solid #e5e7eb; border-radius:var(--radius-md); padding:var(--space-4); margin-top:.5rem; }
+    .insert-heading { font-size:.85rem; font-weight:600; color:var(--aw-navy); margin:0 0 .75rem; }
+
+    .ins-grid { display:grid; grid-template-columns:max-content 1fr; gap:.4rem var(--space-3,1rem); align-items:center; margin-bottom:.5rem; }
+    .ins-grid label { font-size:.8rem; font-weight:500; color:#374151; white-space:nowrap; }
+    .form-label { font-size:var(--font-size-sm); font-weight:500; color:#374151; }
+    .form-control { padding:var(--space-2); border:1px solid #d1d5db; border-radius:var(--radius-md); font-size:var(--font-size-sm); background:white; width:100%; box-sizing:border-box; }
+</style>

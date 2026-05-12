@@ -84,7 +84,7 @@ public sealed class BenefitStepProvider : IBenefitStepProvider
                 steps.Add(new PreTaxBenefitStep(
                     stepCode, preSeq++,
                     eeAmount, erAmount,
-                    reducesIncomeTax: true, reducesFica: false));
+                    reducesIncomeTax: true, reducesFica: election.FicaExempt));
 
                 var preMatch = await LoadMatchRuleAsync(election, request.PayDate, ct);
                 if (preMatch is not null)
