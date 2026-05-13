@@ -7,6 +7,7 @@
 @using AllWorkHRIS.Module.Payroll.Queries
 @using System.Text
 @using Microsoft.JSInterop
+@using Syncfusion.Blazor.Inputs
 @inject IHrisSessionState       SessionState
 @inject PayRegisterQueryService QueryService
 @inject IJSRuntime              JS
@@ -323,8 +324,8 @@
                     {
                         <div class="tab-content">
                             <div class="detail-toolbar">
-                                <input class="search-input" type="search" placeholder="Filter by name or number…"
-                                       @bind="_empFilter" @bind:event="oninput" @bind:after="ResetEmpPage" />
+                                <SfTextBox @bind-Value="_empFilter" Input="OnEmpFilterInput"
+                                           Placeholder="Filter by name or number…" Width="240px" />
                                 <span class="detail-count">@FilteredCount employees</span>
                             </div>
 
@@ -703,6 +704,12 @@
 
     private void ResetEmpPage() => _empPage = 1;
 
+    private void OnEmpFilterInput(InputEventArgs args)
+    {
+        _empFilter = args.Value;
+        ResetEmpPage();
+    }
+
     private void SortBy(string col)
     {
         if (_empSortCol == col) _empSortAsc = !_empSortAsc;
@@ -850,8 +857,8 @@
         border-radius: var(--radius-sm);
         line-height: 1.3;
     }
-    .nav-run:hover { background: #ede9fe; }
-    .nav-run--active { background: #ede9fe; color: #5b21b6; font-weight: var(--font-weight-semibold); }
+    .nav-run:hover { background: color-mix(in srgb, var(--module-ta) 10%, white); }
+    .nav-run--active { background: color-mix(in srgb, var(--module-ta) 15%, white); color: var(--module-ta); font-weight: var(--font-weight-semibold); }
     .nav-run__status { font-size: .7rem; color: #9ca3af; }
 
     .register-content {
@@ -902,7 +909,7 @@
         color: #374151;
     }
     .sub-tab:hover { background: #e5e7eb; }
-    .sub-tab--active { background: #d1fae5; border-color: #6ee7b7; color: #065f46; font-weight: var(--font-weight-medium); }
+    .sub-tab--active { background: color-mix(in srgb, var(--module-ta) 15%, white); border-color: var(--module-ta); color: var(--module-ta); font-weight: var(--font-weight-medium); }
 
     .tab-content  { display: flex; flex-direction: column; gap: var(--space-5); }
     .tab-loading  { color: #9ca3af; font-size: var(--font-size-sm); padding: var(--space-6); }

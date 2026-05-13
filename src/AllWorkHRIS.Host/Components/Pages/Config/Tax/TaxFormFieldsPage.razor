@@ -5,6 +5,8 @@
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Components.Authorization
 @using AllWorkHRIS.Host.Config.Tax
+@using Syncfusion.Blazor.Grids
+@using Syncfusion.Blazor.DropDowns
 @inject ITaxConfigRepository        TaxConfig
 @inject AuthenticationStateProvider AuthState
 
@@ -19,13 +21,11 @@
 
 <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;">
     <label class="form-label" style="margin:0;white-space:nowrap;">Form Type</label>
-    <select class="form-control" style="max-width:300px;" @bind="_selectedFormType" @bind:after="LoadFieldsAsync">
-        <option value="">— select —</option>
-        @foreach (var ft in _formTypes)
-        {
-            <option value="@ft.Code">@ft.Label</option>
-        }
-    </select>
+    <SfDropDownList TValue="string" TItem="FormTypeOption" DataSource="@_formTypeOptions"
+                    @bind-Value="_selectedFormType" Placeholder="— select —" Width="300px">
+        <DropDownListFieldSettings Value="Code" Text="Label" />
+        <DropDownListEvents TValue="string" TItem="FormTypeOption" ValueChange="OnFormTypeChanged" />
+    </SfDropDownList>
 </div>
 
 @if (_loading)
@@ -38,83 +38,89 @@ else if (!string.IsNullOrEmpty(_selectedFormType) && _fields.Count == 0)
 }
 else if (_fields.Count > 0)
 {
-    <div class="grid-container">
-        <table class="data-table">
-            <thead>
-                <tr>
-                    <th>Order</th>
-                    <th>Section</th>
-                    <th>Label</th>
-                    <th>Key</th>
-                    <th>Type</th>
-                    <th>Required</th>
-                    <th>Status</th>
-                    <th>Actions</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var field in _fields)
-                {
-                    var f = field;
-                    <tr>
-                        <td class="mono">@f.DisplayOrder</td>
-                        <td style="color:#6b7280;font-size:.8rem;">@(f.SectionLabel ?? "—")</td>
-                        <td>@f.DisplayLabel</td>
-                        <td class="mono">@f.FieldKey</td>
-                        <td><span class="type-badge">@f.FieldType</span></td>
-                        <td>
-                            <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;">
-                                <input type="checkbox" checked="@f.IsRequired"
-                                       @onchange="e => ToggleRequiredAsync(f, (bool)(e.Value ?? false))" />
-                                <span style="font-size:.8rem;">@(f.IsRequired ? "Required" : "Optional")</span>
-                            </label>
-                        </td>
-                        <td><span class="status-badge status-@f.StatusCode.ToLower().Replace('_','-')">@f.StatusCode</span></td>
-                        <td>
-                            <div style="display:flex;gap:.5rem;flex-wrap:wrap;">
-                                @if (f.StatusCode == "DRAFT")
-                                {
-                                    <button class="btn-action" @onclick="() => SubmitForReviewAsync(f)">Submit</button>
-                                }
-                                @if (f.StatusCode == "APPROVED")
-                                {
-                                    <button class="btn-action btn-action--success" @onclick="() => ActivateAsync(f)">Activate</button>
-                                }
-                                @if (f.StatusCode is "DRAFT" or "ACTIVE")
-                                {
-                                    <button class="btn-action btn-action--danger" @onclick="() => ArchiveAsync(f)">Archive</button>
-                                }
-                            </div>
-                            @if (_actionErrors.TryGetValue(f.FieldDefinitionId, out var err) && err is not null)
-                            {
-                                <p style="color:#dc2626;font-size:.75rem;margin:.25rem 0 0;">@err</p>
-                            }
-                        </td>
-                    </tr>
-                }
-            </tbody>
-        </table>
-    </div>
+    <SfGrid DataSource="@_fields" AllowSorting="true" CssClass="e-gridhover">
+        <GridColumns>
+            <GridColumn HeaderText="Order" Width="80">
+                <Template>@{ var f = (FormFieldConfigRow)context; }<code>@f.DisplayOrder</code></Template>
+            </GridColumn>
+            <GridColumn HeaderText="Section" Width="120">
+                <Template>@{ var f = (FormFieldConfigRow)context; }<span style="color:#6b7280;font-size:.8rem;">@(f.SectionLabel ?? "—")</span></Template>
+            </GridColumn>
+            <GridColumn HeaderText="Label">
+                <Template>@{ var f = (FormFieldConfigRow)context; }@f.DisplayLabel</Template>
+            </GridColumn>
+            <GridColumn HeaderText="Key" Width="140">
+                <Template>@{ var f = (FormFieldConfigRow)context; }<code>@f.FieldKey</code></Template>
+            </GridColumn>
+            <GridColumn HeaderText="Type" Width="100">
+                <Template>@{ var f = (FormFieldConfigRow)context; }<span class="type-badge">@f.FieldType</span></Template>
+            </GridColumn>
+            <GridColumn HeaderText="Required" Width="120">
+                <Template>
+                    @{ var f = (FormFieldConfigRow)context; }
+                    <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;">
+                        <input type="checkbox" checked="@f.IsRequired"
+                               @onchange="e => ToggleRequiredAsync(f, (bool)(e.Value ?? false))" />
+                        <span style="font-size:.8rem;">@(f.IsRequired ? "Required" : "Optional")</span>
+                    </label>
+                </Template>
+            </GridColumn>
+            <GridColumn HeaderText="Status" Width="120">
+                <Template>@{ var f = (FormFieldConfigRow)context; }<span class="status-badge status-@f.StatusCode.ToLower().Replace('_','-')">@f.StatusCode</span></Template>
+            </GridColumn>
+            <GridColumn HeaderText="Actions" Width="220" AllowSorting="false">
+                <Template>
+                    @{ var f = (FormFieldConfigRow)context; }
+                    <div style="display:flex;gap:.5rem;flex-wrap:wrap;">
+                        @if (f.StatusCode == "DRAFT")
+                        {
+                            <button class="btn-action" @onclick="() => SubmitForReviewAsync(f)">Submit</button>
+                        }
+                        @if (f.StatusCode == "APPROVED")
+                        {
+                            <button class="btn-action btn-action--success" @onclick="() => ActivateAsync(f)">Activate</button>
+                        }
+                        @if (f.StatusCode is "DRAFT" or "ACTIVE")
+                        {
+                            <button class="btn-action btn-action--danger" @onclick="() => ArchiveAsync(f)">Archive</button>
+                        }
+                    </div>
+                    @if (_actionErrors.TryGetValue(f.FieldDefinitionId, out var err) && err is not null)
+                    {
+                        <p style="color:#dc2626;font-size:.75rem;margin:.25rem 0 0;">@err</p>
+                    }
+                </Template>
+            </GridColumn>
+        </GridColumns>
+    </SfGrid>
 }
 
 @code {
+    private sealed record FormTypeOption(string Code, string Label);
+
     private bool   _loading         = false;
     private string _selectedFormType = string.Empty;
     private List<FormFieldConfigRow>    _fields       = [];
     private Dictionary<int, string?>   _actionErrors = [];
 
-    private static readonly (string Code, string Label)[] _formTypes =
+    private static readonly List<FormTypeOption> _formTypeOptions =
     [
-        ("W4_2020",   "US Federal W-4 (2020+)"),
-        ("W4_LEGACY", "US Federal W-4 (Pre-2020)"),
-        ("G_4",       "Georgia G-4"),
-        ("IT_2104",   "New York IT-2104"),
-        ("DE_4",      "California DE-4"),
-        ("TD1",       "Canada TD1 (Federal)"),
-        ("BB_TD4",    "Barbados TD4"),
+        new("W4_2020",   "US Federal W-4 (2020+)"),
+        new("W4_LEGACY", "US Federal W-4 (Pre-2020)"),
+        new("G_4",       "Georgia G-4"),
+        new("IT_2104",   "New York IT-2104"),
+        new("DE_4",      "California DE-4"),
+        new("TD1",       "Canada TD1 (Federal)"),
+        new("BB_TD4",    "Barbados TD4"),
     ];
 
     protected override Task OnInitializedAsync() => Task.CompletedTask;
+
+    private async Task OnFormTypeChanged(ChangeEventArgs<string, FormTypeOption> args)
+    {
+        _selectedFormType = args.Value;
+        await LoadFieldsAsync();
+    }
 
     private async Task LoadFieldsAsync()
     {

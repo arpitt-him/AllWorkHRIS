@@ -9,6 +9,9 @@
 @using AllWorkHRIS.Host.Hris.Services
 @using AllWorkHRIS.Core.Lookups
 @using AllWorkHRIS.Core.Temporal
+@using Syncfusion.Blazor.Grids
+@using Syncfusion.Blazor.Inputs
+@using Syncfusion.Blazor.Calendars
 @implements IDisposable
 @inject IWorkQueueService  WorkQueueService
 @inject ILeaveService      LeaveService
@@ -28,11 +31,11 @@
 
     @* ── STAT CARDS ── *@
     <div class="stat-cards">
-        <div class="stat-card">
+        <div class="stat-card stat-card--open">
             <span class="stat-label">Open Items</span>
             <span class="stat-value">@_items.Count</span>
         </div>
-        <div class="stat-card stat-card-urgent">
+        <div class="stat-card stat-card--urgent">
             <span class="stat-label">High / Hold Priority</span>
             <span class="stat-value">@_items.Count(i => i.Priority is WorkQueuePriority.High or WorkQueuePriority.Hold)</span>
         </div>
@@ -41,15 +44,14 @@
     @if (!_loading && _items.Count > 0)
     {
         <div class="filter-row" style="margin-top: var(--space-2); margin-bottom: var(--space-6);">
-            <input type="text" class="filter-input" placeholder="Filter by employee name…"
-                   @bind="_nameFilter" @bind:event="oninput" />
+            <SfTextBox Placeholder="Filter by employee name…"
+                       @bind-Value="_nameFilter"
+                       Width="220px" />
             <span class="filter-label">Due from</span>
-            <input type="date" class="filter-date" value="@_dateFromStr"
-                   @oninput="e => _dateFromStr = e.Value?.ToString() ?? string.Empty" />
+            <SfDatePicker TValue="DateOnly?" @bind-Value="_dateFrom" Width="150px" Placeholder="MM/DD/YYYY" />
             <span class="filter-label">to</span>
-            <input type="date" class="filter-date" value="@_dateToStr"
-                   @oninput="e => _dateToStr = e.Value?.ToString() ?? string.Empty" />
-            @if (!string.IsNullOrWhiteSpace(_nameFilter) || !string.IsNullOrWhiteSpace(_dateFromStr) || !string.IsNullOrWhiteSpace(_dateToStr))
+            <SfDatePicker TValue="DateOnly?" @bind-Value="_dateTo" Width="150px" Placeholder="MM/DD/YYYY" />
+            @if (!string.IsNullOrWhiteSpace(_nameFilter) || _dateFrom.HasValue || _dateTo.HasValue)
             {
                 <button class="btn-secondary btn-sm" @onclick="ClearFilters">Clear</button>
             }
@@ -73,70 +75,66 @@
         {
             <h3 class="section-heading" style="margin-top: var(--space-2);">Leave Approvals</h3>
             <div class="grid-container">
-                <table class="data-table">
-                    <thead>
-                        <tr>
-                            <th>Title</th>
-                            <th>Employee</th>
-                            <th>Priority</th>
-                            <th>Created</th>
-                            <th>Due</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var item in LeaveItems.OrderByDescending(i => PriorityRank(i.Priority)))
-                        {
-                            <tr>
-                                <td>@item.Title</td>
-                                <td>
-                                    @if (item.EmploymentId.HasValue)
-                                    {
-                                        <a href="/hris/employees/@item.EmploymentId" class="link">
-                                            @EmployeeName(item.EmploymentId)
-                                        </a>
-                                    }
-                                    else { @("—") }
-                                </td>
-                                <td><span class="priority-badge priority-@item.Priority.ToLower()">@item.Priority</span></td>
-                                <td>@item.CreatedAt.ToString("yyyy-MM-dd")</td>
-                                <td class="@DueClass(item.DueDate)">@(item.DueDate?.ToString("yyyy-MM-dd") ?? "—")</td>
-                                <td class="action-cell">
-                                    @if (_approvingId == item.WorkQueueItemId)
-                                    {
-                                        <div class="inline-confirm">
-                                            <span class="confirm-text">Confirm approval?</span>
-                                            <button class="btn-primary btn-xs" @onclick="() => ConfirmApproveAsync(item)"
-                                                    disabled="@_actioning">Yes</button>
-                                            <button class="btn-secondary btn-xs" @onclick="CancelAction">No</button>
-                                        </div>
-                                    }
-                                    else if (_denyingId == item.WorkQueueItemId)
-                                    {
-                                        <div class="inline-confirm">
-                                            <input type="text" class="form-input-sm" placeholder="Reason…"
-                                                   @bind="_denyReason" />
-                                            <button class="btn-danger btn-xs" @onclick="() => ConfirmDenyAsync(item)"
-                                                    disabled="@_actioning">Deny</button>
-                                            <button class="btn-secondary btn-xs" @onclick="CancelAction">Cancel</button>
-                                        </div>
-                                    }
-                                    else
-                                    {
-                                        <button class="btn-primary btn-xs"
-                                                @onclick="() => StartApprove(item.WorkQueueItemId)">Approve</button>
-                                        <button class="btn-danger btn-xs"
-                                                @onclick="() => StartDeny(item.WorkQueueItemId)">Deny</button>
-                                    }
-                                </td>
-                            </tr>
-                            @if (_actionError is not null && (_approvingId == item.WorkQueueItemId || _denyingId == item.WorkQueueItemId))
-                            {
-                                <tr><td colspan="6"><p class="form-error">@_actionError</p></td></tr>
-                            }
-                        }
-                    </tbody>
-                </table>
+                <SfGrid TValue="WorkQueueItem"
+                        DataSource="@LeaveItems.OrderByDescending(i => PriorityRank(i.Priority)).ToList()"
+                        AllowSorting="true" CssClass="e-gridhover">
+                    <GridColumns>
+                        <GridColumn Field="Title" HeaderText="Title" />
+                        <GridColumn Field="EmploymentId" HeaderText="Employee" Width="180">
+                            <Template>
+                                @{ var item = (WorkQueueItem)context; }
+                                @if (item.EmploymentId.HasValue)
+                                {
+                                    <a href="/hris/employees/@item.EmploymentId">@EmployeeName(item.EmploymentId)</a>
+                                }
+                                else { <text>—</text> }
+                            </Template>
+                        </GridColumn>
+                        <GridColumn Field="Priority" HeaderText="Priority" Width="100">
+                            <Template>
+                                @{ var item = (WorkQueueItem)context; }
+                                <span class="priority-badge priority-@item.Priority.ToLower()">@item.Priority</span>
+                            </Template>
+                        </GridColumn>
+                        <GridColumn Field="CreatedAt" HeaderText="Created" Width="120">
+                            <Template>@(((WorkQueueItem)context).CreatedAt.ToString("yyyy-MM-dd"))</Template>
+                        </GridColumn>
+                        <GridColumn Field="DueDate" HeaderText="Due" Width="120">
+                            <Template>
+                                @{ var item = (WorkQueueItem)context; }
+                                <span class="@DueClass(item.DueDate)">@(item.DueDate?.ToString("yyyy-MM-dd") ?? "—")</span>
+                            </Template>
+                        </GridColumn>
+                        <GridColumn HeaderText="" Width="220" AllowSorting="false">
+                            <Template>
+                                @{ var item = (WorkQueueItem)context; }
+                                @if (_approvingId == item.WorkQueueItemId)
+                                {
+                                    <div class="inline-confirm">
+                                        <span class="confirm-text">Confirm approval?</span>
+                                        <button class="btn-primary btn-xs" @onclick="() => ConfirmApproveAsync(item)" disabled="@_actioning">Yes</button>
+                                        <button class="btn-secondary btn-xs" @onclick="CancelAction">No</button>
+                                    </div>
+                                    @if (_actionError is not null) { <p class="form-error" style="margin:0">@_actionError</p> }
+                                }
+                                else if (_denyingId == item.WorkQueueItemId)
+                                {
+                                    <div class="inline-confirm">
+                                        <SfTextBox @bind-Value="_denyReason" Placeholder="Reason…" Width="180px" />
+                                        <button class="btn-danger btn-xs" @onclick="() => ConfirmDenyAsync(item)" disabled="@_actioning">Deny</button>
+                                        <button class="btn-secondary btn-xs" @onclick="CancelAction">Cancel</button>
+                                    </div>
+                                    @if (_actionError is not null) { <p class="form-error" style="margin:0">@_actionError</p> }
+                                }
+                                else
+                                {
+                                    <button class="btn-primary btn-xs" @onclick="() => StartApprove(item.WorkQueueItemId)">Approve</button>
+                                    <button class="btn-danger btn-xs" @onclick="() => StartDeny(item.WorkQueueItemId)">Deny</button>
+                                }
+                            </Template>
+                        </GridColumn>
+                    </GridColumns>
+                </SfGrid>
             </div>
         }
 
@@ -145,37 +143,38 @@
         {
             <h3 class="section-heading" style="margin-top: var(--space-8);">Document Alerts</h3>
             <div class="grid-container">
-                <table class="data-table">
-                    <thead>
-                        <tr>
-                            <th>Alert</th>
-                            <th>Employee</th>
-                            <th>Description</th>
-                            <th>Priority</th>
-                            <th>Due / Expires</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var item in DocItems.OrderByDescending(i => PriorityRank(i.Priority)))
-                        {
-                            <tr>
-                                <td>@item.Title</td>
-                                <td>
-                                    @if (item.EmploymentId.HasValue)
-                                    {
-                                        <a href="/hris/employees/@item.EmploymentId" class="link">
-                                            @EmployeeName(item.EmploymentId)
-                                        </a>
-                                    }
-                                    else { @("—") }
-                                </td>
-                                <td>@(item.Description ?? "—")</td>
-                                <td><span class="priority-badge priority-@item.Priority.ToLower()">@item.Priority</span></td>
-                                <td class="@DueClass(item.DueDate)">@(item.DueDate?.ToString("yyyy-MM-dd") ?? "—")</td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
+                <SfGrid TValue="WorkQueueItem"
+                        DataSource="@DocItems.OrderByDescending(i => PriorityRank(i.Priority)).ToList()"
+                        AllowSorting="true" CssClass="e-gridhover">
+                    <GridColumns>
+                        <GridColumn Field="Title" HeaderText="Alert" />
+                        <GridColumn Field="EmploymentId" HeaderText="Employee" Width="180">
+                            <Template>
+                                @{ var item = (WorkQueueItem)context; }
+                                @if (item.EmploymentId.HasValue)
+                                {
+                                    <a href="/hris/employees/@item.EmploymentId">@EmployeeName(item.EmploymentId)</a>
+                                }
+                                else { <text>—</text> }
+                            </Template>
+                        </GridColumn>
+                        <GridColumn Field="Description" HeaderText="Description">
+                            <Template>@(((WorkQueueItem)context).Description ?? "—")</Template>
+                        </GridColumn>
+                        <GridColumn Field="Priority" HeaderText="Priority" Width="100">
+                            <Template>
+                                @{ var item = (WorkQueueItem)context; }
+                                <span class="priority-badge priority-@item.Priority.ToLower()">@item.Priority</span>
+                            </Template>
+                        </GridColumn>
+                        <GridColumn Field="DueDate" HeaderText="Due / Expires" Width="130">
+                            <Template>
+                                @{ var item = (WorkQueueItem)context; }
+                                <span class="@DueClass(item.DueDate)">@(item.DueDate?.ToString("yyyy-MM-dd") ?? "—")</span>
+                            </Template>
+                        </GridColumn>
+                    </GridColumns>
+                </SfGrid>
             </div>
         }
 
@@ -184,35 +183,37 @@
         {
             <h3 class="section-heading" style="margin-top: var(--space-8);">Onboarding Tasks</h3>
             <div class="grid-container">
-                <table class="data-table">
-                    <thead>
-                        <tr>
-                            <th>Task</th>
-                            <th>Employee</th>
-                            <th>Priority</th>
-                            <th>Due</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var item in OnboardingItems.OrderBy(i => i.DueDate))
-                        {
-                            <tr>
-                                <td>@OnboardingTaskLabel(item.Title)</td>
-                                <td>
-                                    @if (item.EmploymentId.HasValue)
-                                    {
-                                        <a href="/hris/employees/@item.EmploymentId" class="link">
-                                            @EmployeeName(item.EmploymentId)
-                                        </a>
-                                    }
-                                    else { @("—") }
-                                </td>
-                                <td><span class="priority-badge priority-@item.Priority.ToLower()">@item.Priority</span></td>
-                                <td class="@DueClass(item.DueDate)">@(item.DueDate?.ToString("yyyy-MM-dd") ?? "—")</td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
+                <SfGrid TValue="WorkQueueItem"
+                        DataSource="@OnboardingItems.OrderBy(i => i.DueDate).ToList()"
+                        AllowSorting="true" CssClass="e-gridhover">
+                    <GridColumns>
+                        <GridColumn Field="Title" HeaderText="Task">
+                            <Template>@OnboardingTaskLabel(((WorkQueueItem)context).Title)</Template>
+                        </GridColumn>
+                        <GridColumn Field="EmploymentId" HeaderText="Employee" Width="180">
+                            <Template>
+                                @{ var item = (WorkQueueItem)context; }
+                                @if (item.EmploymentId.HasValue)
+                                {
+                                    <a href="/hris/employees/@item.EmploymentId">@EmployeeName(item.EmploymentId)</a>
+                                }
+                                else { <text>—</text> }
+                            </Template>
+                        </GridColumn>
+                        <GridColumn Field="Priority" HeaderText="Priority" Width="100">
+                            <Template>
+                                @{ var item = (WorkQueueItem)context; }
+                                <span class="priority-badge priority-@item.Priority.ToLower()">@item.Priority</span>
+                            </Template>
+                        </GridColumn>
+                        <GridColumn Field="DueDate" HeaderText="Due" Width="120">
+                            <Template>
+                                @{ var item = (WorkQueueItem)context; }
+                                <span class="@DueClass(item.DueDate)">@(item.DueDate?.ToString("yyyy-MM-dd") ?? "—")</span>
+                            </Template>
+                        </GridColumn>
+                    </GridColumns>
+                </SfGrid>
             </div>
         }
     }
@@ -225,12 +226,9 @@
     private bool                       _loading      = true;
     private List<WorkQueueItem>        _items        = [];
     private Dictionary<Guid, string>   _employeeNames = [];
-    private string                     _nameFilter   = "";
-    private string                     _dateFromStr  = "";
-    private string                     _dateToStr    = "";
-
-    private DateOnly? DateFrom => DateOnly.TryParse(_dateFromStr, out var d) ? d : null;
-    private DateOnly? DateTo   => DateOnly.TryParse(_dateToStr,   out var d) ? d : null;
+    private string    _nameFilter = "";
+    private DateOnly? _dateFrom;
+    private DateOnly? _dateTo;
 
     private List<WorkQueueItem> LeaveItems =>
         _items.Where(i => i.ItemType == WorkQueueItemTypes.LeaveApproval && MatchesFilter(i)).ToList();
@@ -249,16 +247,16 @@
             var name = EmployeeName(item.EmploymentId);
             if (!name.Contains(_nameFilter, StringComparison.OrdinalIgnoreCase)) return false;
         }
-        if (DateFrom.HasValue && item.DueDate.HasValue && item.DueDate < DateFrom) return false;
-        if (DateTo.HasValue   && item.DueDate.HasValue && item.DueDate > DateTo)   return false;
+        if (_dateFrom.HasValue && item.DueDate.HasValue && item.DueDate < _dateFrom) return false;
+        if (_dateTo.HasValue   && item.DueDate.HasValue && item.DueDate > _dateTo)   return false;
         return true;
     }
 
     private void ClearFilters()
     {
-        _nameFilter  = "";
-        _dateFromStr = "";
-        _dateToStr   = "";
+        _nameFilter = "";
+        _dateFrom   = null;
+        _dateTo     = null;
     }
 
     private string EmployeeName(Guid? employmentId)
@@ -457,7 +455,8 @@
         min-width: 140px;
     }
 
-    .stat-card-urgent { border-left: 3px solid #DC2626; }
+    .stat-card--open   { border-top: 4px solid var(--aw-teal); }
+    .stat-card--urgent { border-top: 4px solid var(--color-danger); }
 
     .stat-label { font-size: var(--font-size-sm); color: #6B7280; font-weight: var(--font-weight-medium); }
     .stat-value { font-size: 1.5rem; font-weight: var(--font-weight-semibold); color: var(--aw-navy); }

@@ -5,10 +5,14 @@
 @using Microsoft.AspNetCore.Authorization
 @using AllWorkHRIS.Core.Pipeline
 @using AllWorkHRIS.Core.Temporal
+@using AllWorkHRIS.Host.Payroll.Tax
+@using Syncfusion.Blazor.Grids
+@using Syncfusion.Blazor.DropDowns
+@using Syncfusion.Blazor.Calendars
+@using Syncfusion.Blazor.Inputs
 @inject IPayrollPipelineService Pipeline
 @inject ITemporalContext         TemporalContext
 @inject ITaxProfileRepository    TaxRepo
-@using AllWorkHRIS.Host.Payroll.Tax
 
 <PageTitle>Preview Sandbox — Tax Configuration</PageTitle>
 
@@ -23,46 +27,37 @@
     <div class="form-grid-2">
         <div class="form-field">
             <label class="form-label">Jurisdiction <span class="req">*</span></label>
-            <select class="form-control" @bind="_jurisdictionCode" @bind:after="OnJurisdictionChangedAsync">
-                <option value="">— select —</option>
-                @foreach (var jCode in _jurisdictions)
-                {
-                    <option value="@jCode">@jCode</option>
-                }
-            </select>
+            <SfDropDownList TValue="string" TItem="string" DataSource="@_jurisdictions"
+                            @bind-Value="_jurisdictionCode" Placeholder="— select —">
+                <DropDownListEvents TValue="string" TItem="string" ValueChange="OnJurisdictionDropdownChanged" />
+            </SfDropDownList>
         </div>
         <div class="form-field">
             <label class="form-label">Pay Date <span class="req">*</span></label>
-            <input type="date" class="form-control" @bind="_payDate" />
+            <SfDatePicker TValue="DateTime" @bind-Value="_payDate" />
         </div>
         <div class="form-field">
             <label class="form-label">Gross Pay (period) <span class="req">*</span></label>
-            <input type="number" class="form-control" min="0" step="0.01" @bind="_grossPay" />
+            <SfNumericTextBox TValue="decimal" @bind-Value="_grossPay" Min="0" Step="0.01m" />
         </div>
         <div class="form-field">
             <label class="form-label">Pay Periods / Year <span class="req">*</span></label>
-            <select class="form-control" @bind="_periodsPerYear">
-                <option value="52">52 — Weekly</option>
-                <option value="26">26 — Biweekly</option>
-                <option value="24">24 — Semi-monthly</option>
-                <option value="12">12 — Monthly</option>
-            </select>
+            <SfDropDownList TValue="int" TItem="PeriodOption" DataSource="@_periodOptions" @bind-Value="_periodsPerYear">
+                <DropDownListFieldSettings Value="Value" Text="Label" />
+            </SfDropDownList>
         </div>
         <div class="form-field">
             <label class="form-label">Filing Status (optional)</label>
             @if (_filingStatuses.Count > 0)
             {
-                <select class="form-control" @bind="_filingStatus">
-                    <option value="">— none —</option>
-                    @foreach (var fs in _filingStatuses)
-                    {
-                        <option value="@fs.FilingStatusCode">@fs.FilingStatusName (@fs.FilingStatusCode)</option>
-                    }
-                </select>
+                <SfDropDownList TValue="string" TItem="TaxFilingStatusRow" DataSource="@_filingStatuses"
+                                @bind-Value="_filingStatus" Placeholder="— none —" ShowClearButton="true">
+                    <DropDownListFieldSettings Value="FilingStatusCode" Text="FilingStatusName" />
+                </SfDropDownList>
             }
             else
             {
-                <input type="text" class="form-control" placeholder="e.g. SINGLE, MFJ" @bind="_filingStatus" />
+                <SfTextBox @bind-Value="_filingStatus" Placeholder="e.g. SINGLE, MFJ" />
             }
         </div>
     </div>
@@ -107,53 +102,39 @@
         @if (_result.StepResults.Count > 0)
         {
             <h4 class="section-heading" style="font-size:.8rem;">Employee Step Results</h4>
-            <div class="grid-container" style="margin-bottom:1rem;">
-                <table class="data-table">
-                    <thead>
-                        <tr>
-                            <th>Step Code</th>
-                            <th style="text-align:right;">Amount</th>
-                            <th style="text-align:right;">% of Gross</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var kv in _result.StepResults)
-                        {
-                            <tr>
-                                <td class="mono">@kv.Key</td>
-                                <td class="mono" style="text-align:right;">@kv.Value.ToString("N4")</td>
-                                <td class="mono pct" style="text-align:right;">@PctOfGross(kv.Value)</td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
+            <div style="margin-bottom:1rem;">
+                <SfGrid DataSource="@_result.StepResults.Select(kv => new StepResultRow(kv.Key, kv.Value)).ToList()" CssClass="e-gridhover">
+                    <GridColumns>
+                        <GridColumn HeaderText="Step Code">
+                            <Template>@{ var r = (StepResultRow)context; }<code>@r.StepCode</code></Template>
+                        </GridColumn>
+                        <GridColumn HeaderText="Amount" Width="130" CustomAttributes="@(new Dictionary<string,object>{{"class","text-right"}})">
+                            <Template>@{ var r = (StepResultRow)context; }<code>@r.Amount.ToString("N4")</code></Template>
+                        </GridColumn>
+                        <GridColumn HeaderText="% of Gross" Width="120" CustomAttributes="@(new Dictionary<string,object>{{"class","text-right"}})">
+                            <Template>@{ var r = (StepResultRow)context; }<span class="pct">@PctOfGross(r.Amount)</span></Template>
+                        </GridColumn>
+                    </GridColumns>
+                </SfGrid>
             </div>
         }
 
         @if (_result.EmployerStepResults.Count > 0)
         {
             <h4 class="section-heading" style="font-size:.8rem;">Employer Step Results</h4>
-            <div class="grid-container">
-                <table class="data-table">
-                    <thead>
-                        <tr>
-                            <th>Step Code</th>
-                            <th style="text-align:right;">Amount</th>
-                            <th style="text-align:right;">% of Gross</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var kv in _result.EmployerStepResults)
-                        {
-                            <tr>
-                                <td class="mono">@kv.Key</td>
-                                <td class="mono" style="text-align:right;">@kv.Value.ToString("N4")</td>
-                                <td class="mono pct" style="text-align:right;">@PctOfGross(kv.Value)</td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
-            </div>
+            <SfGrid DataSource="@_result.EmployerStepResults.Select(kv => new StepResultRow(kv.Key, kv.Value)).ToList()" CssClass="e-gridhover">
+                <GridColumns>
+                    <GridColumn HeaderText="Step Code">
+                        <Template>@{ var r = (StepResultRow)context; }<code>@r.StepCode</code></Template>
+                    </GridColumn>
+                    <GridColumn HeaderText="Amount" Width="130" CustomAttributes="@(new Dictionary<string,object>{{"class","text-right"}})">
+                        <Template>@{ var r = (StepResultRow)context; }<code>@r.Amount.ToString("N4")</code></Template>
+                    </GridColumn>
+                    <GridColumn HeaderText="% of Gross" Width="120" CustomAttributes="@(new Dictionary<string,object>{{"class","text-right"}})">
+                        <Template>@{ var r = (StepResultRow)context; }<span class="pct">@PctOfGross(r.Amount)</span></Template>
+                    </GridColumn>
+                </GridColumns>
+            </SfGrid>
         }
 
         @if (!_result.Succeeded)
@@ -164,6 +145,9 @@
 }
 
 @code {
+    private sealed record StepResultRow(string StepCode, decimal Amount);
+    private sealed record PeriodOption(int Value, string Label);
+
     private string   _jurisdictionCode = string.Empty;
     private DateTime _payDate;
     private decimal  _grossPay         = 10000m;
@@ -179,8 +163,22 @@
     private static readonly string[] _jurisdictions =
         ["BB", "CA-FED", "US-CA", "US-FED", "US-GA", "US-NY"];
 
+    private static readonly List<PeriodOption> _periodOptions =
+    [
+        new(52, "52 — Weekly"),
+        new(26, "26 — Biweekly"),
+        new(24, "24 — Semi-monthly"),
+        new(12, "12 — Monthly"),
+    ];
+
     protected override void OnInitialized()
         => _payDate = TemporalContext.GetOperativeDate();
+
+    private async Task OnJurisdictionDropdownChanged(ChangeEventArgs<string, string> args)
+    {
+        _jurisdictionCode = args.Value;
+        await OnJurisdictionChangedAsync();
+    }
 
     private async Task OnJurisdictionChangedAsync()
     {

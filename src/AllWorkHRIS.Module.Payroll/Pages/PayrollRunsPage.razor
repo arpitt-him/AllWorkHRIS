@@ -5,6 +5,9 @@
 @implements IDisposable
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Components.Authorization
+@using Syncfusion.Blazor.DropDowns
+@using Syncfusion.Blazor.Grids
+@using Syncfusion.Blazor.Inputs
 @inject IPayrollRunService          RunService
 @inject IPayrollContextRepository   ContextRepo
 @inject IHrisSessionState           SessionState
@@ -28,19 +31,19 @@
 
     @* Stat Cards *@
     <div class="stat-cards">
-        <div class="stat-card">
+        <div class="stat-card stat-card--open-runs">
             <span class="stat-label">Open Runs</span>
             <span class="stat-value">@_openRunCount</span>
         </div>
-        <div class="stat-card">
+        <div class="stat-card stat-card--pending">
             <span class="stat-label">Pending Approval</span>
             <span class="stat-value">@_pendingApprovalCount</span>
         </div>
-        <div class="stat-card">
+        <div class="stat-card stat-card--last-pay">
             <span class="stat-label">Last Pay Date</span>
             <span class="stat-value">@(_lastReleasedDate?.ToString("yyyy-MM-dd") ?? "—")</span>
         </div>
-        <div class="stat-card">
+        <div class="stat-card stat-card--next-pay">
             <span class="stat-label">Next Open Pay Date</span>
             <span class="stat-value">@(_nextPayDate?.ToString("yyyy-MM-dd") ?? "—")</span>
         </div>
@@ -50,22 +53,22 @@
         @if (_contexts.Count > 1)
         {
             <label class="filter-label">Payroll Context</label>
-            <select class="filter-select" value="@_selectedContextId"
-                    @onchange="OnContextChangedAsync">
-                @foreach (var ctx in _contexts)
-                {
-                    <option value="@ctx.PayrollContextId">@ctx.PayrollContextName</option>
-                }
-            </select>
+            <SfDropDownList TValue="Guid" TItem="PayrollContext"
+                            DataSource="@_contexts"
+                            @bind-Value="_selectedContextId"
+                            Width="200px">
+                <DropDownListFieldSettings Value="PayrollContextId" Text="PayrollContextName" />
+                <DropDownListEvents TValue="Guid" TItem="PayrollContext"
+                                    ValueChange="OnContextChangedAsync" />
+            </SfDropDownList>
         }
         <label class="filter-label">Status</label>
-        <select class="filter-select" @bind="_statusFilter">
-            <option value="ACTIVE">Active</option>
-            <option value="ALL">All</option>
-            <option value="RELEASED">Released</option>
-            <option value="CANCELLED">Cancelled</option>
-            <option value="FAILED">Failed</option>
-        </select>
+        <SfDropDownList TValue="string" TItem="FilterOption"
+                        DataSource="@_statusOptions"
+                        @bind-Value="_statusFilter"
+                        Width="160px">
+            <DropDownListFieldSettings Value="Value" Text="Label" />
+        </SfDropDownList>
     </div>
 
     @* New Run Form *@
@@ -76,42 +79,38 @@
             <div class="form-grid form-grid-4">
                 <div class="form-field">
                     <label class="form-label">Payroll Context</label>
-                    <select class="form-control" value="@_newRun.ContextId"
-                            @onchange="OnNewRunContextChangedAsync">
-                        <option value="">— select —</option>
-                        @foreach (var ctx in _contexts)
-                        {
-                            <option value="@ctx.PayrollContextId">@ctx.PayrollContextName</option>
-                        }
-                    </select>
+                    <SfDropDownList TValue="Guid" TItem="PayrollContext"
+                                    DataSource="@_contexts"
+                                    @bind-Value="_newRun.ContextId"
+                                    Width="100%">
+                        <DropDownListFieldSettings Value="PayrollContextId" Text="PayrollContextName" />
+                        <DropDownListEvents TValue="Guid" TItem="PayrollContext"
+                                            ValueChange="OnNewRunContextChangedAsync" />
+                    </SfDropDownList>
                 </div>
                 <div class="form-field">
                     <label class="form-label">Pay Period</label>
-                    <select class="form-control" @bind="_newRun.PeriodId">
-                        <option value="">— select —</option>
-                        @foreach (var p in _openPeriods)
-                        {
-                            <option value="@p.PeriodId">
-                                @p.PeriodYear P@(p.PeriodNumber)
-                                (@p.PeriodStartDate.ToString("MM/dd")–@p.PeriodEndDate.ToString("MM/dd"),
-                                pay @p.PayDate.ToString("MM/dd/yyyy"))
-                            </option>
-                        }
-                    </select>
+                    <SfDropDownList TValue="Guid" TItem="PeriodOption"
+                                    DataSource="@PeriodOptions"
+                                    @bind-Value="_newRun.PeriodId"
+                                    Width="100%"
+                                    Placeholder="— select —">
+                        <DropDownListFieldSettings Value="PeriodId" Text="PeriodLabel" />
+                    </SfDropDownList>
                 </div>
                 <div class="form-field">
                     <label class="form-label">Run Type</label>
-                    <select class="form-control" @bind="_newRun.RunTypeId">
-                        <option value="1">Regular</option>
-                        <option value="2">Supplemental</option>
-                        <option value="3">Adjustment</option>
-                        <option value="4">Correction</option>
-                    </select>
+                    <SfDropDownList TValue="int" TItem="IntOption"
+                                    DataSource="@_runTypeOptions"
+                                    @bind-Value="_newRun.RunTypeId"
+                                    Width="100%">
+                        <DropDownListFieldSettings Value="Value" Text="Label" />
+                    </SfDropDownList>
                 </div>
                 <div class="form-field">
                     <label class="form-label">Description (optional)</label>
-                    <input type="text" class="form-control" @bind="_newRun.Description"
-                           placeholder="e.g. April Biweekly" />
+                    <SfTextBox @bind-Value="_newRun.Description"
+                               Placeholder="e.g. April Biweekly" />
                 </div>
             </div>
             @if (_newRunError is not null)
@@ -162,49 +161,59 @@
     }
     else
     {
-        <table class="data-table">
-            <thead>
-                <tr>
-                    <th>Description</th>
-                    <th>Period</th>
-                    <th>Pay Date</th>
-                    <th>Type</th>
-                    <th>Status</th>
-                    <th>Actions</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var run in _filteredRuns.OrderByDescending(r => r.CreationTimestamp))
-                {
-                    var progress = ProgressNotifier.GetProgress(run.RunId);
-                    <tr>
-                        <td>
-                            <a href="/payroll/runs/@run.RunId" class="table-link">
-                                @(run.RunDescription ?? $"Run {run.RunId.ToString()[..8].ToUpper()}")
-                            </a>
-                        </td>
-                        <td>@GetPeriodLabel(run.PeriodId)</td>
-                        <td>@run.PayDate.ToString("yyyy-MM-dd")</td>
-                        <td><span class="badge badge-neutral">@GetRunTypeLabel(run.RunTypeId)</span></td>
-                        <td>
-                            <span class="badge @GetStatusBadgeClass(run.RunStatusId)">
-                                @GetStatusLabel(run.RunStatusId)
-                            </span>
-                            @if (run.RunStatusId == 3 && progress is not null)
-                            {
-                                <div class="progress-mini">
-                                    <div class="progress-bar-track">
-                                        <div class="progress-bar-fill" style="width:@progress.PercentComplete%"></div>
-                                    </div>
-                                    <span class="progress-text">@progress.Processed/@progress.Total</span>
+        <SfGrid DataSource="@_filteredRuns.OrderByDescending(r => r.CreationTimestamp).ToList()"
+                AllowSorting="true" AllowPaging="true" CssClass="e-gridhover">
+            <GridPageSettings PageSize="25" />
+            <GridColumns>
+                <GridColumn Field="RunDescription" HeaderText="Description" Width="220">
+                    <Template>
+                        @{ var run = (PayrollRun)context; }
+                        <a href="/payroll/runs/@run.RunId" class="table-link">
+                            @(run.RunDescription ?? $"Run {run.RunId.ToString()[..8].ToUpper()}")
+                        </a>
+                    </Template>
+                </GridColumn>
+                <GridColumn Field="PeriodId" HeaderText="Period" Width="180">
+                    <Template>
+                        @{ var run = (PayrollRun)context; }
+                        @GetPeriodLabel(run.PeriodId)
+                    </Template>
+                </GridColumn>
+                <GridColumn Field="PayDate" HeaderText="Pay Date" Width="120" Format="MM/dd/yyyy" />
+                <GridColumn Field="RunTypeId" HeaderText="Type" Width="130">
+                    <Template>
+                        @{ var run = (PayrollRun)context; }
+                        <span class="badge badge-neutral">@GetRunTypeLabel(run.RunTypeId)</span>
+                    </Template>
+                </GridColumn>
+                <GridColumn Field="RunStatusId" HeaderText="Status" Width="180">
+                    <Template>
+                        @{
+                            var run = (PayrollRun)context;
+                            var progress = ProgressNotifier.GetProgress(run.RunId);
+                        }
+                        <span class="badge @GetStatusBadgeClass(run.RunStatusId)">
+                            @GetStatusLabel(run.RunStatusId)
+                        </span>
+                        @if (run.RunStatusId == 3 && progress is not null)
+                        {
+                            <div class="progress-mini">
+                                <div class="progress-bar-track">
+                                    <div class="progress-bar-fill" style="width:@progress.PercentComplete%"></div>
                                 </div>
-                            }
-                        </td>
-                        <td class="action-cell">
+                                <span class="progress-text">@progress.Processed/@progress.Total</span>
+                            </div>
+                        }
+                    </Template>
+                </GridColumn>
+                <GridColumn HeaderText="Actions" Width="160" TextAlign="TextAlign.Right">
+                    <Template>
+                        @{ var run = (PayrollRun)context; }
+                        <div class="action-cell">
                             <a href="/payroll/runs/@run.RunId" class="btn-link">View</a>
                             @if (run.RunStatusId == 4)
                             {
-                                <AuthorizeView Roles="PayrollAdmin">
+                                <AuthorizeView Roles="PayrollAdmin" Context="auth">
                                     <Authorized>
                                         <button class="btn-link" @onclick="() => ApproveRunAsync(run.RunId)">Approve</button>
                                     </Authorized>
@@ -212,20 +221,27 @@
                             }
                             @if (run.RunStatusId is 1 or 4)
                             {
-                                <AuthorizeView Roles="PayrollAdmin">
+                                <AuthorizeView Roles="PayrollAdmin" Context="auth">
                                     <Authorized>
                                         <button class="btn-link btn-danger" @onclick="() => CancelRunAsync(run.RunId)">Cancel</button>
                                     </Authorized>
                                 </AuthorizeView>
                             }
-                        </td>
-                    </tr>
-                }
-            </tbody>
-        </table>
+                        </div>
+                    </Template>
+                </GridColumn>
+            </GridColumns>
+        </SfGrid>
     }
 
 </div>
+
+<style>
+    .stat-card--open-runs { border-top: 4px solid var(--module-payroll); }
+    .stat-card--pending   { border-top: 4px solid var(--color-warning); }
+    .stat-card--last-pay  { border-top: 4px solid var(--color-success); }
+    .stat-card--next-pay  { border-top: 4px solid var(--aw-teal); }
+</style>
 
 @code {
     private List<PayrollContext>             _allContexts   = [];
@@ -246,6 +262,31 @@
     private CancellationTokenSource?         _pollCts;
     private Guid                             _currentUserId;
     private string                           _statusFilter  = "ACTIVE";
+
+    private record FilterOption(string Value, string Label);
+    private static readonly List<FilterOption> _statusOptions =
+    [
+        new("ACTIVE",    "Active"),
+        new("ALL",       "All"),
+        new("RELEASED",  "Released"),
+        new("CANCELLED", "Cancelled"),
+        new("FAILED",    "Failed"),
+    ];
+
+    private record IntOption(int Value, string Label);
+    private static readonly List<IntOption> _runTypeOptions =
+    [
+        new(1, "Regular"),
+        new(2, "Supplemental"),
+        new(3, "Adjustment"),
+        new(4, "Correction"),
+    ];
+
+    private record PeriodOption(Guid PeriodId, string PeriodLabel);
+    private List<PeriodOption> PeriodOptions => _openPeriods
+        .Select(p => new PeriodOption(p.PeriodId,
+            $"{p.PeriodYear} P{p.PeriodNumber} ({p.PeriodStartDate:MM/dd}–{p.PeriodEndDate:MM/dd}, pay {p.PayDate:MM/dd/yyyy})"))
+        .ToList();
 
     // Terminal statuses excluded from the "Active" filter view
     private static readonly HashSet<int> TerminalStatuses = [8, 9, 10, 11]; // Released, Closed, Failed, Cancelled
@@ -315,24 +356,18 @@
         _loading = false;
     }
 
-    private async Task OnContextChangedAsync(ChangeEventArgs e)
+    private async Task OnContextChangedAsync(ChangeEventArgs<Guid, PayrollContext> args)
     {
-        if (Guid.TryParse(e.Value?.ToString(), out var id))
-        {
-            _selectedContextId = id;
-            await LoadRunsAsync();
-            _openPeriods = (await ContextRepo.GetOpenPeriodsAsync(_selectedContextId)).ToList();
-        }
+        _selectedContextId = args.Value;
+        await LoadRunsAsync();
+        _openPeriods = (await ContextRepo.GetOpenPeriodsAsync(_selectedContextId)).ToList();
     }
 
-    private async Task OnNewRunContextChangedAsync(ChangeEventArgs e)
+    private async Task OnNewRunContextChangedAsync(ChangeEventArgs<Guid, PayrollContext> args)
     {
-        if (Guid.TryParse(e.Value?.ToString(), out var id))
-        {
-            _newRun.ContextId = id;
-            _newRun.PeriodId  = Guid.Empty;
-            _openPeriods = (await ContextRepo.GetOpenPeriodsAsync(id)).ToList();
-        }
+        _newRun.ContextId = args.Value;
+        _newRun.PeriodId  = Guid.Empty;
+        _openPeriods = (await ContextRepo.GetOpenPeriodsAsync(args.Value)).ToList();
     }
 
     private void ToggleNewRunForm()
@@ -486,8 +521,8 @@
     private static string GetStatusBadgeClass(int id) => id switch
     {
         3 or 7  => "badge-info",
-        4       => "badge-teal",
-        6 or 8  => "badge-success",
+        4 or 6  => "badge-teal",
+        8       => "badge-success",
         5       => "badge-warning",
         10      => "badge-error",
         _       => "badge-neutral"

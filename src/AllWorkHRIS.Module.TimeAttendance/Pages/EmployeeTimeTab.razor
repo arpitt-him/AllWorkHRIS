@@ -1,4 +1,6 @@
 @inject TimeAttendanceQueryService QueryService
+@using Syncfusion.Blazor.Grids
+@using Syncfusion.Blazor.DropDowns
 
 @if (_loading)
 {
@@ -12,13 +14,12 @@ else
 {
     <div style="display:flex;align-items:center;gap:.75rem;margin-bottom:1.25rem;">
         <label class="detail-label" style="margin:0;">Period</label>
-        <select class="form-input" style="width:280px;" value="@_selectedPeriodId"
-                @onchange="OnPeriodChanged">
-            @foreach (var p in _periods)
-            {
-                <option value="@p.PeriodId">@p.Label</option>
-            }
-        </select>
+        <SfDropDownList TValue="Guid" TItem="TaPeriodOption" DataSource="@_periods"
+                        Value="@_selectedPeriodId" Width="280px">
+            <DropDownListFieldSettings Value="PeriodId" Text="Label" />
+            <DropDownListEvents TValue="Guid" TItem="TaPeriodOption"
+                                ValueChange="OnPeriodChangedSf" />
+        </SfDropDownList>
     </div>
 
     @if (_entriesLoading)
@@ -31,50 +32,52 @@ else
     }
     else
     {
-        <table class="data-table">
-            <thead>
-                <tr>
-                    <th>Date</th>
-                    <th>Category</th>
-                    <th>Hours</th>
-                    <th>Time</th>
-                    <th>Status</th>
-                    <th>Notes</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var e in _entries)
-                {
-                    <tr>
-                        <td>@e.WorkDate.ToString("ddd MMM d")</td>
-                        <td><span class="category-chip">@e.TimeCategoryCode</span></td>
-                        <td>@e.Duration.ToString("F2")</td>
-                        <td>
-                            @if (e.StartTime.HasValue && e.EndTime.HasValue)
-                            { @($"{e.StartTime.Value:HH:mm}–{e.EndTime.Value:HH:mm}") }
-                            else { @("—") }
-                        </td>
-                        <td>
-                            <span class="status-badge status-@e.StatusCode.ToLower()">
-                                @e.StatusCode
-                            </span>
-                        </td>
-                        <td class="note-cell">
+        <SfGrid DataSource="@_entries" AllowSorting="true" CssClass="e-gridhover">
+            <GridColumns>
+                <GridColumn HeaderText="Date" Width="120">
+                    <Template>@{ var e = (TimeEntryRow)context; }@e.WorkDate.ToString("ddd MMM d")</Template>
+                </GridColumn>
+                <GridColumn HeaderText="Category" Width="130">
+                    <Template>@{ var e = (TimeEntryRow)context; }<span class="category-chip">@e.TimeCategoryCode</span></Template>
+                </GridColumn>
+                <GridColumn Field="Duration" HeaderText="Hours" Width="90">
+                    <Template>@{ var e = (TimeEntryRow)context; }@e.Duration.ToString("F2")</Template>
+                </GridColumn>
+                <GridColumn HeaderText="Time" Width="130">
+                    <Template>
+                        @{ var e = (TimeEntryRow)context; }
+                        @(e.StartTime.HasValue && e.EndTime.HasValue
+                            ? $"{e.StartTime.Value:HH:mm}–{e.EndTime.Value:HH:mm}"
+                            : "—")
+                    </Template>
+                </GridColumn>
+                <GridColumn HeaderText="Status" Width="110">
+                    <Template>@{ var e = (TimeEntryRow)context; }<span class="status-badge status-@e.StatusCode.ToLower()">@e.StatusCode</span></Template>
+                </GridColumn>
+                <GridColumn HeaderText="Notes">
+                    <Template>
+                        @{ var e = (TimeEntryRow)context; }
+                        <span class="note-cell">
                             @(e.RejectionReason is not null
                                 ? $"Rejected: {e.RejectionReason}"
                                 : e.Notes ?? "")
-                        </td>
-                    </tr>
-                }
-            </tbody>
-            <tfoot>
-                <tr>
-                    <td colspan="2" style="font-weight:600;color:var(--aw-navy);">Total</td>
-                    <td style="font-weight:600;color:var(--aw-navy);">@_entries.Sum(e => e.Duration).ToString("F2")</td>
-                    <td colspan="3"></td>
-                </tr>
-            </tfoot>
-        </table>
+                        </span>
+                    </Template>
+                </GridColumn>
+            </GridColumns>
+            <GridAggregates>
+                <GridAggregate>
+                    <GridAggregateColumns>
+                        <GridAggregateColumn Field="Duration" Type="AggregateType.Sum">
+                            <FooterTemplate>
+                                @{ var agg = (AggregateTemplateContext)context; }
+                                <strong style="color:var(--aw-navy);">@(Convert.ToDecimal(agg.Sum).ToString("F2")) hrs total</strong>
+                            </FooterTemplate>
+                        </GridAggregateColumn>
+                    </GridAggregateColumns>
+                </GridAggregate>
+            </GridAggregates>
+        </SfGrid>
     }
 }
 
@@ -102,10 +105,9 @@ else
         finally { _loading = false; }
     }
 
-    private async Task OnPeriodChanged(ChangeEventArgs e)
+    private async Task OnPeriodChangedSf(ChangeEventArgs<Guid, TaPeriodOption> args)
     {
-        if (!Guid.TryParse(e.Value?.ToString(), out var id)) return;
-        _selectedPeriodId = id;
+        _selectedPeriodId = args.Value;
         await LoadEntriesAsync();
     }
 

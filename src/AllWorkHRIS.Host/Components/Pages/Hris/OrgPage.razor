@@ -11,6 +11,10 @@
 @using AllWorkHRIS.Host.Hris.Domain
 @using AllWorkHRIS.Host.Hris.Queries
 @using AllWorkHRIS.Core.Temporal
+@using Syncfusion.Blazor.Grids
+@using Syncfusion.Blazor.DropDowns
+@using Syncfusion.Blazor.Calendars
+@using Syncfusion.Blazor.Inputs
 @inject IOrgStructureService OrgStructureService
 @inject ILookupCache         LookupCache
 @inject ITemporalContext     TemporalContext
@@ -98,7 +102,7 @@
                             @if (_isHrisAdmin)
                             {
                                 <span class="org-node-actions" @onclick:stopPropagation>
-                                    <button class="btn-icon-edit" title="Edit" @onclick="() => OpenEditOrgUnitPanel(unit)">✎</button>
+                                    <button class="btn-icon-edit" title="Edit" @onclick="() => OpenEditOrgUnitPanel(unit)"><span class="e-icons e-edit"></span></button>
                                 </span>
                             }
                         </div>
@@ -119,7 +123,7 @@
                             <span class="location-chip-code">@loc.OrgUnitCode</span>
                             @if (_isHrisAdmin)
                             {
-                                <button class="btn-icon-edit" title="Edit" @onclick="() => OpenEditOrgUnitPanel(loc)">✎</button>
+                                <button class="btn-icon-edit" title="Edit" @onclick="() => OpenEditOrgUnitPanel(loc)"><span class="e-icons e-edit"></span></button>
                             }
                         </div>
                     }
@@ -130,7 +134,7 @@
     else
     {
         <div class="grid-container">
-            @if (!_orgUnits.Any())
+            @if (!_listOrgUnits.Any())
             {
                 <div class="empty-state">
                     <p>No org units found for this legal entity.</p>
@@ -138,38 +142,39 @@
             }
             else
             {
-                <table class="org-table">
-                    <thead>
-                        <tr>
-                            <th>Name</th>
-                            <th>Code</th>
-                            <th>Type</th>
-                            <th>Status</th>
-                            <th>Effective Start</th>
-                            @if (_isHrisAdmin) { <th></th> }
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var unit in TreeUnits.OrderBy(u => u.OrgUnitTypeId).ThenBy(u => u.OrgUnitName))
-                        {
-                            var isSelected = _selectedNodeId == unit.OrgUnitId;
-                            <tr class="org-table-row @(isSelected ? "selected" : "")"
-                                @onclick="async () => await SelectNodeAsync(unit.OrgUnitId, unit.OrgUnitName)">
-                                <td>@unit.OrgUnitName</td>
-                                <td>@unit.OrgUnitCode</td>
-                                <td><span class="org-type-badge">@LookupLabel(LookupTables.OrgUnitType, unit.OrgUnitTypeId)</span></td>
-                                <td><span class="status-badge status-@LookupCode(LookupTables.OrgStatus, unit.OrgStatusId)">@LookupLabel(LookupTables.OrgStatus, unit.OrgStatusId)</span></td>
-                                <td>@unit.EffectiveStartDate.ToString("yyyy-MM-dd")</td>
+                <SfGrid DataSource="@_listOrgUnits" AllowSorting="true" CssClass="e-gridhover">
+                    <GridEvents TValue="OrgUnit" RowSelected="OnListRowSelectedAsync" />
+                    <GridColumns>
+                        <GridColumn HeaderText="Name">
+                            <Template>@{ var u = (OrgUnit)context; }@u.OrgUnitName</Template>
+                        </GridColumn>
+                        <GridColumn HeaderText="Code" Width="100">
+                            <Template>@{ var u = (OrgUnit)context; }@u.OrgUnitCode</Template>
+                        </GridColumn>
+                        <GridColumn HeaderText="Type" Width="140">
+                            <Template>@{ var u = (OrgUnit)context; }<span class="org-type-badge">@LookupLabel(LookupTables.OrgUnitType, u.OrgUnitTypeId)</span></Template>
+                        </GridColumn>
+                        <GridColumn HeaderText="Status" Width="110">
+                            <Template>@{ var u = (OrgUnit)context; }<span class="status-badge status-@LookupCode(LookupTables.OrgStatus, u.OrgStatusId)">@LookupLabel(LookupTables.OrgStatus, u.OrgStatusId)</span></Template>
+                        </GridColumn>
+                        <GridColumn HeaderText="Effective Start" Width="145">
+                            <Template>@{ var u = (OrgUnit)context; }@u.EffectiveStartDate.ToString("yyyy-MM-dd")</Template>
+                        </GridColumn>
+                        <GridColumn HeaderText="" Width="60" AllowSorting="false">
+                            <Template>
+                                @{ var u = (OrgUnit)context; }
                                 @if (_isHrisAdmin)
                                 {
-                                    <td @onclick:stopPropagation style="width:40px">
-                                        <button class="btn-icon-edit" title="Edit" @onclick="() => OpenEditOrgUnitPanel(unit)">✎</button>
-                                    </td>
+                                    <button class="btn-icon-edit" title="Edit"
+                                            @onclick:stopPropagation
+                                            @onclick="() => OpenEditOrgUnitPanel(u)">
+                                        <span class="e-icons e-edit"></span>
+                                    </button>
                                 }
-                            </tr>
-                        }
-                    </tbody>
-                </table>
+                            </Template>
+                        </GridColumn>
+                    </GridColumns>
+                </SfGrid>
             }
         </div>
     }
@@ -223,34 +228,31 @@
                     </div>
                 </div>
 
-                @* Employee table *@
-                <table class="wf-table">
-                    <thead>
-                        <tr>
-                            <th>Name</th>
-                            <th>#</th>
-                            <th>Job Title</th>
-                            <th>Department</th>
-                            <th>FT/PT</th>
-                            <th>FLSA</th>
-                            <th>Annual Cost</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var emp in _workforce)
-                        {
-                            <tr>
-                                <td>@emp.LegalLastName, @(emp.PreferredName ?? emp.LegalFirstName)</td>
-                                <td class="mono">@emp.EmployeeNumber</td>
-                                <td>@emp.JobTitle</td>
-                                <td>@emp.DepartmentName</td>
-                                <td><span class="wf-badge wf-@emp.FullPartTime.ToLower()">@emp.FullPartTime.Replace("_"," ")</span></td>
-                                <td><span class="wf-badge wf-@emp.FlsaStatus.ToLower()">@emp.FlsaStatus.Replace("_"," ")</span></td>
-                                <td class="mono">@emp.AnnualEquivalent.ToString("C0")</td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
+                <SfGrid DataSource="@_workforce" AllowSorting="true" CssClass="e-gridhover">
+                    <GridColumns>
+                        <GridColumn HeaderText="Name">
+                            <Template>@{ var emp = (OrgUnitEmployee)context; }@emp.LegalLastName, @(emp.PreferredName ?? emp.LegalFirstName)</Template>
+                        </GridColumn>
+                        <GridColumn HeaderText="#" Width="100">
+                            <Template>@{ var emp = (OrgUnitEmployee)context; }<code>@emp.EmployeeNumber</code></Template>
+                        </GridColumn>
+                        <GridColumn HeaderText="Job Title">
+                            <Template>@{ var emp = (OrgUnitEmployee)context; }@emp.JobTitle</Template>
+                        </GridColumn>
+                        <GridColumn HeaderText="Department">
+                            <Template>@{ var emp = (OrgUnitEmployee)context; }@emp.DepartmentName</Template>
+                        </GridColumn>
+                        <GridColumn HeaderText="FT/PT" Width="100">
+                            <Template>@{ var emp = (OrgUnitEmployee)context; }<span class="wf-badge wf-@emp.FullPartTime.ToLower()">@emp.FullPartTime.Replace("_", " ")</span></Template>
+                        </GridColumn>
+                        <GridColumn HeaderText="FLSA" Width="110">
+                            <Template>@{ var emp = (OrgUnitEmployee)context; }<span class="wf-badge wf-@emp.FlsaStatus.ToLower()">@emp.FlsaStatus.Replace("_", " ")</span></Template>
+                        </GridColumn>
+                        <GridColumn HeaderText="Annual Cost" Width="130">
+                            <Template>@{ var emp = (OrgUnitEmployee)context; }<code>@emp.AnnualEquivalent.ToString("C0")</code></Template>
+                        </GridColumn>
+                    </GridColumns>
+                </SfGrid>
             }
         </div>
     }
@@ -266,24 +268,18 @@
             <div class="panel-form">
                 <div class="form-field">
                     <label class="form-label">Type</label>
-                    <select class="form-select"
-                            value="@_newUnitType"
-                            @onchange="e => _newUnitType = e.Value?.ToString() ?? string.Empty">
-                        <option value="" selected="@(_newUnitType == "")">Select type…</option>
-                        @foreach (var t in LookupCache.GetAll(LookupTables.OrgUnitType).Where(t => t.Code != "LEGAL_ENTITY"))
-                        {
-                            <option value="@t.Code" selected="@(_newUnitType == t.Code)">@t.Label</option>
-                        }
-                    </select>
+                    <SfDropDownList TValue="string" TItem="OrgTypeOption" DataSource="@_orgTypeOptions"
+                                    @bind-Value="_newUnitType" Placeholder="Select type…">
+                        <DropDownListFieldSettings Value="Code" Text="Label" />
+                    </SfDropDownList>
                 </div>
                 <div class="form-field">
                     <label class="form-label">Name</label>
-                    <input type="text" class="form-input" @bind="_newUnitName" placeholder="e.g. Engineering" />
+                    <SfTextBox @bind-Value="_newUnitName" Placeholder="e.g. Engineering" />
                 </div>
                 <div class="form-field">
                     <label class="form-label">Code</label>
-                    <input type="text" class="form-input" @bind="_newUnitCode"
-                           placeholder="e.g. ENG" maxlength="20" style="text-transform:uppercase" />
+                    <SfTextBox @bind-Value="_newUnitCode" Placeholder="e.g. ENG" />
                 </div>
                 <div class="form-field">
                     <label class="form-label">Legal Entity</label>
@@ -291,21 +287,14 @@
                 </div>
                 <div class="form-field">
                     <label class="form-label">Parent Org Unit (optional)</label>
-                    <select class="form-select"
-                            value="@_newParentIdStr"
-                            @onchange="e => _newParentIdStr = e.Value?.ToString() ?? string.Empty">
-                        <option value="" selected="@(_newParentIdStr == "")">— None (top level) —</option>
-                        @foreach (var u in _orgUnits.OrderBy(u => u.OrgUnitName))
-                        {
-                            <option value="@u.OrgUnitId" selected="@(_newParentIdStr == u.OrgUnitId.ToString())">
-                                @u.OrgUnitName (@LookupCode(LookupTables.OrgUnitType, u.OrgUnitTypeId).ToUpper())
-                            </option>
-                        }
-                    </select>
+                    <SfDropDownList TValue="string" TItem="ParentUnitOption" DataSource="@_parentOptions"
+                                    @bind-Value="_newParentIdStr" Placeholder="— None (top level) —" ShowClearButton="true">
+                        <DropDownListFieldSettings Value="IdStr" Text="Label" />
+                    </SfDropDownList>
                 </div>
                 <div class="form-field">
                     <label class="form-label">Effective Start Date</label>
-                    <input type="date" class="form-input" @bind="_newEffectiveDt" />
+                    <SfDatePicker TValue="DateTime" @bind-Value="_newEffectiveDt" />
                 </div>
             </div>
 
@@ -337,12 +326,11 @@
                 </div>
                 <div class="form-field">
                     <label class="form-label">Name</label>
-                    <input type="text" class="form-input" @bind="_editName" />
+                    <SfTextBox @bind-Value="_editName" />
                 </div>
                 <div class="form-field">
                     <label class="form-label">Code</label>
-                    <input type="text" class="form-input" @bind="_editCode"
-                           maxlength="20" style="text-transform:uppercase" />
+                    <SfTextBox @bind-Value="_editCode" />
                 </div>
             </div>
 
@@ -362,12 +350,16 @@
 }
 
 @code {
+    private sealed record OrgTypeOption(string Code, string Label);
+    private sealed record ParentUnitOption(string IdStr, string Label);
+
     [CascadingParameter] private Task<AuthenticationState> AuthStateTask { get; set; } = default!;
 
     private bool          _loading      = true;
     private string        _activeView   = "hierarchy";
     private bool          _showAddPanel = false;
     private List<OrgUnit> _orgUnits      = [];
+    private List<OrgUnit> _listOrgUnits  = [];
 
     private int LocationTypeId => LookupCache.GetId(LookupTables.OrgUnitType, "LOCATION");
     private IEnumerable<OrgUnit> TreeUnits     => _orgUnits.Where(u => u.OrgUnitTypeId != LocationTypeId);
@@ -398,12 +390,21 @@
     private bool     _editSaving    = false;
     private bool     _isHrisAdmin   = false;
 
+    // Dropdown sources
+    private List<OrgTypeOption>    _orgTypeOptions = [];
+    private List<ParentUnitOption> _parentOptions  = [];
+
     protected override async Task OnInitializedAsync()
     {
         SessionState.OnChanged += HandleEntityChanged;
 
         var state    = await AuthStateTask;
         _isHrisAdmin = state.User.IsInRole("HrisAdmin");
+
+        _orgTypeOptions = LookupCache.GetAll(LookupTables.OrgUnitType)
+            .Where(t => t.Code != "LEGAL_ENTITY")
+            .Select(t => new OrgTypeOption(t.Code, t.Label))
+            .ToList();
 
         _loading = true;
         try
@@ -424,6 +425,12 @@
 
     public void Dispose()
         => SessionState.OnChanged -= HandleEntityChanged;
+
+    private async Task OnListRowSelectedAsync(RowSelectEventArgs<OrgUnit> args)
+    {
+        if (args.Data is null) return;
+        await SelectNodeAsync(args.Data.OrgUnitId, args.Data.OrgUnitName);
+    }
 
     private async Task SelectNodeAsync(Guid nodeId, string nodeName)
     {
@@ -463,6 +470,14 @@
 
             foreach (var unit in _orgUnits)
                 _expanded.Add(unit.OrgUnitId);
+
+            _listOrgUnits = TreeUnits.OrderBy(u => u.OrgUnitTypeId).ThenBy(u => u.OrgUnitName).ToList();
+            _parentOptions = _orgUnits
+                .OrderBy(u => u.OrgUnitName)
+                .Select(u => new ParentUnitOption(
+                    u.OrgUnitId.ToString(),
+                    $"{u.OrgUnitName} ({LookupCode(LookupTables.OrgUnitType, u.OrgUnitTypeId).ToUpper()})"))
+                .ToList();
         }
         catch (Exception ex)
         {
@@ -726,40 +741,14 @@
     }
 
     .org-type-badge {
-        background: #EFF6FF;
-        color: #1D4ED8;
+        background: #F1F5F9;
+        color: #475569;
         padding: 2px var(--space-2);
         border-radius: var(--radius-sm);
         font-size: var(--font-size-sm);
         font-weight: var(--font-weight-medium);
         white-space: nowrap;
     }
-
-    .org-table {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: var(--font-size-base);
-    }
-
-    .org-table th {
-        background: #F9FAFB;
-        padding: var(--space-3) var(--space-4);
-        text-align: left;
-        font-weight: var(--font-weight-medium);
-        color: #6B7280;
-        font-size: var(--font-size-sm);
-        border-bottom: 1px solid #E5E7EB;
-    }
-
-    .org-table td {
-        padding: var(--space-3) var(--space-4);
-        border-bottom: 1px solid #F3F4F6;
-        color: var(--aw-navy);
-    }
-
-    .org-table-row { cursor: pointer; }
-    .org-table-row:hover td { background: #F9FAFB; }
-    .org-table-row.selected td { background: #EFF6FF; color: var(--aw-teal); }
 
     .status-badge {
         padding: 2px var(--space-2);
@@ -846,22 +835,6 @@
         font-size: var(--font-size-sm);
         font-weight: var(--font-weight-medium);
         color: #374151;
-    }
-
-    .form-input, .form-select {
-        padding: var(--space-2);
-        border: 1px solid #D1D5DB;
-        border-radius: var(--radius-md);
-        font-size: var(--font-size-sm);
-        color: var(--aw-navy);
-        background: white;
-        width: 100%;
-        box-sizing: border-box;
-    }
-
-    .form-input:focus, .form-select:focus {
-        outline: none;
-        border-color: var(--aw-teal);
     }
 
     .form-readonly {
@@ -961,32 +934,6 @@
         text-transform: uppercase;
         letter-spacing: 0.04em;
     }
-
-    .wf-table {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: var(--font-size-sm);
-    }
-
-    .wf-table th {
-        background: #F9FAFB;
-        padding: var(--space-2) var(--space-4);
-        text-align: left;
-        font-weight: var(--font-weight-medium);
-        color: #6B7280;
-        font-size: var(--font-size-xs, 0.75rem);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        border-bottom: 1px solid #E5E7EB;
-    }
-
-    .wf-table td {
-        padding: var(--space-2) var(--space-4);
-        border-bottom: 1px solid #F3F4F6;
-        color: var(--aw-navy);
-    }
-
-    .wf-table tr:last-child td { border-bottom: none; }
 
     .wf-badge {
         padding: 1px var(--space-2);

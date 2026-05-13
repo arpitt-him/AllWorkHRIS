@@ -20,7 +20,7 @@ public sealed class BenefitsNavContributor : INavContributor
             AccentColor: "var(--module-benefits, #047857)",
             Items:
             [
-                new("Deduction Codes",  "/benefits/codes",    RequiredRole: "BenefitsAdmin"),
+                new("Benefit Plans",    "/benefits/codes",    RequiredRole: "BenefitsAdmin"),
                 new("Elections",        "/benefits/elections"),
                 new("Import Elections", "/benefits/import",   RequiredRole: "BenefitsAdmin"),
             ]);

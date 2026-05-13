@@ -7,6 +7,10 @@
 @using Microsoft.AspNetCore.Components.Authorization
 @using Microsoft.AspNetCore.Components.Forms
 @using AllWorkHRIS.Core.Lookups
+@using Syncfusion.Blazor.Grids
+@using Syncfusion.Blazor.DropDowns
+@using Syncfusion.Blazor.Calendars
+@using Syncfusion.Blazor.Inputs
 @using AllWorkHRIS.Core.Temporal
 @using AllWorkHRIS.Core.Composition
 @using AllWorkHRIS.Host.Hris.Commands
@@ -105,17 +109,15 @@ else
                         <div class="form-grid">
                             <div class="form-field">
                                 <label class="form-label">Rate Type <span class="req">*</span></label>
-                                <select class="form-select" @bind="_compNewRateTypeId">
-                                    <option value="0">Select…</option>
-                                    @foreach (var rt in LookupCache.GetAll(LookupTables.CompensationRateType))
-                                    {
-                                        <option value="@rt.Id">@rt.Label</option>
-                                    }
-                                </select>
+                                <SfDropDownList TValue="int" TItem="LookupEntry"
+                                                DataSource="@LookupCache.GetAll(LookupTables.CompensationRateType)"
+                                                @bind-Value="_compNewRateTypeId" Placeholder="Select…">
+                                    <DropDownListFieldSettings Value="Id" Text="Label" />
+                                </SfDropDownList>
                             </div>
                             <div class="form-field">
                                 <label class="form-label">New Base Rate <span class="req">*</span></label>
-                                <input type="number" step="0.01" min="0" class="form-input" @bind="_compNewBaseRate" />
+                                <SfNumericTextBox TValue="decimal" @bind-Value="_compNewBaseRate" Min="0" Step="0.01m" />
                                 @if (_compNewRateTypeId != 0 &&
                                      LookupCache.GetCode(LookupTables.CompensationRateType, _compNewRateTypeId) == "SALARY" &&
                                      LookupCache.GetCode(LookupTables.FlsaStatus, _employment!.FlsaStatusId) == "NON_EXEMPT")
@@ -125,22 +127,19 @@ else
                             </div>
                             <div class="form-field">
                                 <label class="form-label">Pay Frequency <span class="req">*</span></label>
-                                <select class="form-select" @bind="_compNewFreqId">
-                                    <option value="0">Select…</option>
-                                    @foreach (var pf in LookupCache.GetAll(LookupTables.PayFrequency))
-                                    {
-                                        <option value="@pf.Id">@pf.Label</option>
-                                    }
-                                </select>
+                                <SfDropDownList TValue="int" TItem="LookupEntry"
+                                                DataSource="@LookupCache.GetAll(LookupTables.PayFrequency)"
+                                                @bind-Value="_compNewFreqId" Placeholder="Select…">
+                                    <DropDownListFieldSettings Value="Id" Text="Label" />
+                                </SfDropDownList>
                             </div>
                             <div class="form-field">
                                 <label class="form-label">Effective Date <span class="req">*</span></label>
-                                <input type="date" class="form-input" @bind="_compEffectiveDt" />
+                                <SfDatePicker TValue="DateTime" @bind-Value="_compEffectiveDt" />
                             </div>
                             <div class="form-field form-field-full">
                                 <label class="form-label">Change Reason <span class="req">*</span></label>
-                                <input type="text" class="form-input" @bind="_compReasonCode"
-                                       placeholder="e.g. MERIT, PROMOTION, CORRECTION" />
+                                <SfTextBox @bind-Value="_compReasonCode" Placeholder="e.g. MERIT, PROMOTION, CORRECTION" />
                             </div>
                         </div>
                         @if (_compError is not null) { <p class="form-error">@_compError</p> }
@@ -164,46 +163,40 @@ else
                             <div class="form-grid">
                                 <div class="form-field">
                                     <label class="form-label">New Department <span class="req">*</span></label>
-                                    <select class="form-select" @bind="_txfrNewDeptId">
-                                        <option value="@Guid.Empty">Select…</option>
-                                        @foreach (var d in _txfrDepts ?? [])
-                                        {
-                                            <option value="@d.OrgUnitId">@d.OrgUnitName</option>
-                                        }
-                                    </select>
+                                    <SfDropDownList TValue="Guid" TItem="OrgUnit"
+                                                    DataSource="@(_txfrDepts?.ToList() ?? [])"
+                                                    @bind-Value="_txfrNewDeptId" Placeholder="Select…">
+                                        <DropDownListFieldSettings Value="OrgUnitId" Text="OrgUnitName" />
+                                    </SfDropDownList>
                                 </div>
                                 <div class="form-field">
                                     <label class="form-label">New Location <span class="req">*</span></label>
-                                    <select class="form-select" @bind="_txfrNewLocationId">
-                                        <option value="@Guid.Empty">Select…</option>
-                                        @foreach (var l in _txfrLocations ?? [])
-                                        {
-                                            <option value="@l.OrgUnitId">@l.OrgUnitName</option>
-                                        }
-                                    </select>
+                                    <SfDropDownList TValue="Guid" TItem="OrgUnit"
+                                                    DataSource="@(_txfrLocations?.ToList() ?? [])"
+                                                    @bind-Value="_txfrNewLocationId" Placeholder="Select…">
+                                        <DropDownListFieldSettings Value="OrgUnitId" Text="OrgUnitName" />
+                                    </SfDropDownList>
                                 </div>
                                 <div class="form-field">
                                     <label class="form-label">New Job (optional — leave blank to keep current)</label>
-                                    <select class="form-select" @bind="_txfrNewJobId">
-                                        <option value="">Keep current</option>
-                                        @foreach (var j in _txfrJobs ?? [])
-                                        {
-                                            <option value="@j.JobId">@j.JobTitle (@j.JobCode)</option>
-                                        }
-                                    </select>
+                                    <SfDropDownList TValue="string" TItem="TxfrJobOption"
+                                                    DataSource="@_txfrJobOptions"
+                                                    @bind-Value="_txfrNewJobId" Placeholder="Keep current"
+                                                    ShowClearButton="true">
+                                        <DropDownListFieldSettings Value="Id" Text="Label" />
+                                    </SfDropDownList>
                                 </div>
                                 <div class="form-field">
                                     <label class="form-label">Effective Date <span class="req">*</span></label>
-                                    <input type="date" class="form-input" @bind="_txfrEffectiveDt" />
+                                    <SfDatePicker TValue="DateTime" @bind-Value="_txfrEffectiveDt" />
                                 </div>
                                 <div class="form-field">
                                     <label class="form-label">Reason Code <span class="req">*</span></label>
-                                    <input type="text" class="form-input" @bind="_txfrReasonCode"
-                                           placeholder="e.g. RESTRUCTURE, VOLUNTARY, LATERAL" />
+                                    <SfTextBox @bind-Value="_txfrReasonCode" Placeholder="e.g. RESTRUCTURE, VOLUNTARY, LATERAL" />
                                 </div>
                                 <div class="form-field form-field-full">
                                     <label class="form-label">Notes (optional)</label>
-                                    <textarea class="form-input" rows="2" @bind="_txfrNotes"></textarea>
+                                    <SfTextBox @bind-Value="_txfrNotes" Multiline="true" />
                                 </div>
                             </div>
                             @if (_txfrError is not null) { <p class="form-error">@_txfrError</p> }
@@ -228,21 +221,19 @@ else
                             <div class="form-grid">
                                 <div class="form-field">
                                     <label class="form-label">New Manager <span class="req">*</span></label>
-                                    <select class="form-select" @bind="_mgrNewManagerId">
-                                        <option value="">Select…</option>
-                                        @foreach (var e in _mgrCandidates)
-                                        {
-                                            <option value="@e.EmploymentId">@e.LegalLastName, @e.LegalFirstName (@e.EmployeeNumber)</option>
-                                        }
-                                    </select>
+                                    <SfDropDownList TValue="string" TItem="MgrOption"
+                                                    DataSource="@_mgrOptions"
+                                                    @bind-Value="_mgrNewManagerId" Placeholder="Select…">
+                                        <DropDownListFieldSettings Value="Id" Text="Label" />
+                                    </SfDropDownList>
                                 </div>
                                 <div class="form-field">
                                     <label class="form-label">Effective Date <span class="req">*</span></label>
-                                    <input type="date" class="form-input" @bind="_mgrEffectiveDt" />
+                                    <SfDatePicker TValue="DateTime" @bind-Value="_mgrEffectiveDt" />
                                 </div>
                                 <div class="form-field form-field-full">
                                     <label class="form-label">Notes (optional)</label>
-                                    <textarea class="form-input" rows="2" @bind="_mgrNotes"></textarea>
+                                    <SfTextBox @bind-Value="_mgrNotes" Multiline="true" />
                                 </div>
                             </div>
                             @if (_mgrError is not null) { <p class="form-error">@_mgrError</p> }
@@ -362,55 +353,55 @@ else
                                 <div class="form-row form-row--3col">
                                     <div>
                                         <label class="form-label">Legal first name <span class="req">*</span></label>
-                                        <input class="form-input" @bind="_profFirstName" />
+                                        <SfTextBox @bind-Value="_profFirstName" />
                                     </div>
                                     <div>
                                         <label class="form-label">Middle name</label>
-                                        <input class="form-input" @bind="_profMiddleName" />
+                                        <SfTextBox @bind-Value="_profMiddleName" />
                                     </div>
                                     <div>
                                         <label class="form-label">Legal last name <span class="req">*</span></label>
-                                        <input class="form-input" @bind="_profLastName" />
+                                        <SfTextBox @bind-Value="_profLastName" />
                                     </div>
                                 </div>
                                 <div class="form-row form-row--2col">
                                     <div>
                                         <label class="form-label">Suffix</label>
-                                        <input class="form-input form-input--sm" @bind="_profSuffix" placeholder="Jr., Sr., III…" />
+                                        <SfTextBox @bind-Value="_profSuffix" Placeholder="Jr., Sr., III…" />
                                     </div>
                                     <div>
                                         <label class="form-label">Date of birth <span class="req">*</span></label>
-                                        <input class="form-input form-input--dob" type="date" @bind="_profDob" />
+                                        <SfDatePicker TValue="DateTime" @bind-Value="_profDob" />
                                     </div>
                                 </div>
                                 <div class="form-row form-row--2col">
                                     <div>
                                         <label class="form-label">National identifier</label>
-                                        <input class="form-input" @bind="_profNI" placeholder="e.g. 123-45-6789" />
+                                        <SfTextBox @bind-Value="_profNI" Placeholder="e.g. 123-45-6789" />
                                     </div>
                                     <div>
                                         <label class="form-label">ID type</label>
-                                        <input class="form-input form-input--sm" @bind="_profNIType" placeholder="SSN, SIN…" />
+                                        <SfTextBox @bind-Value="_profNIType" Placeholder="SSN, SIN…" />
                                     </div>
                                 </div>
                                 <p class="form-section-label" style="margin-top:var(--space-3)">Personal details</p>
                                 <div class="form-row">
                                     <label class="form-label">Preferred name</label>
-                                    <input class="form-input" @bind="_profPreferredName" />
+                                    <SfTextBox @bind-Value="_profPreferredName" />
                                 </div>
                                 <div class="form-row form-row--2col">
                                     <div>
                                         <label class="form-label">Gender</label>
-                                        <input class="form-input" @bind="_profGender" placeholder="e.g. Male, Female, Non-binary" />
+                                        <SfTextBox @bind-Value="_profGender" Placeholder="e.g. Male, Female, Non-binary" />
                                     </div>
                                     <div>
                                         <label class="form-label">Pronouns</label>
-                                        <input class="form-input" @bind="_profPronouns" placeholder="e.g. she/her" />
+                                        <SfTextBox @bind-Value="_profPronouns" Placeholder="e.g. she/her" />
                                     </div>
                                 </div>
                                 <div class="form-row">
                                     <label class="form-label">Marital status</label>
-                                    <input class="form-input" @bind="_profMaritalStatus" placeholder="e.g. Single, Married" />
+                                    <SfTextBox @bind-Value="_profMaritalStatus" Placeholder="e.g. Single, Married" />
                                 </div>
                                 @if (_profileError is not null) { <p class="form-error">@_profileError</p> }
                                 <div class="form-actions">
@@ -426,21 +417,21 @@ else
                             <div class="stacked-form">
                                 <div class="form-row">
                                     <label class="form-label">Preferred name</label>
-                                    <input class="form-input" @bind="_basicPreferredName" />
+                                    <SfTextBox @bind-Value="_basicPreferredName" />
                                 </div>
                                 <div class="form-row form-row--2col">
                                     <div>
                                         <label class="form-label">Gender</label>
-                                        <input class="form-input" @bind="_basicGender" placeholder="e.g. Male, Female, Non-binary" />
+                                        <SfTextBox @bind-Value="_basicGender" Placeholder="e.g. Male, Female, Non-binary" />
                                     </div>
                                     <div>
                                         <label class="form-label">Pronouns</label>
-                                        <input class="form-input" @bind="_basicPronouns" placeholder="e.g. she/her" />
+                                        <SfTextBox @bind-Value="_basicPronouns" Placeholder="e.g. she/her" />
                                     </div>
                                 </div>
                                 <div class="form-row">
                                     <label class="form-label">Marital status</label>
-                                    <input class="form-input" @bind="_basicMaritalStatus" placeholder="e.g. Single, Married" />
+                                    <SfTextBox @bind-Value="_basicMaritalStatus" Placeholder="e.g. Single, Married" />
                                 </div>
                                 @if (_basicError is not null) { <p class="form-error">@_basicError</p> }
                                 <div class="form-actions">
@@ -459,35 +450,35 @@ else
                                 <div class="form-row form-row--3col">
                                     <div>
                                         <label class="form-label">First name <span class="req">*</span></label>
-                                        <input class="form-input" @bind="_crFirstName" />
+                                        <SfTextBox @bind-Value="_crFirstName" />
                                     </div>
                                     <div>
                                         <label class="form-label">Middle name</label>
-                                        <input class="form-input" @bind="_crMiddleName" />
+                                        <SfTextBox @bind-Value="_crMiddleName" />
                                     </div>
                                     <div>
                                         <label class="form-label">Last name <span class="req">*</span></label>
-                                        <input class="form-input" @bind="_crLastName" />
+                                        <SfTextBox @bind-Value="_crLastName" />
                                     </div>
                                 </div>
                                 <div class="form-row">
                                     <label class="form-label">Suffix</label>
-                                    <input class="form-input form-input--sm" @bind="_crSuffix" placeholder="Jr., Sr., III…" />
+                                    <SfTextBox @bind-Value="_crSuffix" Placeholder="Jr., Sr., III…" />
                                 </div>
                                 <p class="form-section-label" style="margin-top:var(--space-3)">Date of birth</p>
                                 <div class="form-row">
                                     <label class="form-label">Date of birth</label>
-                                    <input class="form-input form-input--dob" type="date" @bind="_crDob" />
+                                    <SfDatePicker TValue="DateTime" @bind-Value="_crDob" />
                                 </div>
                                 <p class="form-section-label" style="margin-top:var(--space-3)">National identifier</p>
                                 <div class="form-row form-row--2col">
                                     <div>
                                         <label class="form-label">Identifier</label>
-                                        <input class="form-input" @bind="_crNI" placeholder="e.g. 123-45-6789" />
+                                        <SfTextBox @bind-Value="_crNI" Placeholder="e.g. 123-45-6789" />
                                     </div>
                                     <div>
                                         <label class="form-label">Type</label>
-                                        <input class="form-input form-input--sm" @bind="_crNIType" placeholder="SSN, SIN…" />
+                                        <SfTextBox @bind-Value="_crNIType" Placeholder="SSN, SIN…" />
                                     </div>
                                 </div>
                                 @if (_crError is not null) { <p class="form-error">@_crError</p> }
@@ -533,8 +524,7 @@ else
                                                 @if (_rejectingId == req.PersonChangeRequestId)
                                                 {
                                                     <div class="pending-reject-form">
-                                                        <textarea class="form-input" rows="2" placeholder="Rejection note (optional)"
-                                                                  @bind="_rejectNote"></textarea>
+                                                        <SfTextBox @bind-Value="_rejectNote" Multiline="true" Placeholder="Rejection note (optional)" />
                                                         <div class="form-actions">
                                                             <button class="btn-danger" @onclick="() => ConfirmRejectAsync(req.PersonChangeRequestId)" disabled="@_reviewSaving">
                                                                 @(_reviewSaving ? "Rejecting…" : "Confirm reject")
@@ -607,43 +597,43 @@ else
                             <div class="stacked-form">
                                 <div class="form-row">
                                     <label class="form-label">Address line 1 <span class="req">*</span></label>
-                                    <input class="form-input" @bind="_addrLine1" />
+                                    <SfTextBox @bind-Value="_addrLine1" />
                                 </div>
                                 <div class="form-row">
                                     <label class="form-label">Address line 2</label>
-                                    <input class="form-input" @bind="_addrLine2" />
+                                    <SfTextBox @bind-Value="_addrLine2" />
                                 </div>
                                 <div class="form-row form-row--3col">
                                     <div>
                                         <label class="form-label">City <span class="req">*</span></label>
-                                        <input class="form-input" @bind="_addrCity" />
+                                        <SfTextBox @bind-Value="_addrCity" />
                                     </div>
                                     <div>
                                         <label class="form-label">State / Province <span class="req">*</span></label>
-                                        <input class="form-input" @bind="_addrState" maxlength="10" />
+                                        <SfTextBox @bind-Value="_addrState" />
                                     </div>
                                     <div>
                                         <label class="form-label">Postal code <span class="req">*</span></label>
-                                        <input class="form-input" @bind="_addrPostal" maxlength="20" />
+                                        <SfTextBox @bind-Value="_addrPostal" />
                                     </div>
                                 </div>
                                 <div class="form-row">
                                     <label class="form-label">Country code <span class="req">*</span></label>
-                                    <input class="form-input form-input--sm" @bind="_addrCountry" maxlength="3" />
+                                    <SfTextBox @bind-Value="_addrCountry" />
                                 </div>
                                 <div class="form-row form-row--2col">
                                     <div>
                                         <label class="form-label">Phone (primary)</label>
-                                        <input class="form-input" @bind="_addrPhone1" />
+                                        <SfTextBox @bind-Value="_addrPhone1" />
                                     </div>
                                     <div>
                                         <label class="form-label">Phone (secondary)</label>
-                                        <input class="form-input" @bind="_addrPhone2" />
+                                        <SfTextBox @bind-Value="_addrPhone2" />
                                     </div>
                                 </div>
                                 <div class="form-row">
                                     <label class="form-label">Personal email</label>
-                                    <input class="form-input" type="email" @bind="_addrEmail" />
+                                    <SfTextBox @bind-Value="_addrEmail" />
                                 </div>
 
                                 @if (_addressError is not null)
@@ -951,30 +941,27 @@ else
                                         <div class="form-grid">
                                             <div class="form-field">
                                                 <label class="form-label">Leave Type</label>
-                                                <select class="form-select" @bind="_newLeaveType">
-                                                    <option value="">Select type…</option>
-                                                    @foreach (var lt in LookupCache.GetAll(LookupTables.LeaveType))
-                                                    {
-                                                        <option value="@lt.Code">@lt.Label</option>
-                                                    }
-                                                </select>
+                                                <SfDropDownList TValue="string" TItem="LookupEntry"
+                                                                DataSource="@LookupCache.GetAll(LookupTables.LeaveType)"
+                                                                @bind-Value="_newLeaveType" Placeholder="Select type…">
+                                                    <DropDownListFieldSettings Value="Code" Text="Label" />
+                                                </SfDropDownList>
                                             </div>
                                             <div class="form-field">
                                                 <label class="form-label">Reason Code</label>
-                                                <input type="text" class="form-input" @bind="_newLeaveReason"
-                                                       placeholder="e.g. PERSONAL" />
+                                                <SfTextBox @bind-Value="_newLeaveReason" Placeholder="e.g. PERSONAL" />
                                             </div>
                                             <div class="form-field">
                                                 <label class="form-label">Start Date</label>
-                                                <input type="date" class="form-input" @bind="_newLeaveStartDt" />
+                                                <SfDatePicker TValue="DateTime" @bind-Value="_newLeaveStartDt" />
                                             </div>
                                             <div class="form-field">
                                                 <label class="form-label">End Date</label>
-                                                <input type="date" class="form-input" @bind="_newLeaveEndDt" />
+                                                <SfDatePicker TValue="DateTime" @bind-Value="_newLeaveEndDt" />
                                             </div>
                                             <div class="form-field form-field-full">
                                                 <label class="form-label">Notes (optional)</label>
-                                                <textarea class="form-input" rows="2" @bind="_newLeaveNotes"></textarea>
+                                                <SfTextBox @bind-Value="_newLeaveNotes" Multiline="true" />
                                             </div>
                                         </div>
                                         @if (_leaveError is not null)
@@ -1058,26 +1045,23 @@ else
                                         <div class="form-grid">
                                             <div class="form-field">
                                                 <label class="form-label">Document Type</label>
-                                                <select class="form-select" @bind="_uploadDocType">
-                                                    <option value="">Select type…</option>
-                                                    @foreach (var dt in LookupCache.GetAll(LookupTables.DocumentType))
-                                                    {
-                                                        <option value="@dt.Code">@dt.Label</option>
-                                                    }
-                                                </select>
+                                                <SfDropDownList TValue="string" TItem="LookupEntry"
+                                                                DataSource="@LookupCache.GetAll(LookupTables.DocumentType)"
+                                                                @bind-Value="_uploadDocType" Placeholder="Select type…">
+                                                    <DropDownListFieldSettings Value="Code" Text="Label" />
+                                                </SfDropDownList>
                                             </div>
                                             <div class="form-field">
                                                 <label class="form-label">Document Name</label>
-                                                <input type="text" class="form-input" @bind="_uploadDocName"
-                                                       placeholder="e.g. I-9 Form" />
+                                                <SfTextBox @bind-Value="_uploadDocName" Placeholder="e.g. I-9 Form" />
                                             </div>
                                             <div class="form-field">
                                                 <label class="form-label">Effective Date</label>
-                                                <input type="date" class="form-input" @bind="_uploadEffectiveDt" />
+                                                <SfDatePicker TValue="DateTime" @bind-Value="_uploadEffectiveDt" />
                                             </div>
                                             <div class="form-field">
                                                 <label class="form-label">Expiration Date (optional)</label>
-                                                <input type="date" class="form-input" @bind="_uploadExpirationDt" />
+                                                <SfDatePicker TValue="DateTime?" @bind-Value="_uploadExpirationDt" ShowClearButton="true" />
                                             </div>
                                             <div class="form-field form-field-full">
                                                 <label class="form-label">File</label>
@@ -1267,8 +1251,7 @@ else
                                                         <td colspan="7">
                                                             <div class="inline-form">
                                                                 <label class="form-label">Completion Date</label>
-                                                                <input type="date" class="form-input form-input-sm"
-                                                                       @bind="_completionDt" />
+                                                                <SfDatePicker TValue="DateTime" @bind-Value="_completionDt" Width="160px" />
                                                                 <button class="btn-primary btn-sm"
                                                                         @onclick="() => ConfirmCompleteAsync(task.TaskId)">Confirm</button>
                                                                 <button class="btn-secondary btn-sm"
@@ -1284,8 +1267,7 @@ else
                                                         <td colspan="7">
                                                             <div class="inline-form">
                                                                 <label class="form-label">Waiver Reason</label>
-                                                                <input type="text" class="form-input form-input-sm"
-                                                                       @bind="_waiveReason" placeholder="Enter reason…" />
+                                                                <SfTextBox @bind-Value="_waiveReason" Placeholder="Enter reason…" Width="220px" />
                                                                 <button class="btn-primary btn-sm"
                                                                         @onclick="() => ConfirmWaiveAsync(task.TaskId)">Confirm</button>
                                                                 <button class="btn-secondary btn-sm"
@@ -1503,6 +1485,7 @@ else
     private IEnumerable<OrgUnit>? _txfrDepts;
     private IEnumerable<OrgUnit>? _txfrLocations;
     private IEnumerable<Job>?     _txfrJobs;
+    private List<TxfrJobOption>   _txfrJobOptions = [];
 
     // Change Manager form
     private string   _mgrNewManagerId = "";
@@ -1512,8 +1495,11 @@ else
     private bool     _mgrLoading;
     private string?  _mgrError;
     private IReadOnlyList<EmploymentListItem> _mgrCandidates = [];
+    private List<MgrOption>                   _mgrOptions    = [];
 
     private sealed record TabEntry(string Label, int SortOrder, Type? ComponentType = null);
+    private sealed record TxfrJobOption(string Id, string Label);
+    private sealed record MgrOption(string Id, string Label);
 
     private static readonly TabEntry[] _coreTabs =
     [
@@ -2093,6 +2079,9 @@ else
             _txfrDepts     = await deptTask;
             _txfrLocations = await locTask;
             _txfrJobs      = await jobTask;
+            _txfrJobOptions = (_txfrJobs ?? [])
+                .Select(j => new TxfrJobOption(j.JobId.ToString(), $"{j.JobTitle} ({j.JobCode})"))
+                .ToList();
         }
         finally { _txfrLoading = false; }
     }
@@ -2145,6 +2134,10 @@ else
             _mgrCandidates = (await EmploymentService.GetAllActiveListAsync(_employment!.LegalEntityId))
                 .Where(e => e.EmploymentId != EmploymentId)
                 .OrderBy(e => e.LegalLastName).ThenBy(e => e.LegalFirstName)
+                .ToList();
+            _mgrOptions = _mgrCandidates
+                .Select(e => new MgrOption(e.EmploymentId.ToString(),
+                    $"{e.LegalLastName}, {e.LegalFirstName} ({e.EmployeeNumber})"))
                 .ToList();
         }
         finally { _mgrLoading = false; }

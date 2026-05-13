@@ -9,14 +9,21 @@
 @inject IDeductionEmployerMatchRepository MatchRepo
 @inject IDeductionRateTableRepository     RateTableRepo
 @inject IConnectionFactory                ConnectionFactory
+@using Syncfusion.Blazor.Grids
+@using Syncfusion.Blazor.Inputs
+@using Syncfusion.Blazor.DropDowns
+@using Syncfusion.Blazor.Calendars
 
-<PageTitle>Deduction Codes — AllWork HRIS</PageTitle>
+<PageTitle>Benefit Plans — AllWork HRIS</PageTitle>
 
 <div class="page-container">
 
     <div class="page-header">
-        <h2 class="page-title">Deduction Codes</h2>
-        <button class="btn btn-primary" @onclick="ShowAddForm">+ Add Code</button>
+        <h2 class="page-title">Benefit Plans</h2>
+        @if (!_showForm)
+        {
+            <button class="btn btn-primary" @onclick="ShowAddForm">+ Add Plan</button>
+        }
     </div>
 
     @if (_loading)
@@ -29,99 +36,89 @@
     }
     else
     {
-        <table class="data-table">
-            <thead>
-                <tr>
-                    <th>Code</th>
-                    <th>Description</th>
-                    <th>Tax Treatment</th>
-                    <th>Mode</th>
-                    <th>Status</th>
-                    <th>Effective Start</th>
-                    <th>Effective End</th>
-                    <th></th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var dc in _codes)
-                {
-                    <tr>
-                        <td><samp>@dc.Code</samp></td>
-                        <td>@dc.Description</td>
-                        <td><span class="badge @TreatmentBadgeClass(dc.TaxTreatment)">@dc.TaxTreatment</span></td>
-                        <td><span class="badge badge-gray">@dc.CalculationMode</span></td>
-                        <td><span class="badge @StatusBadgeClass(dc.Status)">@dc.Status</span></td>
-                        <td>@(dc.EffectiveStartDate.ToString("yyyy-MM-dd"))</td>
-                        <td>@(dc.EffectiveEndDate?.ToString("yyyy-MM-dd") ?? "—")</td>
-                        <td class="action-cell">
-                            <button class="btn btn-sm btn-ghost" @onclick="() => StartEdit(dc)">Edit</button>
-                            <button class="btn btn-sm btn-ghost" @onclick="() => OpenMatchRules(dc)">Match Rules</button>
-                            @if (dc.CalculationMode == CalculationMode.CoverageBased)
-                            {
-                                <button class="btn btn-sm btn-ghost" @onclick="() => OpenRateTable(dc)">Rate Table</button>
-                            }
-                        </td>
-                    </tr>
-                }
-                @if (_codes.Count == 0)
-                {
-                    <tr><td colspan="8" class="empty-state">No deduction codes configured.</td></tr>
-                }
-            </tbody>
-        </table>
+        <SfGrid DataSource="@_codes" AllowSorting="true" AllowPaging="true" CssClass="e-gridhover">
+            <GridPageSettings PageSize="25" />
+            <GridColumns>
+                <GridColumn HeaderText="Code" Width="150">
+                    <Template>@{ var dc = (Deduction)context; }<samp>@dc.Code</samp></Template>
+                </GridColumn>
+                <GridColumn Field="Description" HeaderText="Description" />
+                <GridColumn HeaderText="Tax Treatment" Width="140">
+                    <Template>@{ var dc = (Deduction)context; }<span class="badge @TreatmentBadgeClass(dc.TaxTreatment)">@dc.TaxTreatment</span></Template>
+                </GridColumn>
+                <GridColumn HeaderText="Mode" Width="160">
+                    <Template>@{ var dc = (Deduction)context; }<span class="badge badge-gray">@dc.CalculationMode</span></Template>
+                </GridColumn>
+                <GridColumn HeaderText="Status" Width="100">
+                    <Template>@{ var dc = (Deduction)context; }<span class="badge @StatusBadgeClass(dc.Status)">@dc.Status</span></Template>
+                </GridColumn>
+                <GridColumn HeaderText="Effective Start" Width="130">
+                    <Template>@{ var dc = (Deduction)context; }@dc.EffectiveStartDate.ToString("yyyy-MM-dd")</Template>
+                </GridColumn>
+                <GridColumn HeaderText="Effective End" Width="130">
+                    <Template>@{ var dc = (Deduction)context; }@(dc.EffectiveEndDate?.ToString("yyyy-MM-dd") ?? "—")</Template>
+                </GridColumn>
+                <GridColumn HeaderText="" Width="200" AllowSorting="false">
+                    <Template>
+                        @{ var dc = (Deduction)context; }
+                        <button class="btn btn-sm btn-ghost" @onclick="() => StartEdit(dc)">Edit</button>
+                        <button class="btn btn-sm btn-ghost" @onclick="() => OpenMatchRules(dc)">Match Rules</button>
+                        @if (dc.CalculationMode == CalculationMode.CoverageBased)
+                        {
+                            <button class="btn btn-sm btn-ghost" @onclick="() => OpenRateTable(dc)">Rate Table</button>
+                        }
+                    </Template>
+                </GridColumn>
+            </GridColumns>
+        </SfGrid>
     }
 
     @* ── Deduction add/edit form ─────────────────────────────────── *@
     @if (_showForm)
     {
         <div class="form-panel">
-            <h3 class="form-panel__title">@(_editCode is null ? "Add Deduction Code" : "Edit Deduction Code")</h3>
+            <h3 class="form-panel__title">@(_editCode is null ? "Add Benefit Plan" : "Edit Benefit Plan")</h3>
 
             <div class="form-grid">
                 <div class="form-group">
                     <label class="form-label">Code <span class="required">*</span></label>
-                    <input class="form-input" @bind="_formCode" disabled="@(_editCode is not null)"
-                           placeholder="e.g. HEALTH_PRE" maxlength="30" />
+                    <SfTextBox @bind-Value="_formCode" Placeholder="e.g. HEALTH_PRE" MaxLength="30"
+                               Enabled="@(_editCode is null)" />
                 </div>
                 <div class="form-group">
                     <label class="form-label">Tax Treatment <span class="required">*</span></label>
-                    <select class="form-select" @bind="_formTaxTreatment" disabled="@(_editCode is not null)">
-                        <option value="">— select —</option>
-                        <option value="PRE_TAX">PRE_TAX</option>
-                        <option value="POST_TAX">POST_TAX</option>
-                    </select>
+                    <SfDropDownList TValue="string" TItem="FilterOption" DataSource="@_taxTreatmentOptions"
+                                    @bind-Value="_formTaxTreatment" Enabled="@(_editCode is null)">
+                        <DropDownListFieldSettings Value="Value" Text="Label" />
+                    </SfDropDownList>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Calculation Mode <span class="required">*</span></label>
-                    <select class="form-select" @bind="_formCalculationMode">
-                        <option value="FIXED_PER_PERIOD">FIXED_PER_PERIOD</option>
-                        <option value="FIXED_ANNUAL">FIXED_ANNUAL</option>
-                        <option value="FIXED_MONTHLY">FIXED_MONTHLY</option>
-                        <option value="PCT_PRE_TAX">PCT_PRE_TAX</option>
-                        <option value="PCT_POST_TAX">PCT_POST_TAX</option>
-                        <option value="COVERAGE_BASED">COVERAGE_BASED</option>
-                    </select>
+                    <SfDropDownList TValue="string" TItem="FilterOption" DataSource="@_calcModeOptions"
+                                    @bind-Value="_formCalculationMode">
+                        <DropDownListFieldSettings Value="Value" Text="Label" />
+                    </SfDropDownList>
                 </div>
                 <div class="form-group form-group--full">
                     <label class="form-label">Description <span class="required">*</span></label>
-                    <input class="form-input" @bind="_formDescription" maxlength="200" />
+                    <SfTextBox @bind-Value="_formDescription" MaxLength="200" />
                 </div>
                 <div class="form-group">
                     <label class="form-label">Effective Start <span class="required">*</span></label>
-                    <input class="form-input" type="date" @bind="_formEffectiveStart" />
+                    <SfDatePicker TValue="DateOnly?" @bind-Value="_formEffectiveStart" Placeholder="MM/DD/YYYY" />
                 </div>
                 <div class="form-group">
                     <label class="form-label">Effective End</label>
-                    <input class="form-input" type="date" @bind="_formEffectiveEnd" />
+                    <SfDatePicker TValue="DateOnly?" @bind-Value="_formEffectiveEnd" Placeholder="MM/DD/YYYY" />
                 </div>
                 @if (_editCode is not null)
                 {
                     <div class="form-group">
                         <label class="form-label">Status</label>
-                        <select class="form-select" @bind="_formStatus">
-                            <option value="ACTIVE">ACTIVE</option>
-                            <option value="INACTIVE">INACTIVE</option>
-                        </select>
+                        <SfDropDownList TValue="string" TItem="FilterOption" DataSource="@_codeStatusOptions"
+                                        @bind-Value="_formStatus">
+                            <DropDownListFieldSettings Value="Value" Text="Label" />
+                        </SfDropDownList>
                     </div>
                 }
             </div>
@@ -238,7 +235,7 @@
                     <div class="form-grid" style="margin-bottom:1.25rem;">
                         <div class="form-group">
                             <label class="form-label">Effective From <span class="required">*</span></label>
-                            <input class="form-input" type="date" @bind="_rateFormFrom" />
+                            <SfDatePicker TValue="DateOnly?" @bind-Value="_rateFormFrom" Placeholder="MM/DD/YYYY" />
                             <small class="hint-text">
                                 Must be a future date. Rate changes on or before today could affect
                                 in-progress payroll runs.
@@ -246,12 +243,11 @@
                         </div>
                         <div class="form-group">
                             <label class="form-label">Effective To</label>
-                            <input class="form-input" type="date" @bind="_rateFormTo" />
+                            <SfDatePicker TValue="DateOnly?" @bind-Value="_rateFormTo" Placeholder="MM/DD/YYYY" />
                         </div>
                         <div class="form-group form-group--full">
                             <label class="form-label">Description</label>
-                            <input class="form-input" @bind="_rateFormDescription"
-                                   placeholder="e.g. 2026 Plan Year" maxlength="200" />
+                            <SfTextBox @bind-Value="_rateFormDescription" Placeholder="e.g. 2026 Plan Year" MaxLength="200" />
                         </div>
                     </div>
 
@@ -273,18 +269,12 @@
                                         <span style="color:#6b7280;font-size:.82rem;margin-left:.4rem;">@tier.TierLabel</span>
                                     </td>
                                     <td>
-                                        <input class="form-input" type="number" step="0.01" min="0"
-                                               style="max-width:110px;"
-                                               value="@(tier.EmployeeRate?.ToString("0.00"))"
-                                               @onchange="e => tier.EmployeeRate = ParseRoundedDecimal(e.Value?.ToString())"
-                                               placeholder="0.00" />
+                                        <SfNumericTextBox TValue="decimal?" @bind-Value="tier.EmployeeRate"
+                                                          Min="0" Step="0.01m" Placeholder="0.00" Width="110px" />
                                     </td>
                                     <td>
-                                        <input class="form-input" type="number" step="0.01" min="0"
-                                               style="max-width:110px;"
-                                               value="@(tier.EmployerRate?.ToString("0.00"))"
-                                               @onchange="e => tier.EmployerRate = ParseRoundedDecimal(e.Value?.ToString())"
-                                               placeholder="0.00" />
+                                        <SfNumericTextBox TValue="decimal?" @bind-Value="tier.EmployerRate"
+                                                          Min="0" Step="0.01m" Placeholder="0.00" Width="110px" />
                                     </td>
                                 </tr>
                             }
@@ -373,38 +363,36 @@
                     <div class="form-grid">
                         <div class="form-group">
                             <label class="form-label">Match % <span class="required">*</span></label>
-                            <input class="form-input" type="number" step="0.01" min="0" max="500"
-                                   @bind="_matchFormRatePct" placeholder="e.g. 50" />
+                            <SfNumericTextBox TValue="decimal?" @bind-Value="_matchFormRatePct"
+                                             Min="0" Max="500" Step="0.01m" Placeholder="e.g. 50" />
                             <small class="hint-text">Employer matches this % of the employee's contribution (e.g. 50 for 50%)</small>
                         </div>
                         <div class="form-group">
                             <label class="form-label">Match Type <span class="required">*</span></label>
-                            <select class="form-select" @bind="_matchFormType">
-                                <option value="PER_PERIOD">Per Period</option>
-                                <option value="ANNUAL_TRUE_UP">Annual True-Up</option>
-                            </select>
+                            <SfDropDownList TValue="string" TItem="FilterOption" DataSource="@_matchTypeOptions"
+                                            @bind-Value="_matchFormType">
+                                <DropDownListFieldSettings Value="Value" Text="Label" />
+                            </SfDropDownList>
                         </div>
                         <div class="form-group">
                             <label class="form-label">Cap — % of Gross</label>
-                            <input class="form-input" type="number" step="0.01" min="0" max="100"
-                                   @bind="_matchFormCapPct" placeholder="e.g. 3" />
+                            <SfNumericTextBox TValue="decimal?" @bind-Value="_matchFormCapPct"
+                                             Min="0" Max="100" Step="0.01m" Placeholder="e.g. 3" />
                             <small class="hint-text">Match applies only to up to this % of gross (e.g. 3 for 3%)</small>
                         </div>
                         <div class="form-group">
                             <label class="form-label">Cap — Annual Amount ($)</label>
-                            <input class="form-input" type="number" step="0.01" min="0"
-                                   value="@_matchFormCapAnnual"
-                                   @onchange="e => _matchFormCapAnnual = ParseRoundedDecimal(e.Value?.ToString())"
-                                   placeholder="e.g. 3000" />
+                            <SfNumericTextBox TValue="decimal?" @bind-Value="_matchFormCapAnnual"
+                                             Min="0" Step="0.01m" Placeholder="e.g. 3000" />
                             <small class="hint-text">Hard annual ceiling in dollars — takes precedence over % cap</small>
                         </div>
                         <div class="form-group">
                             <label class="form-label">Effective From <span class="required">*</span></label>
-                            <input class="form-input" type="date" @bind="_matchFormFrom" />
+                            <SfDatePicker TValue="DateOnly?" @bind-Value="_matchFormFrom" Placeholder="MM/DD/YYYY" />
                         </div>
                         <div class="form-group">
                             <label class="form-label">Effective To</label>
-                            <input class="form-input" type="date" @bind="_matchFormTo" />
+                            <SfDatePicker TValue="DateOnly?" @bind-Value="_matchFormTo" Placeholder="MM/DD/YYYY" />
                         </div>
                     </div>
 
@@ -818,6 +806,38 @@
         _editMatch      = null;
         _matchFormError = null;
     }
+
+    // ── Dropdown data sources ────────────────────────────────────────
+
+    private sealed record FilterOption(string Value, string Label);
+
+    private static readonly List<FilterOption> _taxTreatmentOptions =
+    [
+        new("PRE_TAX",  "Pre-Tax"),
+        new("POST_TAX", "Post-Tax"),
+    ];
+
+    private static readonly List<FilterOption> _calcModeOptions =
+    [
+        new(CalculationMode.FixedPerPeriod, "Fixed Per Period"),
+        new(CalculationMode.FixedAnnual,    "Fixed Annual"),
+        new(CalculationMode.FixedMonthly,   "Fixed Monthly"),
+        new(CalculationMode.PctPreTax,      "% of Pre-Tax Gross"),
+        new(CalculationMode.PctPostTax,     "% of Post-Tax Gross"),
+        new(CalculationMode.CoverageBased,  "Coverage-Based"),
+    ];
+
+    private static readonly List<FilterOption> _codeStatusOptions =
+    [
+        new("ACTIVE",   "Active"),
+        new("INACTIVE", "Inactive"),
+    ];
+
+    private static readonly List<FilterOption> _matchTypeOptions =
+    [
+        new("PER_PERIOD",    "Per Period"),
+        new("ANNUAL_TRUE_UP","Annual True-Up"),
+    ];
 
     // ── Helpers ──────────────────────────────────────────────────────
 

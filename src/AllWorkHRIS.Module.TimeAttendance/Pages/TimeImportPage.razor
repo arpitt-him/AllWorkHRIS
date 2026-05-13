@@ -13,6 +13,7 @@
 @inject AuthenticationStateProvider AuthState
 @inject IJSRuntime                JS
 @inject ITemporalContext          TemporalContext
+@using Syncfusion.Blazor.Grids
 
 <PageTitle>Import Time Entries — AllWork HRIS</PageTitle>
 
@@ -130,11 +131,11 @@
         </div>
 
         <div style="display:flex;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
-            <div class="stat-card stat-card--success">
+            <div class="stat-card stat-card--imported">
                 <div class="stat-value">@_result.Imported</div>
                 <div class="stat-label">Imported</div>
             </div>
-            <div class="stat-card @(_result.Failed > 0 ? "stat-card--danger" : "stat-card--success")">
+            <div class="stat-card @(_result.Failed > 0 ? "stat-card--failed" : "stat-card--imported")">
                 <div class="stat-value">@_result.Failed</div>
                 <div class="stat-label">Failed</div>
             </div>
@@ -148,27 +149,19 @@
                     Download Errors as CSV
                 </button>
             </div>
-            <div style="max-height:420px;overflow-y:auto;border:1px solid var(--border-color, #e5e7eb);border-radius:6px;">
-                <table class="data-table">
-                    <thead>
-                        <tr>
-                            <th style="width:6rem;">Row #</th>
-                            <th style="width:14rem;">Employee Number</th>
-                            <th>Reason</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var err in _result.Errors)
-                        {
-                            <tr>
-                                <td>@err.RowNumber</td>
-                                <td><code>@err.EmployeeNumber</code></td>
-                                <td>@err.Reason</td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
-            </div>
+            <SfGrid DataSource="@_result.Errors" AllowSorting="true" CssClass="e-gridhover">
+                <GridColumns>
+                    <GridColumn HeaderText="Row #" Width="90">
+                        <Template>@{ var err = (TimeImportError)context; }@err.RowNumber</Template>
+                    </GridColumn>
+                    <GridColumn HeaderText="Employee Number" Width="200">
+                        <Template>@{ var err = (TimeImportError)context; }<code>@err.EmployeeNumber</code></Template>
+                    </GridColumn>
+                    <GridColumn HeaderText="Reason">
+                        <Template>@{ var err = (TimeImportError)context; }@err.Reason</Template>
+                    </GridColumn>
+                </GridColumns>
+            </SfGrid>
         }
 
         <div class="form-actions" style="margin-top:1.25rem;">
@@ -259,6 +252,9 @@
 }
 
 <style>
+    .stat-card--imported { border-top: 3px solid #16a34a; }
+    .stat-card--failed   { border-top: 3px solid #dc2626; }
+
     .import-provenance {
         display: flex;
         align-items: center;

@@ -80,6 +80,15 @@
     box-sizing: border-box;
 }
 
+a {
+    color: var(--aw-teal);
+    text-decoration: none;
+}
+
+a:hover {
+    text-decoration: underline;
+}
+
 html, body {
     margin: 0;
     padding: 0;
@@ -114,6 +123,9 @@ html, body {
     overflow-y: auto;
     padding-top: var(--space-2);
 }
+
+/* Note: .nav-item, .nav-group, .nav-parent, .nav-label, .nav-badge are
+   defined below under .shell-sidebar for specificity protection. */
 
 .shell-nav-bottom {
     flex-shrink: 0;
@@ -191,13 +203,66 @@ html, body {
 }
 
 /* ------------------------------------------------------------------ */
-/* Navigation                                                           */
+/* Syncfusion SfGrid overrides                                         */
 /* ------------------------------------------------------------------ */
-.nav-group {
+
+/* Suppress the "Press Enter to sort" accessibility tooltip text that  */
+/* renders visibly in the header on some Syncfusion builds.            */
+.e-grid .e-headercell .e-sortfilterdiv::after,
+.e-grid .e-headercell .e-ascending::after,
+.e-grid .e-headercell .e-descending::after {
+    display: none;
+}
+
+.e-grid .e-headercell .e-headertext {
+    color: #6B7280;
+}
+
+.e-date-wrapper input.e-input {
+    font-size: 0.95em;
+}
+
+.e-datepicker.e-popup .e-calendar {
+    font-size: 0.88em;
+    min-width: unset;
+}
+
+.e-datepicker.e-popup .e-calendar .e-header {
+    padding: 4px 8px;
+}
+
+.e-datepicker.e-popup .e-calendar .e-content td {
+    height: 28px;
+    width: 28px;
+}
+
+.e-pager .e-numericitem.e-currentitem,
+.e-pager .e-numericitem.e-currentitem:hover {
+    background-color: color-mix(in srgb, var(--aw-teal) 12%, white);
+    border-color: var(--aw-teal);
+    color: var(--aw-teal);
+}
+.e-pager .e-numericitem:not(.e-currentitem):hover,
+.e-pager .e-icons:not(.e-disable):hover {
+    color: var(--aw-teal);
+}
+
+/* ------------------------------------------------------------------ */
+/* Navigation — all rules scoped under .shell-sidebar for specificity  */
+/* ------------------------------------------------------------------ */
+.shell-sidebar .shell-nav-main {
+    flex: 1;
+    overflow-y: auto;
+    padding-top: var(--space-2);
+    display: block;
+}
+
+.shell-sidebar .nav-group {
+    display: block;
     margin-bottom: var(--space-1);
 }
 
-.nav-parent {
+.shell-sidebar .nav-parent {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -210,7 +275,7 @@ html, body {
     cursor: default;
 }
 
-.nav-item {
+.shell-sidebar .nav-item {
     display: flex;
     align-items: center;
     padding: var(--space-2) var(--space-4) var(--space-2) var(--space-6);
@@ -220,21 +285,23 @@ html, body {
     transition: background-color 0.15s ease;
 }
 
-.nav-item:hover {
+.shell-sidebar .nav-item:hover {
     background-color: var(--sidebar-item-hover);
     color: var(--sidebar-text-active);
 }
 
-.nav-item.active {
+.shell-sidebar .nav-item.active {
     background-color: var(--sidebar-item-hover);
     color: var(--sidebar-text-active);
 }
 
-.nav-label {
+.shell-sidebar .nav-label {
+    display: block;
     flex: 1;
+    color: inherit;
 }
 
-.nav-badge {
+.shell-sidebar .nav-badge {
     font-size: 10px;
     font-weight: var(--font-weight-semibold);
     padding: 2px 6px;
@@ -447,6 +514,10 @@ html, body {
 
 .stat-card--warn .stat-value {
     color: #D97706;
+}
+
+.stat-card--ta {
+    border-left: 4px solid var(--module-ta, #7c3aed);
 }
 
 .stat-label {

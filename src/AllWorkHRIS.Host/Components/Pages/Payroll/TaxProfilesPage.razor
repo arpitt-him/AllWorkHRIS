@@ -10,6 +10,8 @@
 @using AllWorkHRIS.Host.Hris.Queries
 @using AllWorkHRIS.Host.Hris.Services
 @using AllWorkHRIS.Host.Payroll.Tax
+@using Syncfusion.Blazor.DropDowns
+@using Syncfusion.Blazor.Inputs
 @inject ITaxProfileRepository        TaxRepo
 @inject IEmploymentService           EmploymentService
 @inject ITemporalContext             TemporalContext
@@ -125,15 +127,12 @@
         @* Dropdown *@
         <div class="form-field" style="flex:1;min-width:200px;max-width:320px;">
             <label class="form-label">Employee</label>
-            <select class="form-control"
-                    value="@_selectedEmploymentId.ToString()"
-                    @onchange="OnDropdownChanged">
-                <option value="@Guid.Empty.ToString()">— select employee —</option>
-                @foreach (var emp in _allEmployees.OrderBy(e => e.LegalLastName).ThenBy(e => e.LegalFirstName))
-                {
-                    <option value="@emp.EmploymentId.ToString()">@emp.LegalLastName, @emp.LegalFirstName</option>
-                }
-            </select>
+            <SfDropDownList TValue="string" TItem="EmpOption" DataSource="@_empOptions"
+                            Value="@_selectedEmploymentId.ToString()"
+                            ShowClearButton="true" Placeholder="— select employee —">
+                <DropDownListFieldSettings Value="Id" Text="Label" />
+                <DropDownListEvents TValue="string" TItem="EmpOption" ValueChange="OnEmpDropdownChangedAsync" />
+            </SfDropDownList>
         </div>
 
     </div>
@@ -360,14 +359,13 @@
                                         <div class="form-grid form-grid-3" style="margin-bottom:1rem;">
                                             <div class="form-field">
                                                 <label class="form-label">Filing Status <span style="color:var(--color-danger)">*</span></label>
-                                                <select class="form-control" @bind="form.FilingStatusCode"
-                                                        @bind:after="() => _saveErrors[jCode] = null">
-                                                    <option value="">— select —</option>
-                                                    @foreach (var fs2 in filingStatuses)
-                                                    {
-                                                        <option value="@fs2.FilingStatusCode">@fs2.FilingStatusName</option>
-                                                    }
-                                                </select>
+                                                <SfDropDownList TValue="string" TItem="TaxFilingStatusRow" DataSource="@filingStatuses"
+                                                                @bind-Value="form.FilingStatusCode"
+                                                                ShowClearButton="true" Placeholder="— select —">
+                                                    <DropDownListFieldSettings Value="FilingStatusCode" Text="FilingStatusName" />
+                                                    <DropDownListEvents TValue="string" TItem="TaxFilingStatusRow"
+                                                                       ValueChange="@(_ => _saveErrors[jCode] = null)" />
+                                                </SfDropDownList>
                                             </div>
                                         </div>
                                     }
@@ -378,13 +376,11 @@
                                         <div class="form-grid form-grid-3" style="margin-bottom:1rem;">
                                             <div class="form-field">
                                                 <label class="form-label">Allowances</label>
-                                                <input type="number" class="form-control" min="0"
-                                                       @bind="form.AllowanceCount" />
+                                                <SfNumericTextBox TValue="int" @bind-Value="form.AllowanceCount" Min="0" />
                                             </div>
                                             <div class="form-field">
                                                 <label class="form-label">Additional Withholding / Period</label>
-                                                <input type="number" class="form-control" min="0" step="0.01"
-                                                       @bind="form.AdditionalWithholding" />
+                                                <SfNumericTextBox TValue="decimal" @bind-Value="form.AdditionalWithholding" Min="0" Step="0.01m" />
                                             </div>
                                         </div>
                                     }
@@ -395,23 +391,19 @@
                                         <div class="form-grid form-grid-3" style="margin-bottom:1rem;">
                                             <div class="form-field">
                                                 <label class="form-label">Step 3 — Child & Other Credits ($)</label>
-                                                <input type="number" class="form-control" min="0" step="0.01"
-                                                       @bind="form.CreditsAmount" />
+                                                <SfNumericTextBox TValue="decimal" @bind-Value="form.CreditsAmount" Min="0" Step="0.01m" />
                                             </div>
                                             <div class="form-field">
                                                 <label class="form-label">Step 4a — Other Income ($)</label>
-                                                <input type="number" class="form-control" min="0" step="0.01"
-                                                       @bind="form.OtherIncomeAmount" />
+                                                <SfNumericTextBox TValue="decimal" @bind-Value="form.OtherIncomeAmount" Min="0" Step="0.01m" />
                                             </div>
                                             <div class="form-field">
                                                 <label class="form-label">Step 4b — Deductions ($)</label>
-                                                <input type="number" class="form-control" min="0" step="0.01"
-                                                       @bind="form.DeductionsAmount" />
+                                                <SfNumericTextBox TValue="decimal" @bind-Value="form.DeductionsAmount" Min="0" Step="0.01m" />
                                             </div>
                                             <div class="form-field">
                                                 <label class="form-label">Step 4c — Extra Withholding / Period ($)</label>
-                                                <input type="number" class="form-control" min="0" step="0.01"
-                                                       @bind="form.AdditionalWithholding" />
+                                                <SfNumericTextBox TValue="decimal" @bind-Value="form.AdditionalWithholding" Min="0" Step="0.01m" />
                                             </div>
                                         </div>
                                     }
@@ -435,8 +427,7 @@
                                             </div>
                                             <div class="form-field">
                                                 <label class="form-label">Additional Tax / Period ($)</label>
-                                                <input type="number" class="form-control" min="0" step="0.01"
-                                                       @bind="form.AdditionalTaxAmount" />
+                                                <SfNumericTextBox TValue="decimal" @bind-Value="form.AdditionalTaxAmount" Min="0" Step="0.01m" />
                                             </div>
                                         </div>
                                     }
@@ -481,9 +472,12 @@
 </div>
 
 @code {
+    private sealed record EmpOption(string Id, string Label);
+
     // ── State ────────────────────────────────────────────────────
     private List<EmploymentListItem>               _allEmployees      = [];
     private List<EmploymentListItem>               _filteredEmployees = [];
+    private List<EmpOption>                        _empOptions        = [];
     private string                                 _searchText        = string.Empty;
     private string                                 _selectedEmployeeName = string.Empty;
     private Guid                                   _selectedEmploymentId = Guid.Empty;
@@ -591,6 +585,10 @@
         var entityId = SessionState.HasEntity ? SessionState.SelectedLegalEntityId : (Guid?)null;
         _allEmployees      = (await EmploymentService.GetAllActiveListAsync(entityId)).ToList();
         _filteredEmployees = _allEmployees;
+        _empOptions = _allEmployees
+            .OrderBy(e => e.LegalLastName).ThenBy(e => e.LegalFirstName)
+            .Select(e => new EmpOption(e.EmploymentId.ToString(), $"{e.LegalLastName}, {e.LegalFirstName}"))
+            .ToList();
         FilterEmployees();
     }
 
@@ -668,6 +666,17 @@
     private async Task OnDropdownChanged(ChangeEventArgs e)
     {
         if (!Guid.TryParse(e.Value?.ToString(), out var id) || id == Guid.Empty)
+        {
+            await ClearEmployee();
+            return;
+        }
+        var emp = _allEmployees.FirstOrDefault(x => x.EmploymentId == id);
+        if (emp is not null) await SelectEmployee(emp);
+    }
+
+    private async Task OnEmpDropdownChangedAsync(Syncfusion.Blazor.DropDowns.ChangeEventArgs<string, EmpOption> args)
+    {
+        if (!Guid.TryParse(args.Value, out var id) || id == Guid.Empty)
         {
             await ClearEmployee();
             return;

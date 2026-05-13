@@ -5,6 +5,8 @@
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Components.Authorization
 @using AllWorkHRIS.Host.Config.Tax
+@using Syncfusion.Blazor.Grids
+@using Syncfusion.Blazor.DropDowns
 @inject ITaxConfigRepository         TaxConfig
 @inject AuthenticationStateProvider  AuthState
 
@@ -20,13 +22,10 @@
 @* Jurisdiction picker *@
 <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;">
     <label class="form-label" style="margin:0;white-space:nowrap;">Jurisdiction</label>
-    <select class="form-control" style="max-width:280px;" @bind="_selectedJurisdiction" @bind:after="LoadStepsAsync">
-        <option value="">— select —</option>
-        @foreach (var jCode in _jurisdictions)
-        {
-            <option value="@jCode">@jCode</option>
-        }
-    </select>
+    <SfDropDownList TValue="string" TItem="string" DataSource="@_jurisdictions"
+                    @bind-Value="_selectedJurisdiction" Placeholder="— select —" Width="280px">
+        <DropDownListEvents TValue="string" TItem="string" ValueChange="OnJurisdictionChanged" />
+    </SfDropDownList>
 </div>
 
 @if (_loading)
@@ -39,93 +38,87 @@ else if (!string.IsNullOrEmpty(_selectedJurisdiction) && _steps.Count == 0)
 }
 else if (_steps.Count > 0)
 {
-    <div class="grid-container">
-        <table class="data-table">
-            <thead>
-                <tr>
-                    <th>Seq</th>
-                    <th>Step Code</th>
-                    <th>Name</th>
-                    <th>Type</th>
-                    <th>Applies To</th>
-                    <th>Status</th>
-                    <th>Actions</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var step in _steps)
-                {
-                    var s = step;
-                    <tr>
-                        <td class="mono">@s.SequenceNumber</td>
-                        <td class="mono">@s.StepCode</td>
-                        <td>@s.StepName</td>
-                        <td><span class="type-badge">@StepTypeLabel(s.StepType)</span></td>
-                        <td>@s.AppliesTo</td>
-                        <td><span class="status-badge status-@s.StatusCode.ToLower().Replace('_','-')">@s.StatusCode</span></td>
-                        <td>
-                            <div style="display:flex;gap:.5rem;flex-wrap:wrap;">
-                                @if (s.StatusCode == "DRAFT")
-                                {
-                                    <button class="btn-action" @onclick="() => SubmitForReviewAsync(s)">Submit for Review</button>
-                                    <button class="btn-action btn-action--danger" @onclick="() => ArchiveAsync(s)">Archive</button>
-                                }
-                                @if (s.StatusCode == "APPROVED")
-                                {
-                                    <button class="btn-action btn-action--success" @onclick="() => ActivateAsync(s)">Activate</button>
-                                }
-                                @if (s.StatusCode == "ACTIVE")
-                                {
-                                    <button class="btn-action btn-action--danger" @onclick="() => ArchiveAsync(s)">Archive</button>
-                                }
-                                <button class="btn-action btn-action--neutral" @onclick="() => ToggleRates(s.StepCode)">Rates</button>
-                            </div>
-                            @if (_actionErrors.TryGetValue(s.StepCode, out var err) && err is not null)
-                            {
-                                <p style="color:#dc2626;font-size:.75rem;margin:.25rem 0 0;">@err</p>
-                            }
-                        </td>
-                    </tr>
-                    @if (_expandedRates.Contains(s.StepCode))
+    <SfGrid DataSource="@_steps" AllowSorting="true" CssClass="e-gridhover">
+        <GridEvents TValue="TaxStepConfigRow" DetailsExpanded="OnRatesExpandedAsync" />
+        <GridColumns>
+            <GridColumn HeaderText="Seq" Width="70">
+                <Template>@{ var s = (TaxStepConfigRow)context; }<code>@s.SequenceNumber</code></Template>
+            </GridColumn>
+            <GridColumn HeaderText="Step Code" Width="140">
+                <Template>@{ var s = (TaxStepConfigRow)context; }<code>@s.StepCode</code></Template>
+            </GridColumn>
+            <GridColumn HeaderText="Name">
+                <Template>@{ var s = (TaxStepConfigRow)context; }@s.StepName</Template>
+            </GridColumn>
+            <GridColumn HeaderText="Type" Width="120">
+                <Template>@{ var s = (TaxStepConfigRow)context; }<span class="type-badge">@StepTypeLabel(s.StepType)</span></Template>
+            </GridColumn>
+            <GridColumn HeaderText="Applies To" Width="110">
+                <Template>@{ var s = (TaxStepConfigRow)context; }@s.AppliesTo</Template>
+            </GridColumn>
+            <GridColumn HeaderText="Status" Width="130">
+                <Template>@{ var s = (TaxStepConfigRow)context; }<span class="status-badge status-@s.StatusCode.ToLower().Replace('_','-')">@s.StatusCode</span></Template>
+            </GridColumn>
+            <GridColumn HeaderText="Actions" Width="230" AllowSorting="false">
+                <Template>
+                    @{ var s = (TaxStepConfigRow)context; }
+                    <div style="display:flex;gap:.5rem;flex-wrap:wrap;">
+                        @if (s.StatusCode == "DRAFT")
+                        {
+                            <button class="btn-action" @onclick="() => SubmitForReviewAsync(s)">Submit for Review</button>
+                            <button class="btn-action btn-action--danger" @onclick="() => ArchiveAsync(s)">Archive</button>
+                        }
+                        @if (s.StatusCode == "APPROVED")
+                        {
+                            <button class="btn-action btn-action--success" @onclick="() => ActivateAsync(s)">Activate</button>
+                        }
+                        @if (s.StatusCode == "ACTIVE")
+                        {
+                            <button class="btn-action btn-action--danger" @onclick="() => ArchiveAsync(s)">Archive</button>
+                        }
+                    </div>
+                    @if (_actionErrors.TryGetValue(s.StepCode, out var err) && err is not null)
                     {
-                        var rates = _ratesByStep.TryGetValue(s.StepCode, out var rr) ? rr : [];
-                        <tr>
-                            <td colspan="7" style="background:#f9fafb;padding:.75rem 1rem;">
-                                @if (rates.Count == 0)
-                                {
-                                    <span style="color:#6b7280;font-size:.8rem;">No rate rows found.</span>
-                                }
-                                else
-                                {
-                                    <table style="width:100%;font-size:.8rem;border-collapse:collapse;">
-                                        <thead>
-                                            <tr>
-                                                <th style="text-align:left;color:#6b7280;padding:2px 8px;">Type</th>
-                                                <th style="text-align:left;color:#6b7280;padding:2px 8px;">Effective From</th>
-                                                <th style="text-align:left;color:#6b7280;padding:2px 8px;">Effective To</th>
-                                                <th style="text-align:left;color:#6b7280;padding:2px 8px;">Summary</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            @foreach (var rate in rates)
-                                            {
-                                                <tr>
-                                                    <td style="padding:2px 8px;"><span class="rate-type-tag">@rate.RowType</span></td>
-                                                    <td style="padding:2px 8px;font-family:monospace;">@rate.EffectiveFrom.ToString("yyyy-MM-dd")</td>
-                                                    <td style="padding:2px 8px;font-family:monospace;">@(rate.EffectiveTo?.ToString("yyyy-MM-dd") ?? "open")</td>
-                                                    <td style="padding:2px 8px;">@rate.Summary</td>
-                                                </tr>
-                                            }
-                                        </tbody>
-                                    </table>
-                                }
-                            </td>
-                        </tr>
+                        <p style="color:#dc2626;font-size:.75rem;margin:.25rem 0 0;">@err</p>
                     }
+                </Template>
+            </GridColumn>
+        </GridColumns>
+        <GridTemplates><DetailTemplate>
+            @{ var s = (TaxStepConfigRow)context; }
+            @{ var rates = _ratesByStep.TryGetValue(s.StepCode, out var rr) ? rr : []; }
+            <div style="padding:.75rem 1rem;background:#f9fafb;">
+                @if (rates.Count == 0)
+                {
+                    <span style="color:#6b7280;font-size:.8rem;">No rate rows found.</span>
                 }
-            </tbody>
-        </table>
-    </div>
+                else
+                {
+                    <table style="width:100%;font-size:.8rem;border-collapse:collapse;">
+                        <thead>
+                            <tr>
+                                <th style="text-align:left;color:#6b7280;padding:2px 8px;">Type</th>
+                                <th style="text-align:left;color:#6b7280;padding:2px 8px;">Effective From</th>
+                                <th style="text-align:left;color:#6b7280;padding:2px 8px;">Effective To</th>
+                                <th style="text-align:left;color:#6b7280;padding:2px 8px;">Summary</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var rate in rates)
+                            {
+                                <tr>
+                                    <td style="padding:2px 8px;"><span class="rate-type-tag">@rate.RowType</span></td>
+                                    <td style="padding:2px 8px;font-family:monospace;">@rate.EffectiveFrom.ToString("yyyy-MM-dd")</td>
+                                    <td style="padding:2px 8px;font-family:monospace;">@(rate.EffectiveTo?.ToString("yyyy-MM-dd") ?? "open")</td>
+                                    <td style="padding:2px 8px;">@rate.Summary</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            </div>
+        </DetailTemplate></GridTemplates>
+    </SfGrid>
 }
 
 @* Audit log panel *@
@@ -133,46 +126,55 @@ else if (_steps.Count > 0)
 {
     <div style="margin-top:1.5rem;">
         <h3 class="ref-jur-heading">Recent Activity</h3>
-        <div class="grid-container">
-            <table class="data-table">
-                <thead><tr><th>Action</th><th>From</th><th>To</th><th>By</th><th>At</th><th>Note</th></tr></thead>
-                <tbody>
-                    @foreach (var row in _auditLog)
-                    {
-                        <tr>
-                            <td>@row.ActionCode</td>
-                            <td class="mono">@(row.PriorStatus ?? "—")</td>
-                            <td class="mono">@(row.NewStatus ?? "—")</td>
-                            <td>@row.ChangedBy</td>
-                            <td class="mono">@row.ChangedAt.ToString("yyyy-MM-dd HH:mm")</td>
-                            <td>@(row.ApprovalNote ?? "")</td>
-                        </tr>
-                    }
-                </tbody>
-            </table>
-        </div>
+        <SfGrid DataSource="@_auditLog" AllowSorting="true" CssClass="e-gridhover">
+            <GridColumns>
+                <GridColumn HeaderText="Action" Width="120">
+                    <Template>@{ var row = (AuditLogRow)context; }@row.ActionCode</Template>
+                </GridColumn>
+                <GridColumn HeaderText="From" Width="130">
+                    <Template>@{ var row = (AuditLogRow)context; }<code>@(row.PriorStatus ?? "—")</code></Template>
+                </GridColumn>
+                <GridColumn HeaderText="To" Width="130">
+                    <Template>@{ var row = (AuditLogRow)context; }<code>@(row.NewStatus ?? "—")</code></Template>
+                </GridColumn>
+                <GridColumn HeaderText="By" Width="140">
+                    <Template>@{ var row = (AuditLogRow)context; }@row.ChangedBy</Template>
+                </GridColumn>
+                <GridColumn HeaderText="At" Width="160">
+                    <Template>@{ var row = (AuditLogRow)context; }<code>@row.ChangedAt.ToString("yyyy-MM-dd HH:mm")</code></Template>
+                </GridColumn>
+                <GridColumn HeaderText="Note">
+                    <Template>@{ var row = (AuditLogRow)context; }@(row.ApprovalNote ?? "")</Template>
+                </GridColumn>
+            </GridColumns>
+        </SfGrid>
     </div>
 }
 
 @code {
     private bool   _loading              = false;
     private string _selectedJurisdiction = string.Empty;
-    private List<TaxStepConfigRow>                          _steps        = [];
+    private List<TaxStepConfigRow>                               _steps       = [];
     private Dictionary<string, IReadOnlyList<TaxRateRowSummary>> _ratesByStep = [];
-    private HashSet<string>                                 _expandedRates = [];
-    private Dictionary<string, string?>                     _actionErrors  = [];
-    private List<AuditLogRow>                               _auditLog      = [];
+    private Dictionary<string, string?>                          _actionErrors = [];
+    private List<AuditLogRow>                                    _auditLog     = [];
 
     private static readonly string[] _jurisdictions =
         ["BB", "CA-FED", "US-CA", "US-FED", "US-GA", "US-NY"];
 
     protected override Task OnInitializedAsync() => Task.CompletedTask;
 
+    private async Task OnJurisdictionChanged(ChangeEventArgs<string, string> args)
+    {
+        _selectedJurisdiction = args.Value;
+        await LoadStepsAsync();
+    }
+
     private async Task LoadStepsAsync()
     {
         if (string.IsNullOrEmpty(_selectedJurisdiction)) { _steps = []; return; }
         _loading = true;
-        _expandedRates.Clear();
+        _ratesByStep.Clear();
         _actionErrors.Clear();
         _auditLog = [];
         StateHasChanged();
@@ -181,15 +183,15 @@ else if (_steps.Count > 0)
         _loading = false;
     }
 
-    private async Task ToggleRates(string stepCode)
+    private async Task OnRatesExpandedAsync(DetailsExpandedEventArgs<TaxStepConfigRow> args)
     {
-        if (!_expandedRates.Add(stepCode))
+        if (args.Data is null) return;
+        var sc = args.Data.StepCode;
+        if (!_ratesByStep.ContainsKey(sc))
         {
-            _expandedRates.Remove(stepCode);
-            return;
+            _ratesByStep[sc] = await TaxConfig.GetRateSummaryAsync(sc);
+            StateHasChanged();
         }
-        if (!_ratesByStep.ContainsKey(stepCode))
-            _ratesByStep[stepCode] = await TaxConfig.GetRateSummaryAsync(stepCode);
     }
 
     private async Task SubmitForReviewAsync(TaxStepConfigRow step)

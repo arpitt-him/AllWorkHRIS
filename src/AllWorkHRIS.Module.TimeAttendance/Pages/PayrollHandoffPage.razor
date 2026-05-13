@@ -3,6 +3,7 @@
 @rendermode InteractiveServer
 @attribute [Authorize(Roles = "TimeAdmin")]
 @using Microsoft.AspNetCore.Authorization
+@using Syncfusion.Blazor.Grids
 @inject IHrisSessionState          SessionState
 @inject TimeAttendanceQueryService QueryService
 @inject IPayrollHandoffService     HandoffService
@@ -30,180 +31,158 @@
     }
     else
     {
+        @* ── Handoff results (shown outside grid so always visible) ── *@
+        @foreach (var kvp in _handoffResults)
+        {
+            var periodLabel = _periods.FirstOrDefault(p => p.PeriodId == kvp.Key)?.PeriodLabel ?? "Period";
+            <div class="alert @(kvp.Value.IsError ? "alert--error" : "alert--success")"
+                 style="margin-bottom:.5rem;">
+                <strong>@periodLabel</strong> —
+                @if (kvp.Value.IsError) { <span>Handoff failed: </span> } else { <span>Handoff complete — </span> }
+                @kvp.Value.Message
+            </div>
+        }
+
         <div class="card">
-            <table class="data-table">
-                <thead>
-                    <tr>
-                        <th>Period</th>
-                        <th>Pay Date</th>
-                        <th style="text-align:right;">Approved</th>
-                        <th style="text-align:right;">Locked</th>
-                        <th style="text-align:right;">Total Hours</th>
-                        <th>Status</th>
-                        <th>First Locked</th>
-                        <th style="width:220px;"></th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach (var row in _periods)
-                    {
-                        var isRunning  = _runningPeriodId == row.PeriodId;
-                        var isDone     = _completedPeriods.Contains(row.PeriodId);
-                        var isExpanded = _expandedPeriods.Contains(row.PeriodId);
-                        var canPreview = row.TotalEntries > 0;
-                        <tr class="data-row">
-                            <td><strong>@row.PeriodLabel</strong></td>
-                            <td>@row.PayDate.ToString("MMM d, yyyy")</td>
-                            <td style="text-align:right;">@row.ApprovedEntries</td>
-                            <td style="text-align:right;">@row.LockedEntries</td>
-                            <td style="text-align:right;">@row.TotalHours.ToString("0.##")</td>
-                            <td>
-                                @if (isDone)
-                                {
-                                    <span class="badge badge--success">Handed Off</span>
-                                }
-                                else if (isRunning)
-                                {
-                                    <span class="badge badge--info">Processing…</span>
-                                }
-                                else if (row.LockedEntries > 0 && row.ApprovedEntries == 0)
-                                {
-                                    <span class="badge badge--success">Complete</span>
-                                }
-                                else if (row.ApprovedEntries > 0)
-                                {
-                                    <span class="badge badge--warning">Pending (@row.ApprovedEntries ready)</span>
-                                }
-                                else
-                                {
-                                    <span class="badge badge--neutral">No approved entries</span>
-                                }
-                            </td>
-                            <td style="font-size:.8rem;color:#6b7280;">
+            <SfGrid DataSource="@_periods" AllowSorting="true" CssClass="e-gridhover">
+                <GridEvents TValue="HandoffPeriodRow" DetailsExpanded="OnRowExpandedAsync" />
+                <GridColumns>
+                    <GridColumn HeaderText="Period">
+                        <Template>@{ var row = (HandoffPeriodRow)context; }<strong>@row.PeriodLabel</strong></Template>
+                    </GridColumn>
+                    <GridColumn HeaderText="Pay Date" Width="140">
+                        <Template>@{ var row = (HandoffPeriodRow)context; }@row.PayDate.ToString("MMM d, yyyy")</Template>
+                    </GridColumn>
+                    <GridColumn HeaderText="Approved" Width="100" CustomAttributes="@(new Dictionary<string,object>{{"class","text-right"}})">
+                        <Template>@{ var row = (HandoffPeriodRow)context; }@row.ApprovedEntries</Template>
+                    </GridColumn>
+                    <GridColumn HeaderText="Locked" Width="90" CustomAttributes="@(new Dictionary<string,object>{{"class","text-right"}})">
+                        <Template>@{ var row = (HandoffPeriodRow)context; }@row.LockedEntries</Template>
+                    </GridColumn>
+                    <GridColumn HeaderText="Total Hours" Width="110" CustomAttributes="@(new Dictionary<string,object>{{"class","text-right"}})">
+                        <Template>@{ var row = (HandoffPeriodRow)context; }@row.TotalHours.ToString("0.##")</Template>
+                    </GridColumn>
+                    <GridColumn HeaderText="Status" Width="200">
+                        <Template>
+                            @{ var row = (HandoffPeriodRow)context;
+                               var isDone    = _completedPeriods.Contains(row.PeriodId);
+                               var isRunning = _runningPeriodId == row.PeriodId; }
+                            @if (isDone)
+                            {
+                                <span class="badge badge--success">Handed Off</span>
+                            }
+                            else if (isRunning)
+                            {
+                                <span class="badge badge--info">Processing…</span>
+                            }
+                            else if (row.LockedEntries > 0 && row.ApprovedEntries == 0)
+                            {
+                                <span class="badge badge--success">Complete</span>
+                            }
+                            else if (row.ApprovedEntries > 0)
+                            {
+                                <span class="badge badge--warning">Pending (@row.ApprovedEntries ready)</span>
+                            }
+                            else
+                            {
+                                <span class="badge badge--neutral">No approved entries</span>
+                            }
+                        </Template>
+                    </GridColumn>
+                    <GridColumn HeaderText="First Locked" Width="180">
+                        <Template>
+                            @{ var row = (HandoffPeriodRow)context; }
+                            <span style="font-size:.8rem;color:#6b7280;">
                                 @(row.FirstLockAt.HasValue
                                     ? row.FirstLockAt.Value.ToLocalTime().ToString("MMM d, yyyy h:mm tt")
                                     : "—")
-                            </td>
-                            <td>
-                                @if (isRunning)
-                                {
-                                    <div class="handoff-progress">
-                                        <div class="handoff-progress__bar"
-                                             style="width:@(_progressPct)%;"></div>
-                                    </div>
-                                }
-                                else
-                                {
-                                    <span style="display:flex;gap:.4rem;align-items:center;">
-                                        @if (canPreview)
-                                        {
-                                            <a href="" class="btn-link"
-                                               @onclick="() => TogglePreviewAsync(row.PeriodId)"
-                                               @onclick:preventDefault>
-                                                @(isExpanded ? "Close" : "View")
-                                            </a>
-                                        }
-                                        @if (!isDone && row.ApprovedEntries > 0)
-                                        {
-                                            @if (_confirmHandoffId == row.PeriodId)
-                                            {
-                                                <button class="btn btn--primary btn--sm"
-                                                        @onclick="() => RunHandoffAsync(row.PeriodId, (int)row.ApprovedEntries)">
-                                                    Confirm
-                                                </button>
-                                                <button class="btn btn--ghost btn--sm"
-                                                        @onclick="() => _confirmHandoffId = null">
-                                                    Cancel
-                                                </button>
-                                            }
-                                            else
-                                            {
-                                                <button class="btn btn--secondary btn--sm"
-                                                        @onclick="() => _confirmHandoffId = row.PeriodId">
-                                                    Run Handoff
-                                                </button>
-                                            }
-                                        }
-                                    </span>
-                                }
-                            </td>
-                        </tr>
-
-                        @* Inline result row after handoff completes *@
-                        @if (_handoffResults.TryGetValue(row.PeriodId, out var result))
-                        {
-                            <tr class="handoff-result-row">
-                                <td colspan="8">
-                                    @if (result.IsError)
+                            </span>
+                        </Template>
+                    </GridColumn>
+                    <GridColumn HeaderText="" Width="220" AllowSorting="false">
+                        <Template>
+                            @{ var row = (HandoffPeriodRow)context;
+                               var isDone    = _completedPeriods.Contains(row.PeriodId);
+                               var isRunning = _runningPeriodId == row.PeriodId; }
+                            @if (isRunning)
+                            {
+                                <div class="handoff-progress">
+                                    <div class="handoff-progress__bar" style="width:@(_progressPct)%;"></div>
+                                </div>
+                            }
+                            else if (!isDone && row.ApprovedEntries > 0)
+                            {
+                                <span style="display:flex;gap:.4rem;align-items:center;">
+                                    @if (_confirmHandoffId == row.PeriodId)
                                     {
-                                        <span class="alert alert--error" style="display:inline-block;">
-                                            Handoff failed: @result.Message
-                                        </span>
+                                        <button class="btn btn--primary btn--sm"
+                                                @onclick="() => RunHandoffAsync(row.PeriodId, (int)row.ApprovedEntries)">
+                                            Confirm
+                                        </button>
+                                        <button class="btn btn--ghost btn--sm"
+                                                @onclick="() => _confirmHandoffId = null">
+                                            Cancel
+                                        </button>
                                     }
                                     else
                                     {
-                                        <span class="alert alert--success" style="display:inline-block;">
-                                            Handoff complete — @result.Message
-                                        </span>
+                                        <button class="btn btn--secondary btn--sm"
+                                                @onclick="() => _confirmHandoffId = row.PeriodId">
+                                            Run Handoff
+                                        </button>
                                     }
-                                </td>
-                            </tr>
+                                </span>
+                            }
+                        </Template>
+                    </GridColumn>
+                </GridColumns>
+                <GridTemplates><DetailTemplate>
+                    @{ var row = (HandoffPeriodRow)context; }
+                    @if (_previewCache.TryGetValue(row.PeriodId, out var entries))
+                    {
+                        @if (!entries.Any())
+                        {
+                            <p class="preview-empty">No approved entries found.</p>
                         }
-
-                        @* Expandable entry preview *@
-                        @if (isExpanded)
+                        else
                         {
-                            <tr class="preview-row">
-                                <td colspan="8">
-                                    @if (_previewCache.TryGetValue(row.PeriodId, out var entries))
+                            <table class="preview-table">
+                                <thead>
+                                    <tr>
+                                        <th>Employee</th>
+                                        <th>Work Date</th>
+                                        <th>Category</th>
+                                        <th>Status</th>
+                                        <th style="text-align:right;">Hours</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var e in entries)
                                     {
-                                        @if (!entries.Any())
-                                        {
-                                            <p class="preview-empty">No approved entries found.</p>
-                                        }
-                                        else
-                                        {
-                                            <table class="preview-table">
-                                                <thead>
-                                                    <tr>
-                                                        <th>Employee</th>
-                                                        <th>Work Date</th>
-                                                        <th>Category</th>
-                                                        <th>Status</th>
-                                                        <th style="text-align:right;">Hours</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody>
-                                                    @foreach (var e in entries)
-                                                    {
-                                                        <tr>
-                                                            <td>@e.EmployeeName <span class="preview-emp-num">#@e.EmployeeNumber</span></td>
-                                                            <td>@e.WorkDate.ToString("MMM d, yyyy")</td>
-                                                            <td><span class="badge badge--category">@e.TimeCategory</span></td>
-                                                            <td><span class="badge badge--entry-status badge--entry-@e.StatusCode.ToLower()">@e.StatusCode</span></td>
-                                                            <td style="text-align:right;">@e.Duration.ToString("0.##")</td>
-                                                        </tr>
-                                                    }
-                                                </tbody>
-                                                <tfoot>
-                                                    <tr>
-                                                        <td colspan="4" style="text-align:right;font-weight:600;">Total</td>
-                                                        <td style="text-align:right;font-weight:600;">@entries.Sum(e => e.Duration).ToString("0.##")</td>
-                                                    </tr>
-                                                </tfoot>
-                                            </table>
-                                        }
+                                        <tr>
+                                            <td>@e.EmployeeName <span class="preview-emp-num">#@e.EmployeeNumber</span></td>
+                                            <td>@e.WorkDate.ToString("MMM d, yyyy")</td>
+                                            <td><span class="badge badge--category">@e.TimeCategory</span></td>
+                                            <td><span class="badge badge--entry-status badge--entry-@e.StatusCode.ToLower()">@e.StatusCode</span></td>
+                                            <td style="text-align:right;">@e.Duration.ToString("0.##")</td>
+                                        </tr>
                                     }
-                                    else
-                                    {
-                                        <p class="preview-empty">Loading…</p>
-                                    }
-                                </td>
-                            </tr>
+                                </tbody>
+                                <tfoot>
+                                    <tr>
+                                        <td colspan="4" style="text-align:right;font-weight:600;">Total</td>
+                                        <td style="text-align:right;font-weight:600;">@entries.Sum(e => e.Duration).ToString("0.##")</td>
+                                    </tr>
+                                </tfoot>
+                            </table>
                         }
                     }
-                </tbody>
-            </table>
+                    else
+                    {
+                        <p class="preview-empty">Loading…</p>
+                    }
+                </DetailTemplate></GridTemplates>
+            </SfGrid>
         </div>
     }
 
@@ -211,7 +190,7 @@
 
 @code {
 
-    private IReadOnlyList<HandoffPeriodRow> _periods = [];
+    private List<HandoffPeriodRow> _periods = [];
     private bool _loading = true;
 
     private Guid? _confirmHandoffId;
@@ -220,8 +199,7 @@
 
     private readonly HashSet<Guid>                                        _completedPeriods = [];
     private readonly Dictionary<Guid, HandoffResultMsg>                  _handoffResults   = new();
-    private readonly HashSet<Guid>                                        _expandedPeriods  = [];
-    private readonly Dictionary<Guid, IReadOnlyList<HandoffPreviewEntry>> _previewCache     = new();
+    private readonly Dictionary<Guid, IReadOnlyList<HandoffPreviewEntry>> _previewCache    = new();
 
     private sealed record HandoffResultMsg(bool IsError, string Message);
 
@@ -236,19 +214,18 @@
 
     private async Task LoadAsync(Guid entityId)
     {
-        _periods = await QueryService.GetHandoffSummariesAsync(entityId);
+        _periods = (await QueryService.GetHandoffSummariesAsync(entityId)).ToList();
     }
 
-    private async Task TogglePreviewAsync(Guid periodId)
+    private async Task OnRowExpandedAsync(DetailsExpandedEventArgs<HandoffPeriodRow> args)
     {
-        if (!_expandedPeriods.Add(periodId))
-        {
-            _expandedPeriods.Remove(periodId);
-            return;
-        }
-
+        if (args.Data is null) return;
+        var periodId = args.Data.PeriodId;
         if (!_previewCache.ContainsKey(periodId))
+        {
             _previewCache[periodId] = await QueryService.GetEntriesForPeriodAsync(periodId);
+            StateHasChanged();
+        }
     }
 
     private async Task RunHandoffAsync(Guid periodId, int approvedCount)

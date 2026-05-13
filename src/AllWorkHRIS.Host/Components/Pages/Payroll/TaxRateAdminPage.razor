@@ -8,6 +8,7 @@
 @using AllWorkHRIS.Core.Security
 @using AllWorkHRIS.Core.Temporal
 @using Syncfusion.Blazor.Calendars
+@using Syncfusion.Blazor.Inputs
 @inject ITaxConfigRepository        TaxConfig
 @inject AuthenticationStateProvider AuthState
 @inject ITemporalContext             TemporalContext
@@ -154,13 +155,13 @@ else
                                                 <label>Effective From <span class="req">*</span></label>
                                                 <SfDatePicker CssClass="form-control" @bind-Value="fi.EffectiveFrom" />
                                                 <label>Rate (decimal, e.g. 0.0765) <span class="req">*</span></label>
-                                                <input type="number" class="form-control" step="0.000001" min="0" @bind="fi.Rate" />
+                                                <SfNumericTextBox TValue="decimal" @bind-Value="fi.Rate" Min="0" Step="0.000001m" />
                                                 <label>Wage Base (optional)</label>
-                                                <input type="number" class="form-control" step="0.01" min="0" @bind="fi.WageBase" />
+                                                <SfNumericTextBox TValue="decimal?" @bind-Value="fi.WageBase" Min="0" Step="0.01m" ShowClearButton="true" />
                                                 <label>Period Cap (optional)</label>
-                                                <input type="number" class="form-control" step="0.01" min="0" @bind="fi.PeriodCap" />
+                                                <SfNumericTextBox TValue="decimal?" @bind-Value="fi.PeriodCap" Min="0" Step="0.01m" ShowClearButton="true" />
                                                 <label>Annual Cap (optional)</label>
-                                                <input type="number" class="form-control" step="0.01" min="0" @bind="fi.AnnualCap" />
+                                                <SfNumericTextBox TValue="decimal?" @bind-Value="fi.AnnualCap" Min="0" Step="0.01m" ShowClearButton="true" />
                                             </div>
                                             @if (fi.Error is not null) { <p class="form-error">@fi.Error</p> }
                                             <div style="display:flex;gap:.5rem;margin-top:.75rem;">
@@ -252,10 +253,10 @@ else
                                                         var idx = i;
                                                         var br  = bi.Rows[idx];
                                                         <tr>
-                                                            <td><input class="form-control" placeholder="SINGLE…" @bind="br.FilingStatus" /></td>
-                                                            <td><input type="number" class="form-control" step="0.01" @bind="br.LowerLimit" /></td>
-                                                            <td><input class="form-control" placeholder="blank=∞" @bind="br.UpperLimitStr" /></td>
-                                                            <td><input type="number" class="form-control" step="0.000001" @bind="br.Rate" /></td>
+                                                            <td><SfTextBox @bind-Value="br.FilingStatus" Placeholder="SINGLE…" /></td>
+                                                            <td><SfNumericTextBox TValue="decimal" @bind-Value="br.LowerLimit" Step="0.01m" /></td>
+                                                            <td><SfTextBox @bind-Value="br.UpperLimitStr" Placeholder="blank=∞" /></td>
+                                                            <td><SfNumericTextBox TValue="decimal" @bind-Value="br.Rate" Step="0.000001m" /></td>
                                                             <td><button class="btn-close" @onclick="() => bi.Rows.RemoveAt(idx)">✕</button></td>
                                                         </tr>
                                                     }
@@ -336,9 +337,9 @@ else
                                                 <label>Effective From <span class="req">*</span></label>
                                                 <SfDatePicker CssClass="form-control" @bind-Value="ai.EffectiveFrom" />
                                                 <label>Filing Status (optional)</label>
-                                                <input class="form-control" placeholder="e.g. SINGLE, MFJ" @bind="ai.FilingStatus" />
+                                                <SfTextBox @bind-Value="ai.FilingStatus" Placeholder="e.g. SINGLE, MFJ" />
                                                 <label>Annual Amount <span class="req">*</span></label>
-                                                <input type="number" class="form-control" step="0.01" min="0" @bind="ai.AnnualAmount" />
+                                                <SfNumericTextBox TValue="decimal" @bind-Value="ai.AnnualAmount" Min="0" Step="0.01m" />
                                             </div>
                                             @if (ai.Error is not null) { <p class="form-error">@ai.Error</p> }
                                             <div style="display:flex;gap:.5rem;margin-top:.75rem;">
@@ -431,11 +432,11 @@ else
                                                         var idx = i;
                                                         var tr2 = ti.Rows[idx];
                                                         <tr>
-                                                            <td><input type="number" class="form-control" step="0.01" @bind="tr2.LowerLimit" /></td>
-                                                            <td><input class="form-control" placeholder="blank=∞" @bind="tr2.UpperLimitStr" /></td>
-                                                            <td><input type="number" class="form-control" step="0.000001" @bind="tr2.Rate" /></td>
-                                                            <td><input type="number" class="form-control" step="0.01" @bind="tr2.PeriodCap" /></td>
-                                                            <td><input type="number" class="form-control" step="0.01" @bind="tr2.AnnualCap" /></td>
+                                                            <td><SfNumericTextBox TValue="decimal" @bind-Value="tr2.LowerLimit" Step="0.01m" /></td>
+                                                            <td><SfTextBox @bind-Value="tr2.UpperLimitStr" Placeholder="blank=∞" /></td>
+                                                            <td><SfNumericTextBox TValue="decimal" @bind-Value="tr2.Rate" Step="0.000001m" /></td>
+                                                            <td><SfNumericTextBox TValue="decimal?" @bind-Value="tr2.PeriodCap" Min="0" Step="0.01m" /></td>
+                                                            <td><SfNumericTextBox TValue="decimal?" @bind-Value="tr2.AnnualCap" Min="0" Step="0.01m" /></td>
                                                             <td><button class="btn-close" @onclick="() => ti.Rows.RemoveAt(idx)">✕</button></td>
                                                         </tr>
                                                     }
@@ -517,9 +518,9 @@ else
                                                 <label>Effective From <span class="req">*</span></label>
                                                 <SfDatePicker CssClass="form-control" @bind-Value="ci.EffectiveFrom" />
                                                 <label>Annual Amount <span class="req">*</span></label>
-                                                <input type="number" class="form-control" step="0.01" min="0" @bind="ci.AnnualAmount" />
+                                                <SfNumericTextBox TValue="decimal" @bind-Value="ci.AnnualAmount" Min="0" Step="0.01m" />
                                                 <label>Credit Rate (decimal) <span class="req">*</span></label>
-                                                <input type="number" class="form-control" step="0.000001" min="0" @bind="ci.CreditRate" />
+                                                <SfNumericTextBox TValue="decimal" @bind-Value="ci.CreditRate" Min="0" Step="0.000001m" />
                                                 <label>Refundable</label>
                                                 <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;">
                                                     <input type="checkbox" @bind="ci.IsRefundable" /> Yes

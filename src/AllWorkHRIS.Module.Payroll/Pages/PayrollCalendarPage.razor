@@ -5,6 +5,10 @@
 @implements IDisposable
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Components.Authorization
+@using Syncfusion.Blazor.Grids
+@using Syncfusion.Blazor.Inputs
+@using Syncfusion.Blazor.DropDowns
+@using Syncfusion.Blazor.Calendars
 @inject IPayrollContextRepository   ContextRepo
 @inject IHrisSessionState           SessionState
 @inject ILookupCache                LookupCache
@@ -22,19 +26,19 @@
     </div>
 
     <div class="stat-cards">
-        <div class="stat-card">
+        <div class="stat-card stat-card--total">
             <span class="stat-label">Total Contexts</span>
             <span class="stat-value">@_filtered.Count</span>
         </div>
-        <div class="stat-card">
+        <div class="stat-card stat-card--active">
             <span class="stat-label">Active</span>
             <span class="stat-value">@_filtered.Count(c => c.ContextStatus == "ACTIVE")</span>
         </div>
-        <div class="stat-card">
+        <div class="stat-card stat-card--inactive">
             <span class="stat-label">Inactive</span>
             <span class="stat-value">@_filtered.Count(c => c.ContextStatus == "INACTIVE")</span>
         </div>
-        <div class="stat-card">
+        <div class="stat-card stat-card--closed">
             <span class="stat-label">Closed</span>
             <span class="stat-value">@_filtered.Count(c => c.ContextStatus == "CLOSED")</span>
         </div>
@@ -48,37 +52,34 @@
             <div class="form-grid form-grid-3">
                 <div class="form-field">
                     <label class="form-label">Context Code <span style="color:var(--color-danger)">*</span></label>
-                    <input type="text" class="form-control" @bind="_newCtx.Code"
-                           placeholder="e.g. CORP-BW" maxlength="20" />
+                    <SfTextBox @bind-Value="_newCtx.Code" Placeholder="e.g. CORP-BW" />
                 </div>
                 <div class="form-field" style="grid-column:span 2">
                     <label class="form-label">Context Name <span style="color:var(--color-danger)">*</span></label>
-                    <input type="text" class="form-control" @bind="_newCtx.Name"
-                           placeholder="e.g. Corporate Biweekly" />
+                    <SfTextBox @bind-Value="_newCtx.Name" Placeholder="e.g. Corporate Biweekly" />
                 </div>
                 <div class="form-field">
                     <label class="form-label">Rate Type <span style="color:var(--color-danger)">*</span></label>
-                    <select class="form-control" @bind="_newCtx.RateTypeId">
-                        <option value="0">— select —</option>
-                        @foreach (var rt in _rateTypes)
-                        {
-                            <option value="@rt.Id">@rt.Label</option>
-                        }
-                    </select>
+                    <SfDropDownList TValue="int" TItem="LookupEntry"
+                                    DataSource="@_rateTypes"
+                                    @bind-Value="_newCtx.RateTypeId"
+                                    Placeholder="— select —" Width="100%">
+                        <DropDownListFieldSettings Value="Id" Text="Label" />
+                    </SfDropDownList>
                 </div>
                 <div class="form-field">
                     <label class="form-label">Pay Frequency <span style="color:var(--color-danger)">*</span></label>
-                    <select class="form-control" @bind="_newCtx.PayFrequencyId">
-                        <option value="0">— select —</option>
-                        @foreach (var f in _frequencies)
-                        {
-                            <option value="@f.Id">@f.Label</option>
-                        }
-                    </select>
+                    <SfDropDownList TValue="int" TItem="LookupEntry"
+                                    DataSource="@_frequencies"
+                                    @bind-Value="_newCtx.PayFrequencyId"
+                                    Placeholder="— select —" Width="100%">
+                        <DropDownListFieldSettings Value="Id" Text="Label" />
+                    </SfDropDownList>
                 </div>
                 <div class="form-field">
                     <label class="form-label">Effective Start Date <span style="color:var(--color-danger)">*</span></label>
-                    <input type="date" class="form-control" @bind="_newCtx.EffectiveStartDate" />
+                    <SfDatePicker TValue="DateOnly" @bind-Value="_newCtx.EffectiveStartDate"
+                                  Placeholder="MM/DD/YYYY" Width="100%" />
                 </div>
             </div>
 
@@ -127,43 +128,41 @@
                     {
                         <div class="form-field">
                             <label class="form-label">Pay Date Offset (days after period end)</label>
-                            <input type="number" class="form-control" @bind="_newCtx.PayDateOffsetDays" min="1" max="30" />
+                            <SfNumericTextBox TValue="int" @bind-Value="_newCtx.PayDateOffsetDays" Min="1" Max="30" Width="100%" />
                         </div>
                     }
                     <div class="form-field">
                         <label class="form-label">Input Cutoff (days before pay date)</label>
-                        <input type="number" class="form-control" @bind="_newCtx.CutoffOffsetDays" min="1" max="30" />
+                        <SfNumericTextBox TValue="int" @bind-Value="_newCtx.CutoffOffsetDays" Min="1" Max="30" Width="100%" />
                     </div>
                     @if (newFreqCode is "WEEKLY" or "BIWEEKLY")
                     {
                         <div class="form-field">
                             <label class="form-label">53rd/27th Period Policy</label>
-                            <select class="form-control" @bind="_newCtx.ExtraPeriodPolicy">
-                                <option value="EXTRA_SPECIAL">Treat as special case (recommended)</option>
-                                <option value="ADJUST_ALL">Adjust all checks (÷ 27)</option>
-                                <option value="PER_EMPLOYEE">HR decides per employee</option>
-                            </select>
+                            <SfDropDownList TValue="string" TItem="FilterOption"
+                                            DataSource="@_extraPeriodOptions"
+                                            @bind-Value="_newCtx.ExtraPeriodPolicy"
+                                            Width="100%">
+                                <DropDownListFieldSettings Value="Value" Text="Label" />
+                            </SfDropDownList>
                         </div>
                     }
                     <div class="form-field">
                         <label class="form-label">OT Weekly Threshold (hrs)</label>
-                        <input type="number" class="form-control" @bind="_newCtx.OtWeeklyThresholdHours"
-                               min="1" max="168" step="0.5" />
+                        <SfNumericTextBox TValue="decimal" @bind-Value="_newCtx.OtWeeklyThresholdHours"
+                                         Min="1" Max="168" Step="0.5m" Width="100%" />
                         <span style="font-size:var(--font-size-sm);color:#6B7280">
                             FLSA standard is 40.00. Override only if this payroll group has a lower company-configured threshold than the legal entity default.
                         </span>
                     </div>
                     <div class="form-field">
                         <label class="form-label">Workweek Start Day</label>
-                        <select class="form-control" @bind="_newCtx.WorkweekStartDay">
-                            <option value="0">Sunday</option>
-                            <option value="1">Monday</option>
-                            <option value="2">Tuesday</option>
-                            <option value="3">Wednesday</option>
-                            <option value="4">Thursday</option>
-                            <option value="5">Friday</option>
-                            <option value="6">Saturday</option>
-                        </select>
+                        <SfDropDownList TValue="int" TItem="IntOption"
+                                        DataSource="@_weekdayOptions"
+                                        @bind-Value="_newCtx.WorkweekStartDay"
+                                        Width="100%">
+                            <DropDownListFieldSettings Value="Value" Text="Label" />
+                        </SfDropDownList>
                         <span style="font-size:var(--font-size-sm);color:#6B7280">
                             Pre-populated from the legal entity default. FLSA workweek anchor — every non-exempt employee in this group uses this day.
                         </span>
@@ -189,12 +188,12 @@
     {
         <div class="filter-row" style="margin-bottom:var(--space-4)">
             <label class="filter-label">Status</label>
-            <select class="filter-select" @bind="_statusFilter">
-                <option value="">All</option>
-                <option value="ACTIVE">Active</option>
-                <option value="INACTIVE">Inactive</option>
-                <option value="CLOSED">Closed</option>
-            </select>
+            <SfDropDownList TValue="string" TItem="FilterOption"
+                            DataSource="@_statusOptions"
+                            @bind-Value="_statusFilter"
+                            Width="160px">
+                <DropDownListFieldSettings Value="Value" Text="Label" />
+            </SfDropDownList>
         </div>
     }
 
@@ -223,43 +222,59 @@
         }
         else
         {
-            <table class="data-table">
-                <thead>
-                    <tr>
-                        <th>Code</th>
-                        <th>Name</th>
-                        <th>Pay Frequency</th>
-                        <th>Effective From</th>
-                        <th>Effective To</th>
-                        <th>Status</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach (var ctx in visible)
-                    {
-                        <tr>
-                            <td style="font-family:monospace;font-weight:var(--font-weight-medium)">@ctx.PayrollContextCode</td>
-                            <td>
-                                <a href="/payroll/calendar/@ctx.PayrollContextId" class="table-link">
-                                    @ctx.PayrollContextName
-                                </a>
-                            </td>
-                            <td>@FrequencyLabel(ctx.PayFrequencyId)</td>
-                            <td>@ctx.EffectiveStartDate.ToString("yyyy-MM-dd")</td>
-                            <td>@(ctx.EffectiveEndDate?.ToString("yyyy-MM-dd") ?? "—")</td>
-                            <td><span class="badge @StatusClass(ctx.ContextStatus)">@ctx.ContextStatus</span></td>
-                            <td class="action-cell">
-                                <a href="/payroll/calendar/@ctx.PayrollContextId" class="btn-link">View</a>
-                            </td>
-                        </tr>
-                    }
-                </tbody>
-            </table>
+            <SfGrid DataSource="@visible" AllowSorting="true" AllowPaging="true" CssClass="e-gridhover">
+                <GridPageSettings PageSize="25" />
+                <GridColumns>
+                    <GridColumn Field="PayrollContextCode" HeaderText="Code" Width="120">
+                        <Template>
+                            @{ var ctx = (PayrollContext)context; }
+                            <span style="font-family:monospace;font-weight:var(--font-weight-medium)">@ctx.PayrollContextCode</span>
+                        </Template>
+                    </GridColumn>
+                    <GridColumn Field="PayrollContextName" HeaderText="Name" Width="200">
+                        <Template>
+                            @{ var ctx = (PayrollContext)context; }
+                            <a href="/payroll/calendar/@ctx.PayrollContextId" class="table-link">@ctx.PayrollContextName</a>
+                        </Template>
+                    </GridColumn>
+                    <GridColumn Field="PayFrequencyId" HeaderText="Pay Frequency" Width="150">
+                        <Template>
+                            @{ var ctx = (PayrollContext)context; }
+                            @FrequencyLabel(ctx.PayFrequencyId)
+                        </Template>
+                    </GridColumn>
+                    <GridColumn Field="EffectiveStartDate" HeaderText="Effective From" Width="140" Format="yyyy-MM-dd" />
+                    <GridColumn Field="EffectiveEndDate" HeaderText="Effective To" Width="130">
+                        <Template>
+                            @{ var ctx = (PayrollContext)context; }
+                            @(ctx.EffectiveEndDate?.ToString("yyyy-MM-dd") ?? "—")
+                        </Template>
+                    </GridColumn>
+                    <GridColumn Field="ContextStatus" HeaderText="Status" Width="120">
+                        <Template>
+                            @{ var ctx = (PayrollContext)context; }
+                            <span class="badge @StatusClass(ctx.ContextStatus)">@ctx.ContextStatus</span>
+                        </Template>
+                    </GridColumn>
+                    <GridColumn HeaderText="Actions" Width="90" TextAlign="TextAlign.Right">
+                        <Template>
+                            @{ var ctx = (PayrollContext)context; }
+                            <a href="/payroll/calendar/@ctx.PayrollContextId" class="btn-link">View</a>
+                        </Template>
+                    </GridColumn>
+                </GridColumns>
+            </SfGrid>
         }
     }
 
 </div>
+
+<style>
+    .stat-card--total    { border-top: 4px solid var(--module-payroll); }
+    .stat-card--active   { border-top: 4px solid var(--color-success); }
+    .stat-card--inactive { border-top: 4px solid var(--color-warning); }
+    .stat-card--closed   { border-top: 4px solid #9CA3AF; }
+</style>
 
 @code {
     private List<PayrollContext> _all         = [];
@@ -390,6 +405,28 @@
         catch (Exception ex) { _contextError = ex.Message; }
         finally { _submitting = false; }
     }
+
+    private record FilterOption(string Value, string Label);
+    private static readonly List<FilterOption> _statusOptions =
+    [
+        new("",         "All"),
+        new("ACTIVE",   "Active"),
+        new("INACTIVE", "Inactive"),
+        new("CLOSED",   "Closed"),
+    ];
+    private static readonly List<FilterOption> _extraPeriodOptions =
+    [
+        new("EXTRA_SPECIAL", "Treat as special case (recommended)"),
+        new("ADJUST_ALL",    "Adjust all checks (÷ 27)"),
+        new("PER_EMPLOYEE",  "HR decides per employee"),
+    ];
+
+    private record IntOption(int Value, string Label);
+    private static readonly List<IntOption> _weekdayOptions =
+    [
+        new(0, "Sunday"), new(1, "Monday"), new(2, "Tuesday"),
+        new(3, "Wednesday"), new(4, "Thursday"), new(5, "Friday"), new(6, "Saturday"),
+    ];
 
     private string FrequencyLabel(int id)
         => _frequencies.FirstOrDefault(f => f.Id == id)?.Label ?? id.ToString();

@@ -104,7 +104,7 @@ public sealed class BenefitsModule : IPlatformModule
         };
         yield return new MenuContribution
         {
-            Label        = "Deduction Codes",
+            Label        = "Benefit Plans",
             Href         = "/benefits/codes",
             Icon         = "BenefitsIcon",
             SortOrder    = 1,

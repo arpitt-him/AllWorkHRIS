@@ -12,6 +12,10 @@
 @inject AuthenticationStateProvider AuthState
 @inject NavigationManager           Nav
 @inject IHrisSessionState           SessionState
+@using Syncfusion.Blazor.Grids
+@using Syncfusion.Blazor.Inputs
+@using Syncfusion.Blazor.DropDowns
+@using Syncfusion.Blazor.Calendars
 
 <PageTitle>Pay Calendar Detail — AllWork HRIS</PageTitle>
 
@@ -40,7 +44,7 @@
                 @if (!_showDeleteConfirm && !_showGenerateForm && !_showClearConfirm)
                 {
                     <button class="btn-secondary"
-                            style="border:1px solid var(--color-danger);color:var(--color-danger);border-radius:var(--radius-md);padding:var(--space-2) var(--space-4);font-size:var(--font-size-sm)"
+                            style="border:1px solid #DC2626;color:#DC2626;border-radius:var(--radius-md);padding:var(--space-2) var(--space-4);font-size:var(--font-size-sm)"
                             @onclick="ShowDeleteConfirmAsync">
                         Delete Context
                     </button>
@@ -113,19 +117,14 @@
         @* Year selector + Generate button *@
         <div class="filter-row" style="margin-bottom:var(--space-4)">
             <label class="filter-label">Year</label>
-            <select class="filter-select" value="@_selectedYear" @onchange="OnYearChangedAsync">
-                @for (int y = TemporalContext.GetOperativeDate().Year + 1; y >= TemporalContext.GetOperativeDate().Year - 3; y--)
-                {
-                    <option value="@y">@y</option>
-                }
-            </select>
+            <SfDropDownList TValue="int" TItem="YearOption" DataSource="@_yearOptions" @bind-Value="_selectedYear" Width="120px">
+                <DropDownListFieldSettings Value="Value" Text="Label" />
+                <DropDownListEvents TValue="int" TItem="YearOption" ValueChange="OnYearChangedAsync" />
+            </SfDropDownList>
             <label class="filter-label" style="margin-left:var(--space-4)">Status</label>
-            <select class="filter-select" @bind="_periodStatusFilter">
-                <option value="">All</option>
-                <option value="OPEN">Open</option>
-                <option value="CLOSED">Closed</option>
-                <option value="LOCKED">Locked</option>
-            </select>
+            <SfDropDownList TValue="string" TItem="FilterOption" DataSource="@_statusOptions" @bind-Value="_periodStatusFilter" Width="140px">
+                <DropDownListFieldSettings Value="Value" Text="Label" />
+            </SfDropDownList>
             @if (!_showGenerateForm && !_showClearConfirm)
             {
                 <div style="margin-left:auto;display:flex;gap:var(--space-2)">
@@ -134,8 +133,8 @@
                     </button>
                     @if (_yearPeriods.Count > 0)
                     {
-                        <button class="btn-danger"
-                                style="border:1px solid var(--color-danger);border-radius:var(--radius-md);padding:var(--space-2) var(--space-4)"
+                        <button class="btn-secondary"
+                                style="border:1px solid var(--module-ta);color:var(--module-ta);border-radius:var(--radius-md);padding:var(--space-2) var(--space-4)"
                                 @onclick="() => _showClearConfirm = true">
                             Clear @_selectedYear Calendar
                         </button>
@@ -197,8 +196,9 @@
                     <div class="form-grid form-grid-3" style="margin-bottom:var(--space-4)">
                         <div class="form-field">
                             <label class="form-label">First Period Start Date <span style="color:var(--color-danger)">*</span></label>
-                            <input type="date" class="form-control" @bind="_genForm.FirstPeriodStart"
-                                   @bind:after="StateHasChanged" />
+                            <SfDatePicker TValue="DateOnly" @bind-Value="_genForm.FirstPeriodStart" Placeholder="MM/DD/YYYY">
+                                <DatePickerEvents TValue="DateOnly" ValueChange="@(_ => StateHasChanged())" />
+                            </SfDatePicker>
                             <span style="font-size:var(--font-size-sm);color:#6B7280">Establishes the anchor — all @GetPeriodsPerYear(freqCode) periods derive from this date.</span>
                         </div>
                     </div>
@@ -234,17 +234,17 @@
                         {
                             <div class="form-field">
                                 <label class="form-label">Pay Date Offset (days after period end)</label>
-                                <input type="number" class="form-control" @bind="_genForm.PayDateOffsetDays" min="1" max="30" />
+                                <SfNumericTextBox TValue="int" @bind-Value="_genForm.PayDateOffsetDays" Min="1" Max="30" />
                             </div>
                         }
                     }
                     <div class="form-field">
                         <label class="form-label">Input Cutoff (days before pay date)</label>
-                        <input type="number" class="form-control" @bind="_genForm.CutoffOffsetDays" min="1" max="30" />
+                        <SfNumericTextBox TValue="int" @bind-Value="_genForm.CutoffOffsetDays" Min="1" Max="30" />
                     </div>
                     <div class="form-field">
                         <label class="form-label">Run Lead (banking days before pay date)</label>
-                        <input type="number" class="form-control" @bind="_genForm.CalculationLeadDays" min="3" max="30" />
+                        <SfNumericTextBox TValue="int" @bind-Value="_genForm.CalculationLeadDays" Min="3" Max="30" />
                         <span style="font-size:var(--font-size-sm);color:#6B7280">Transmission is always 2 banking days before pay date.</span>
                     </div>
                 </div>
@@ -299,78 +299,61 @@
                 ? _yearPeriods
                 : _yearPeriods.Where(p => p.CalendarStatus == _periodStatusFilter).ToList();
 
-            <table class="data-table" style="table-layout:fixed">
-                <colgroup>
-                    <col style="width:5rem" />
-                    <col style="width:8.5rem" />
-                    <col style="width:8.5rem" />
-                    <col style="width:8.5rem" />
-                    <col style="width:11rem" />
-                    <col style="width:8.5rem" />
-                    <col style="width:6.5rem" />
-                </colgroup>
-                <thead>
-                    <tr>
-                        <th>Period</th>
-                        <th>Start Date</th>
-                        <th>End Date</th>
-                        <th>Cutoff</th>
-                        <th>Run Date</th>
-                        <th>Pay Date</th>
-                        <th>Status</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach (var p in visible.OrderBy(p => p.PeriodNumber))
-                    {
-                        <tr>
-                            <td style="font-weight:var(--font-weight-medium);white-space:nowrap">P@(p.PeriodNumber)</td>
-                            <td style="white-space:nowrap">@p.PeriodStartDate.ToString("yyyy-MM-dd")</td>
-                            <td style="white-space:nowrap">@p.PeriodEndDate.ToString("yyyy-MM-dd")</td>
-                            <td style="white-space:nowrap">@p.InputCutoffDate.ToString("yyyy-MM-dd")</td>
-                            <td>
-                                @if (_editRunDatePeriodId == p.PeriodId)
+            <SfGrid DataSource="@visible.OrderBy(p => p.PeriodNumber).ToList()" AllowSorting="true" AllowPaging="true" CssClass="e-gridhover">
+                <GridPageSettings PageSize="25" />
+                <GridColumns>
+                    <GridColumn Field="PeriodNumber" HeaderText="Period" Width="90">
+                        <Template>@{ var p = (PayrollPeriod)context; }<span style="font-weight:var(--font-weight-medium)">P@(p.PeriodNumber)</span></Template>
+                    </GridColumn>
+                    <GridColumn Field="PeriodStartDate" HeaderText="Start Date" Width="120">
+                        <Template>@{ var p = (PayrollPeriod)context; }@p.PeriodStartDate.ToString("yyyy-MM-dd")</Template>
+                    </GridColumn>
+                    <GridColumn Field="PeriodEndDate" HeaderText="End Date" Width="120">
+                        <Template>@{ var p = (PayrollPeriod)context; }@p.PeriodEndDate.ToString("yyyy-MM-dd")</Template>
+                    </GridColumn>
+                    <GridColumn Field="InputCutoffDate" HeaderText="Cutoff" Width="120">
+                        <Template>@{ var p = (PayrollPeriod)context; }@p.InputCutoffDate.ToString("yyyy-MM-dd")</Template>
+                    </GridColumn>
+                    <GridColumn HeaderText="Run Date" Width="220">
+                        <Template>
+                            @{ var p = (PayrollPeriod)context; }
+                            @if (_editRunDatePeriodId == p.PeriodId)
+                            {
+                                <div style="display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap">
+                                    <input type="date" class="form-control" style="width:auto;padding:2px 6px"
+                                           @bind="_editRunDateValue" @bind:format="yyyy-MM-dd" />
+                                    <button class="btn-primary"
+                                            style="padding:2px 10px;font-size:var(--font-size-sm)"
+                                            @onclick="() => SaveRunDateAsync(p.PeriodId)"
+                                            disabled="@_editRunDateSaving">
+                                        @(_editRunDateSaving ? "…" : "Save")
+                                    </button>
+                                    <button class="btn-secondary"
+                                            style="padding:2px 10px;font-size:var(--font-size-sm)"
+                                            @onclick="CancelEditRunDate">Cancel</button>
+                                </div>
+                                @if (_editRunDateError is not null)
                                 {
-                                    <div style="display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap">
-                                        <input type="date" class="form-control" style="width:auto;padding:2px 6px"
-                                               @bind="_editRunDateValue" @bind:format="yyyy-MM-dd" />
-                                        <button class="btn-primary"
-                                                style="padding:2px 10px;font-size:var(--font-size-sm)"
-                                                @onclick="() => SaveRunDateAsync(p.PeriodId)"
-                                                disabled="@_editRunDateSaving">
-                                            @(_editRunDateSaving ? "…" : "Save")
-                                        </button>
-                                        <button class="btn-secondary"
-                                                style="padding:2px 10px;font-size:var(--font-size-sm)"
-                                                @onclick="CancelEditRunDate">Cancel</button>
-                                    </div>
-                                    @if (_editRunDateError is not null)
-                                    {
-                                        <div class="alert-error" style="margin-top:2px;font-size:var(--font-size-sm)">@_editRunDateError</div>
-                                    }
+                                    <div class="alert-error" style="margin-top:2px;font-size:var(--font-size-sm)">@_editRunDateError</div>
                                 }
-                                else
-                                {
-                                    <span>@(p.CalculationDate?.ToString("yyyy-MM-dd") ?? "—")</span>
-                                    <button class="btn-link"
-                                            style="font-size:var(--font-size-sm);margin-left:var(--space-2)"
-                                            @onclick="() => BeginEditRunDate(p)">edit</button>
-                                }
-                            </td>
-                            <td>@p.PayDate.ToString("yyyy-MM-dd")</td>
-                            <td><span class="badge @PeriodStatusClass(p.CalendarStatus)">@p.CalendarStatus</span></td>
-                        </tr>
-                    }
-                </tbody>
-                <tfoot>
-                    <tr style="background:#F9FAFB">
-                        <td colspan="6" style="padding:var(--space-3) var(--space-4);font-size:var(--font-size-sm);color:#6B7280">
-                            Showing @visible.Count of @_yearPeriods.Count period(s) for @_selectedYear
-                        </td>
-                        <td></td>
-                    </tr>
-                </tfoot>
-            </table>
+                            }
+                            else
+                            {
+                                <span>@(p.CalculationDate?.ToString("yyyy-MM-dd") ?? "—")</span>
+                                <button class="btn-link"
+                                        style="font-size:var(--font-size-sm);margin-left:var(--space-2)"
+                                        @onclick="() => BeginEditRunDate(p)">edit</button>
+                            }
+                        </Template>
+                    </GridColumn>
+                    <GridColumn Field="PayDate" HeaderText="Pay Date" Width="120">
+                        <Template>@{ var p = (PayrollPeriod)context; }@p.PayDate.ToString("yyyy-MM-dd")</Template>
+                    </GridColumn>
+                    <GridColumn HeaderText="Status" Width="100">
+                        <Template>@{ var p = (PayrollPeriod)context; }<span class="badge @PeriodStatusClass(p.CalendarStatus)">@p.CalendarStatus</span></Template>
+                    </GridColumn>
+                </GridColumns>
+            </SfGrid>
         }
     }
 
@@ -378,6 +361,19 @@
 
 @code {
     [Parameter] public Guid ContextId { get; set; }
+
+    private record FilterOption(string Value, string Label);
+    private record YearOption(int Value, string Label);
+
+    private List<YearOption> _yearOptions = [];
+
+    private static readonly List<FilterOption> _statusOptions =
+    [
+        new("",       "All"),
+        new("OPEN",   "Open"),
+        new("CLOSED", "Closed"),
+        new("LOCKED", "Locked"),
+    ];
 
     private PayrollContext?  _context;
     private List<PayrollPeriod> _allPeriods  = [];
@@ -409,7 +405,12 @@
 
     protected override async Task OnInitializedAsync()
     {
-        _selectedYear = TemporalContext.GetOperativeDate().Year;
+        var currentYear = TemporalContext.GetOperativeDate().Year;
+        _selectedYear = currentYear;
+        _yearOptions = Enumerable.Range(currentYear - 3, 5)
+            .Select(y => new YearOption(y, y.ToString()))
+            .OrderByDescending(y => y.Value)
+            .ToList();
 
         var auth = await AuthState.GetAuthenticationStateAsync();
         _currentUserId = Guid.TryParse(auth.User.FindFirst("sub")?.Value, out var g) ? g : Guid.Empty;
@@ -439,14 +440,11 @@
         _periodLoading = false;
     }
 
-    private async Task OnYearChangedAsync(ChangeEventArgs e)
+    private async Task OnYearChangedAsync(ChangeEventArgs<int, YearOption> args)
     {
-        if (int.TryParse(e.Value?.ToString(), out var year))
-        {
-            _selectedYear     = year;
-            _showGenerateForm = false;
-            await LoadPeriodsAsync();
-        }
+        _selectedYear     = args.Value;
+        _showGenerateForm = false;
+        await LoadPeriodsAsync();
     }
 
     private async Task ClearYearAsync()

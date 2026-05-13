@@ -10,6 +10,10 @@
 @using AllWorkHRIS.Host.Hris.Services
 @using AllWorkHRIS.Host.Hris.Domain
 @using AllWorkHRIS.Core.Temporal
+@using Syncfusion.Blazor.Grids
+@using Syncfusion.Blazor.Calendars
+@using Syncfusion.Blazor.DropDowns
+@using Syncfusion.Blazor.Inputs
 @inject IJobService           JobService
 @inject IPositionService      PositionService
 @inject IOrgStructureService  OrgStructureService
@@ -27,11 +31,11 @@
 
     @* ── STAT CARDS ── *@
     <div class="stat-cards">
-        <div class="stat-card">
+        <div class="stat-card stat-card--jobs">
             <span class="stat-label">Active Jobs</span>
             <span class="stat-value">@_jobs.Count</span>
         </div>
-        <div class="stat-card">
+        <div class="stat-card stat-card--positions">
             <span class="stat-label">Active Positions</span>
             <span class="stat-value">@_positions.Count</span>
         </div>
@@ -61,47 +65,41 @@
                     <div class="form-grid">
                         <div class="form-field">
                             <label class="form-label">Job Code <span class="required">*</span></label>
-                            <input type="text" class="form-input" @bind="_jobCode"
-                                   placeholder="e.g. JOB-ACCT" maxlength="50" />
+                            <SfTextBox @bind-Value="_jobCode" Placeholder="e.g. JOB-ACCT" />
                         </div>
                         <div class="form-field">
                             <label class="form-label">Job Title <span class="required">*</span></label>
-                            <input type="text" class="form-input" @bind="_jobTitle"
-                                   placeholder="e.g. Staff Accountant" maxlength="200" />
+                            <SfTextBox @bind-Value="_jobTitle" Placeholder="e.g. Staff Accountant" />
                         </div>
                         <div class="form-field">
                             <label class="form-label">Job Family</label>
-                            <input type="text" class="form-input" @bind="_jobFamily"
-                                   placeholder="e.g. Finance" maxlength="100" />
+                            <SfTextBox @bind-Value="_jobFamily" Placeholder="e.g. Finance" />
                         </div>
                         <div class="form-field">
                             <label class="form-label">Job Level</label>
-                            <input type="text" class="form-input" @bind="_jobLevel"
-                                   placeholder="e.g. Individual Contributor" maxlength="100" />
+                            <SfTextBox @bind-Value="_jobLevel" Placeholder="e.g. Individual Contributor" />
                         </div>
                         <div class="form-field">
                             <label class="form-label">FLSA Classification <span class="required">*</span></label>
-                            <select class="form-select" @bind="_jobFlsaCode">
-                                <option value="">Select…</option>
-                                @foreach (var e in LookupCache.GetAll(LookupTables.FlsaClassification))
-                                {
-                                    <option value="@e.Code">@e.Label</option>
-                                }
-                            </select>
+                            <SfDropDownList TValue="string" TItem="LookupEntry"
+                                            Placeholder="Select…"
+                                            DataSource="@LookupCache.GetAll(LookupTables.FlsaClassification)"
+                                            @bind-Value="_jobFlsaCode">
+                                <DropDownListFieldSettings Value="Code" Text="Label" />
+                            </SfDropDownList>
                         </div>
                         <div class="form-field">
                             <label class="form-label">EEO Category <span class="required">*</span></label>
-                            <select class="form-select" @bind="_jobEeoCode">
-                                <option value="">Select…</option>
-                                @foreach (var e in LookupCache.GetAll(LookupTables.EeoCategory))
-                                {
-                                    <option value="@e.Code">@e.Label</option>
-                                }
-                            </select>
+                            <SfDropDownList TValue="string" TItem="LookupEntry"
+                                            Placeholder="Select…"
+                                            DataSource="@LookupCache.GetAll(LookupTables.EeoCategory)"
+                                            @bind-Value="_jobEeoCode">
+                                <DropDownListFieldSettings Value="Code" Text="Label" />
+                            </SfDropDownList>
                         </div>
                         <div class="form-field">
                             <label class="form-label">Effective Date <span class="required">*</span></label>
-                            <input type="date" class="form-input" @bind="_jobEffectiveDate" />
+                            <SfDatePicker TValue="DateTime" @bind-Value="_jobEffectiveDate" />
                         </div>
                     </div>
                     @if (_jobError is not null)
@@ -132,33 +130,28 @@
         }
         else
         {
-            <table class="data-table">
-                <thead>
-                    <tr>
-                        <th>Code</th>
-                        <th>Title</th>
-                        <th>Family</th>
-                        <th>Level</th>
-                        <th>FLSA Classification</th>
-                        <th>EEO Category</th>
-                        <th>Effective Date</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach (var job in _jobs)
-                    {
-                        <tr>
-                            <td class="mono">@job.JobCode</td>
-                            <td>@job.JobTitle</td>
-                            <td>@(job.JobFamily ?? "—")</td>
-                            <td>@(job.JobLevel ?? "—")</td>
-                            <td>@Label(LookupTables.FlsaClassification, job.FlsaClassificationId)</td>
-                            <td>@Label(LookupTables.EeoCategory, job.EeoCategoryId)</td>
-                            <td>@job.EffectiveStartDate.ToString("yyyy-MM-dd")</td>
-                        </tr>
-                    }
-                </tbody>
-            </table>
+            <SfGrid TValue="Job" DataSource="@_jobs" AllowSorting="true" AllowPaging="true" CssClass="e-gridhover">
+                <GridPageSettings PageSize="25" />
+                <GridColumns>
+                    <GridColumn Field="JobCode" HeaderText="Code" Width="140" />
+                    <GridColumn Field="JobTitle" HeaderText="Title" />
+                    <GridColumn Field="JobFamily" HeaderText="Family">
+                        <Template>@(((Job)context).JobFamily ?? "—")</Template>
+                    </GridColumn>
+                    <GridColumn Field="JobLevel" HeaderText="Level">
+                        <Template>@(((Job)context).JobLevel ?? "—")</Template>
+                    </GridColumn>
+                    <GridColumn Field="FlsaClassificationId" HeaderText="FLSA Classification">
+                        <Template>@Label(LookupTables.FlsaClassification, ((Job)context).FlsaClassificationId)</Template>
+                    </GridColumn>
+                    <GridColumn Field="EeoCategoryId" HeaderText="EEO Category">
+                        <Template>@Label(LookupTables.EeoCategory, ((Job)context).EeoCategoryId)</Template>
+                    </GridColumn>
+                    <GridColumn Field="EffectiveStartDate" HeaderText="Effective Date" Width="130">
+                        <Template>@(((Job)context).EffectiveStartDate.ToString("yyyy-MM-dd"))</Template>
+                    </GridColumn>
+                </GridColumns>
+            </SfGrid>
         }
     </div>
 
@@ -187,37 +180,36 @@
                     <div class="form-grid">
                         <div class="form-field">
                             <label class="form-label">Job <span class="required">*</span></label>
-                            <select class="form-select" @bind="_posJobId">
-                                <option value="">Select job…</option>
-                                @foreach (var job in _jobs)
-                                {
-                                    <option value="@job.JobId">@job.JobTitle (@job.JobCode)</option>
-                                }
-                            </select>
+                            <SfDropDownList TValue="Guid" TItem="Job"
+                                            Placeholder="Select job…"
+                                            DataSource="@_jobs"
+                                            @bind-Value="_posJobId">
+                                <DropDownListFieldSettings Value="JobId" Text="JobTitle" />
+                            </SfDropDownList>
                         </div>
                         <div class="form-field">
                             <label class="form-label">Department <span class="required">*</span></label>
-                            <select class="form-select" @bind="_posDeptId">
-                                <option value="">Select department…</option>
-                                @foreach (var dept in _departments)
-                                {
-                                    <option value="@dept.OrgUnitId">@dept.OrgUnitName</option>
-                                }
-                            </select>
+                            <SfDropDownList TValue="Guid" TItem="OrgUnit"
+                                            Placeholder="Select department…"
+                                            DataSource="@_departments"
+                                            @bind-Value="_posDeptId">
+                                <DropDownListFieldSettings Value="OrgUnitId" Text="OrgUnitName" />
+                            </SfDropDownList>
                         </div>
                         <div class="form-field">
                             <label class="form-label">Position Title (optional)</label>
-                            <input type="text" class="form-input" @bind="_posTitle"
-                                   placeholder="Leave blank to use job title" maxlength="200" />
+                            <SfTextBox @bind-Value="_posTitle"
+                                       Placeholder="Leave blank to use job title"
+                                       MaxLength="200" />
                         </div>
                         <div class="form-field">
                             <label class="form-label">Headcount Budget</label>
-                            <input type="number" class="form-input" @bind="_posHeadcount"
-                                   min="1" max="999" placeholder="e.g. 2" />
+                            <SfNumericTextBox TValue="int?" @bind-Value="_posHeadcount"
+                                              Min="1" Max="999" Placeholder="e.g. 2" />
                         </div>
                         <div class="form-field">
                             <label class="form-label">Effective Date <span class="required">*</span></label>
-                            <input type="date" class="form-input" @bind="_posEffectiveDate" />
+                            <SfDatePicker TValue="DateTime" @bind-Value="_posEffectiveDate" />
                         </div>
                     </div>
                     @if (_posError is not null)
@@ -248,35 +240,34 @@
         }
         else
         {
-            <table class="data-table">
-                <thead>
-                    <tr>
-                        <th>Job</th>
-                        <th>Department</th>
-                        <th>Position Title</th>
-                        <th>Headcount Budget</th>
-                        <th>Status</th>
-                        <th>Effective Date</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach (var pos in _positions)
-                    {
-                        <tr>
-                            <td>@JobTitle(pos.JobId)</td>
-                            <td>@DeptName(pos.OrgUnitId)</td>
-                            <td>@(pos.PositionTitle ?? "—")</td>
-                            <td>@(pos.HeadcountBudget?.ToString() ?? "—")</td>
-                            <td>
-                                <span class="status-badge status-@StatusCode(LookupTables.PositionStatus, pos.PositionStatusId)">
-                                    @Label(LookupTables.PositionStatus, pos.PositionStatusId)
-                                </span>
-                            </td>
-                            <td>@pos.EffectiveStartDate.ToString("yyyy-MM-dd")</td>
-                        </tr>
-                    }
-                </tbody>
-            </table>
+            <SfGrid TValue="Position" DataSource="@_positions" AllowSorting="true" AllowPaging="true" CssClass="e-gridhover">
+                <GridPageSettings PageSize="25" />
+                <GridColumns>
+                    <GridColumn Field="JobId" HeaderText="Job">
+                        <Template>@JobTitle(((Position)context).JobId)</Template>
+                    </GridColumn>
+                    <GridColumn Field="OrgUnitId" HeaderText="Department">
+                        <Template>@DeptName(((Position)context).OrgUnitId)</Template>
+                    </GridColumn>
+                    <GridColumn Field="PositionTitle" HeaderText="Position Title">
+                        <Template>@(((Position)context).PositionTitle ?? "—")</Template>
+                    </GridColumn>
+                    <GridColumn Field="HeadcountBudget" HeaderText="Headcount" Width="120">
+                        <Template>@(((Position)context).HeadcountBudget?.ToString() ?? "—")</Template>
+                    </GridColumn>
+                    <GridColumn Field="PositionStatusId" HeaderText="Status" Width="110">
+                        <Template>
+                            @{ var pos = (Position)context; }
+                            <span class="status-badge status-@StatusCode(LookupTables.PositionStatus, pos.PositionStatusId)">
+                                @Label(LookupTables.PositionStatus, pos.PositionStatusId)
+                            </span>
+                        </Template>
+                    </GridColumn>
+                    <GridColumn Field="EffectiveStartDate" HeaderText="Effective Date" Width="130">
+                        <Template>@(((Position)context).EffectiveStartDate.ToString("yyyy-MM-dd"))</Template>
+                    </GridColumn>
+                </GridColumns>
+            </SfGrid>
         }
     </div>
 
@@ -304,8 +295,8 @@
 
     // Position form
     private bool     _showPositionForm = false;
-    private string   _posJobId        = "";
-    private string   _posDeptId       = "";
+    private Guid     _posJobId;
+    private Guid     _posDeptId;
     private string   _posTitle        = "";
     private int?     _posHeadcount;
     private DateTime _posEffectiveDate;
@@ -399,8 +390,10 @@
     private async Task CreatePositionAsync()
     {
         _posError = null;
-        if (!Guid.TryParse(_posJobId, out var jobId))   { _posError = "Job is required.";        return; }
-        if (!Guid.TryParse(_posDeptId, out var deptId)) { _posError = "Department is required."; return; }
+        if (_posJobId == Guid.Empty)  { _posError = "Job is required.";        return; }
+        if (_posDeptId == Guid.Empty) { _posError = "Department is required."; return; }
+        var jobId  = _posJobId;
+        var deptId = _posDeptId;
 
         _posSaving = true;
         try
@@ -417,7 +410,9 @@
             await PositionService.CreatePositionAsync(command);
 
             _showPositionForm = false;
-            _posJobId = _posDeptId = _posTitle = "";
+            _posJobId  = Guid.Empty;
+            _posDeptId = Guid.Empty;
+            _posTitle  = "";
             _posHeadcount = null;
             if (SessionState.HasEntity)
                 _positions = (await PositionService.GetByLegalEntityAsync(SessionState.SelectedLegalEntityId!.Value)).ToList();
@@ -480,6 +475,9 @@
     }
 
     /* ---- Stat cards ---- */
+
+    .stat-card--jobs      { border-top: 4px solid var(--aw-teal); }
+    .stat-card--positions { border-top: 4px solid var(--aw-purple); }
 
     .stat-cards {
         display: flex;

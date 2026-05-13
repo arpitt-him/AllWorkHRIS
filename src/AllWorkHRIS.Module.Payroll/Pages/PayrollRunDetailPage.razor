@@ -5,6 +5,7 @@
 @implements IDisposable
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Components.Authorization
+@using Syncfusion.Blazor.Grids
 @inject IPayrollRunService              RunService
 @inject IPayrollContextRepository       ContextRepo
 @inject IEmployeePayrollResultRepository ResultRepo
@@ -144,7 +145,7 @@
                         </div>
                         <div class="detail-field">
                             <span class="detail-label">Net Pay</span>
-                            <span class="detail-value" style="color:var(--aw-teal);font-weight:var(--font-weight-semibold)">@_results.Sum(r => r.NetPayAmount).ToString("N2")</span>
+                            <span class="detail-value">@_results.Sum(r => r.NetPayAmount).ToString("N2")</span>
                         </div>
                     </div>
                 </div>
@@ -198,46 +199,81 @@
             }
             else
             {
-                <table class="data-table">
-                    <thead>
-                        <tr>
-                            <th>Employee</th>
-                            <th>Pay Period</th>
-                            <th style="text-align:right">Gross Pay</th>
-                            <th style="text-align:right">Deductions</th>
-                            <th style="text-align:right">Emp Tax</th>
-                            <th style="text-align:right">Er Contrib</th>
-                            <th style="text-align:right">Net Pay</th>
-                            <th>Status</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var r in _results.OrderBy(r => GetEmployeeName(r.EmploymentId)))
-                        {
-                            <tr>
-                                <td>@GetEmployeeName(r.EmploymentId)</td>
-                                <td>@r.PayPeriodStartDate.ToString("MM/dd")–@r.PayPeriodEndDate.ToString("MM/dd")</td>
-                                <td style="text-align:right">@r.GrossPayAmount.ToString("N2")</td>
-                                <td style="text-align:right">@r.TotalDeductionsAmount.ToString("N2")</td>
-                                <td style="text-align:right">@r.TotalEmployeeTaxAmount.ToString("N2")</td>
-                                <td style="text-align:right">@r.TotalEmployerContributionAmount.ToString("N2")</td>
-                                <td style="text-align:right;font-weight:var(--font-weight-semibold)">@r.NetPayAmount.ToString("N2")</td>
-                                <td><span class="badge @GetResultStatusClass(r.ResultStatusId)">@GetResultStatusLabel(r.ResultStatusId)</span></td>
-                            </tr>
-                        }
-                    </tbody>
-                    <tfoot>
-                        <tr style="background:#F9FAFB;font-weight:var(--font-weight-semibold)">
-                            <td colspan="2">Totals (@_results.Count employees)</td>
-                            <td style="text-align:right">@_results.Sum(r => r.GrossPayAmount).ToString("N2")</td>
-                            <td style="text-align:right">@_results.Sum(r => r.TotalDeductionsAmount).ToString("N2")</td>
-                            <td style="text-align:right">@_results.Sum(r => r.TotalEmployeeTaxAmount).ToString("N2")</td>
-                            <td style="text-align:right">@_results.Sum(r => r.TotalEmployerContributionAmount).ToString("N2")</td>
-                            <td style="text-align:right">@_results.Sum(r => r.NetPayAmount).ToString("N2")</td>
-                            <td></td>
-                        </tr>
-                    </tfoot>
-                </table>
+                <SfGrid DataSource="@_results" AllowSorting="true" AllowPaging="true" CssClass="e-gridhover">
+                    <GridPageSettings PageSize="25" />
+                    <GridColumns>
+                        <GridColumn Field="EmploymentId" HeaderText="Employee" Width="180">
+                            <Template>
+                                @{ var r = (EmployeePayrollResult)context; }
+                                @GetEmployeeName(r.EmploymentId)
+                            </Template>
+                        </GridColumn>
+                        <GridColumn Field="PayPeriodStartDate" HeaderText="Pay Period" Width="130">
+                            <Template>
+                                @{ var r = (EmployeePayrollResult)context; }
+                                @r.PayPeriodStartDate.ToString("MM/dd")–@r.PayPeriodEndDate.ToString("MM/dd")
+                            </Template>
+                        </GridColumn>
+                        <GridColumn Field="GrossPayAmount" HeaderText="Gross Pay" Width="110"
+                                    TextAlign="TextAlign.Right" Format="N2" />
+                        <GridColumn Field="TotalDeductionsAmount" HeaderText="Deductions" Width="110"
+                                    TextAlign="TextAlign.Right" Format="N2" />
+                        <GridColumn Field="TotalEmployeeTaxAmount" HeaderText="Emp Tax" Width="100"
+                                    TextAlign="TextAlign.Right" Format="N2" />
+                        <GridColumn Field="TotalEmployerContributionAmount" HeaderText="Er Contrib" Width="110"
+                                    TextAlign="TextAlign.Right" Format="N2" />
+                        <GridColumn Field="NetPayAmount" HeaderText="Net Pay" Width="110"
+                                    TextAlign="TextAlign.Right" Format="N2" />
+                        <GridColumn Field="ResultStatusId" HeaderText="Status" Width="110">
+                            <Template>
+                                @{ var r = (EmployeePayrollResult)context; }
+                                <span class="badge @GetResultStatusClass(r.ResultStatusId)">@GetResultStatusLabel(r.ResultStatusId)</span>
+                            </Template>
+                        </GridColumn>
+                    </GridColumns>
+                    <GridAggregates>
+                        <GridAggregate>
+                            <GridAggregateColumns>
+                                <GridAggregateColumn Field="EmploymentId" Type="AggregateType.Count">
+                                    <FooterTemplate>
+                                        @{ var agg = (AggregateTemplateContext)context; }
+                                        <span style="font-weight:600">Totals (@agg.Count employees)</span>
+                                    </FooterTemplate>
+                                </GridAggregateColumn>
+                                <GridAggregateColumn Field="GrossPayAmount" Type="AggregateType.Sum" Format="N2">
+                                    <FooterTemplate>
+                                        @{ var agg = (AggregateTemplateContext)context; }
+                                        <span style="font-weight:600">@agg.Sum</span>
+                                    </FooterTemplate>
+                                </GridAggregateColumn>
+                                <GridAggregateColumn Field="TotalDeductionsAmount" Type="AggregateType.Sum" Format="N2">
+                                    <FooterTemplate>
+                                        @{ var agg = (AggregateTemplateContext)context; }
+                                        <span style="font-weight:600">@agg.Sum</span>
+                                    </FooterTemplate>
+                                </GridAggregateColumn>
+                                <GridAggregateColumn Field="TotalEmployeeTaxAmount" Type="AggregateType.Sum" Format="N2">
+                                    <FooterTemplate>
+                                        @{ var agg = (AggregateTemplateContext)context; }
+                                        <span style="font-weight:600">@agg.Sum</span>
+                                    </FooterTemplate>
+                                </GridAggregateColumn>
+                                <GridAggregateColumn Field="TotalEmployerContributionAmount" Type="AggregateType.Sum" Format="N2">
+                                    <FooterTemplate>
+                                        @{ var agg = (AggregateTemplateContext)context; }
+                                        <span style="font-weight:600">@agg.Sum</span>
+                                    </FooterTemplate>
+                                </GridAggregateColumn>
+                                <GridAggregateColumn Field="NetPayAmount" Type="AggregateType.Sum" Format="N2">
+                                    <FooterTemplate>
+                                        @{ var agg = (AggregateTemplateContext)context; }
+                                        <span style="font-weight:600">@agg.Sum</span>
+                                    </FooterTemplate>
+                                </GridAggregateColumn>
+                            </GridAggregateColumns>
+                        </GridAggregate>
+                    </GridAggregates>
+                </SfGrid>
             }
         }
     }
@@ -417,8 +453,8 @@
     private static string GetStatusBadgeClass(int id) => id switch
     {
         3 or 7  => "badge-info",
-        4       => "badge-teal",
-        6 or 8  => "badge-success",
+        4 or 6  => "badge-teal",
+        8       => "badge-success",
         5       => "badge-warning",
         10      => "badge-error",
         _       => "badge-neutral"
@@ -432,7 +468,7 @@
 
     private static string GetResultStatusClass(int id) => id switch
     {
-        2  => "badge-teal",
+        1  => "badge-info",
         10 => "badge-error",
         _  => "badge-neutral"
     };

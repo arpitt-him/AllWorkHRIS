@@ -4,6 +4,10 @@
 @attribute [Authorize(Roles = "Employee,TimeAdmin")]
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Components.Authorization
+@using Syncfusion.Blazor.Grids
+@using Syncfusion.Blazor.Inputs
+@using Syncfusion.Blazor.DropDowns
+@using Syncfusion.Blazor.Calendars
 @inject AuthenticationStateProvider AuthProvider
 @inject TimeAttendanceQueryService  QueryService
 @inject ITimeEntryService           TimeEntryService
@@ -15,14 +19,13 @@
     <div class="page-header" style="display:flex;align-items:center;gap:var(--space-4,1rem);flex-wrap:wrap;">
         <h2 class="page-title" style="margin:0;">My Timecard</h2>
 
-        <select class="form-input" style="width:300px;" value="@_selectedPeriodId"
-                @onchange="OnPeriodChanged">
-            <option value="">— select period —</option>
-            @foreach (var p in _periods)
-            {
-                <option value="@p.PeriodId">@p.Label</option>
-            }
-        </select>
+        <SfDropDownList TValue="Guid" TItem="TaPeriodOption" DataSource="@_periods.ToList()"
+                        Value="@_selectedPeriodId" Placeholder="— select period —"
+                        Width="300px">
+            <DropDownListFieldSettings Value="PeriodId" Text="Label" />
+            <DropDownListEvents TValue="Guid" TItem="TaPeriodOption"
+                                ValueChange="OnPeriodChangedSf" />
+        </SfDropDownList>
 
         @if (_selectedPeriod is not null)
         {
@@ -54,52 +57,53 @@
 
         @* ── Entry table ─────────────────────────────────────────────────── *@
         <div class="card" style="margin-bottom:var(--space-5,1.25rem);">
-            <table class="data-table">
-                <thead>
-                    <tr>
-                        <th>Date</th>
-                        <th>Category</th>
-                        <th>Hours</th>
-                        <th>Start</th>
-                        <th>End</th>
-                        <th>Status</th>
-                        <th>Notes</th>
-                        <th style="width:80px;"></th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @if (!_entries.Any())
-                    {
-                        <tr>
-                            <td colspan="8" style="text-align:center;color:#9ca3af;padding:2rem;">
-                                No entries yet. Click <em>+ Add Entry</em> to get started.
-                            </td>
-                        </tr>
-                    }
-                    @foreach (var entry in _entries)
-                    {
-                        <tr class="data-row @(entry.StatusCode == "REJECTED" ? "data-row--rejected" : "")">
-                            <td>@entry.WorkDate.ToString("ddd MMM d")</td>
-                            <td>@CategoryLabel(entry.TimeCategoryCode)</td>
-                            <td>@entry.Duration.ToString("0.##")</td>
-                            <td>@(entry.StartTime?.ToString("h:mm tt") ?? "—")</td>
-                            <td>@(entry.EndTime?.ToString("h:mm tt") ?? "—")</td>
-                            <td><span class="badge @StatusBadgeClass(entry.StatusCode)">@entry.StatusCode</span></td>
-                            <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
-                                title="@(entry.RejectionReason ?? entry.Notes)">
-                                @if (entry.StatusCode == "REJECTED" && entry.RejectionReason is not null)
+            @if (!_entries.Any())
+            {
+                <div class="empty-state" style="padding:2rem;text-align:center;color:#9ca3af;">
+                    No entries yet. Click <em>+ Add Entry</em> to get started.
+                </div>
+            }
+            else
+            {
+                <SfGrid DataSource="@_entries.ToList()" AllowSorting="true" CssClass="e-gridhover">
+                    <GridColumns>
+                        <GridColumn HeaderText="Date" Width="120">
+                            <Template>@{ var e = (TimeEntryRow)context; }@e.WorkDate.ToString("ddd MMM d")</Template>
+                        </GridColumn>
+                        <GridColumn HeaderText="Category" Width="140">
+                            <Template>@{ var e = (TimeEntryRow)context; }@CategoryLabel(e.TimeCategoryCode)</Template>
+                        </GridColumn>
+                        <GridColumn HeaderText="Hours" Width="90">
+                            <Template>@{ var e = (TimeEntryRow)context; }@e.Duration.ToString("0.##")</Template>
+                        </GridColumn>
+                        <GridColumn HeaderText="Start" Width="90">
+                            <Template>@{ var e = (TimeEntryRow)context; }@(e.StartTime?.ToString("h:mm tt") ?? "—")</Template>
+                        </GridColumn>
+                        <GridColumn HeaderText="End" Width="90">
+                            <Template>@{ var e = (TimeEntryRow)context; }@(e.EndTime?.ToString("h:mm tt") ?? "—")</Template>
+                        </GridColumn>
+                        <GridColumn HeaderText="Status" Width="110">
+                            <Template>@{ var e = (TimeEntryRow)context; }<span class="badge @StatusBadgeClass(e.StatusCode)">@e.StatusCode</span></Template>
+                        </GridColumn>
+                        <GridColumn HeaderText="Notes">
+                            <Template>
+                                @{ var e = (TimeEntryRow)context; }
+                                @if (e.StatusCode == "REJECTED" && e.RejectionReason is not null)
                                 {
-                                    <em style="color:#dc2626;">@entry.RejectionReason</em>
+                                    <em style="color:#dc2626;">@e.RejectionReason</em>
                                 }
                                 else
                                 {
-                                    @(entry.Notes ?? "—")
+                                    @(e.Notes ?? "—")
                                 }
-                            </td>
-                            <td>
-                                @if (entry.StatusCode is "SUBMITTED" or "DRAFT")
+                            </Template>
+                        </GridColumn>
+                        <GridColumn HeaderText="" Width="110" AllowSorting="false">
+                            <Template>
+                                @{ var e = (TimeEntryRow)context; }
+                                @if (e.StatusCode is "SUBMITTED" or "DRAFT")
                                 {
-                                    @if (_voidConfirmId == entry.TimeEntryId)
+                                    @if (_voidConfirmId == e.TimeEntryId)
                                     {
                                         <span style="display:flex;gap:.3rem;">
                                             <button class="btn btn--danger btn--sm"
@@ -111,16 +115,16 @@
                                     else
                                     {
                                         <button class="btn btn--ghost btn--sm"
-                                                @onclick="() => _voidConfirmId = entry.TimeEntryId">
+                                                @onclick="() => _voidConfirmId = e.TimeEntryId">
                                             Void
                                         </button>
                                     }
                                 }
-                            </td>
-                        </tr>
-                    }
-                </tbody>
-            </table>
+                            </Template>
+                        </GridColumn>
+                    </GridColumns>
+                </SfGrid>
+            }
         </div>
 
         <div style="display:flex;gap:var(--space-3,.75rem);align-items:center;">
@@ -152,47 +156,40 @@
 
                 <div class="form-group">
                     <label class="form-label">Work Date</label>
-                    <input type="date" class="form-input"
-                           @bind="_entryWorkDate"
-                           min="@(_selectedPeriod?.StartDate.ToString("yyyy-MM-dd"))"
-                           max="@(_selectedPeriod?.EndDate.ToString("yyyy-MM-dd"))" />
+                    <SfDatePicker TValue="DateOnly" @bind-Value="_entryWorkDate"
+                                  Placeholder="MM/DD/YYYY"
+                                  Min="@((_selectedPeriod?.StartDate ?? DateOnly.MinValue).ToDateTime(TimeOnly.MinValue))"
+                                  Max="@((_selectedPeriod?.EndDate   ?? DateOnly.MaxValue).ToDateTime(TimeOnly.MinValue))" />
                 </div>
 
                 <div class="form-group">
                     <label class="form-label">Category</label>
-                    <select class="form-input" @bind="_entryCategory">
-                        <option value="REGULAR">Regular</option>
-                        <option value="OVERTIME">Overtime</option>
-                        <option value="PTO">PTO</option>
-                        <option value="SICK">Sick</option>
-                        <option value="HOLIDAY">Holiday</option>
-                        <option value="BEREAVEMENT">Bereavement</option>
-                        <option value="JURY_DUTY">Jury Duty</option>
-                        <option value="UNPAID">Unpaid</option>
-                    </select>
+                    <SfDropDownList TValue="string" TItem="CategoryOption"
+                                    DataSource="@_categoryOptions" @bind-Value="_entryCategory">
+                        <DropDownListFieldSettings Value="Value" Text="Label" />
+                    </SfDropDownList>
                 </div>
 
                 <div class="form-group">
                     <label class="form-label">Duration (hours)</label>
-                    <input type="number" class="form-input" step="0.25" min="0.25" max="24"
-                           @bind="_entryDuration" />
+                    <SfNumericTextBox TValue="decimal" @bind-Value="_entryDuration"
+                                     Min="0.25m" Max="24" Step="0.25m" Placeholder="8.00" />
                 </div>
 
                 <div style="display:flex;gap:var(--space-3,.75rem);">
                     <div class="form-group" style="flex:1;">
                         <label class="form-label">Start Time <span style="color:#9ca3af;font-weight:400;">(opt.)</span></label>
-                        <input type="time" class="form-input" @bind="_entryStartTime" />
+                        <SfTimePicker TValue="TimeOnly?" @bind-Value="_entryStartTime" Placeholder="HH:mm" />
                     </div>
                     <div class="form-group" style="flex:1;">
                         <label class="form-label">End Time <span style="color:#9ca3af;font-weight:400;">(opt.)</span></label>
-                        <input type="time" class="form-input" @bind="_entryEndTime" />
+                        <SfTimePicker TValue="TimeOnly?" @bind-Value="_entryEndTime" Placeholder="HH:mm" />
                     </div>
                 </div>
 
                 <div class="form-group">
                     <label class="form-label">Notes <span style="color:#9ca3af;font-weight:400;">(opt.)</span></label>
-                    <textarea class="form-input" rows="3" @bind="_entryNotes"
-                              placeholder="Describe the work or leave blank…"></textarea>
+                    <SfTextBox @bind-Value="_entryNotes" Multiline="true" Placeholder="Describe the work or leave blank…" />
                 </div>
 
                 @if (!string.IsNullOrEmpty(_entryError))
@@ -225,9 +222,23 @@
     private bool    _statusIsError;
     private Guid?   _voidConfirmId;
 
+    // ── Dropdown data sources ───────────────────────────────────────────────
+    private sealed record CategoryOption(string Value, string Label);
+    private static readonly List<CategoryOption> _categoryOptions =
+    [
+        new("REGULAR",     "Regular"),
+        new("OVERTIME",    "Overtime"),
+        new("PTO",         "PTO"),
+        new("SICK",        "Sick"),
+        new("HOLIDAY",     "Holiday"),
+        new("BEREAVEMENT", "Bereavement"),
+        new("JURY_DUTY",   "Jury Duty"),
+        new("UNPAID",      "Unpaid"),
+    ];
+
     // ── Entry form ──────────────────────────────────────────────────────────
     private bool      _showEntryPanel;
-    private DateTime  _entryWorkDate  = DateTime.Today;
+    private DateOnly  _entryWorkDate  = DateOnly.FromDateTime(DateTime.Today);
     private string    _entryCategory  = "REGULAR";
     private decimal   _entryDuration  = 8m;
     private TimeOnly? _entryStartTime;
@@ -266,19 +277,15 @@
         }
     }
 
-    private async Task OnPeriodChanged(ChangeEventArgs e)
+    private async Task OnPeriodChangedSf(ChangeEventArgs<Guid, TaPeriodOption> args)
     {
-        if (Guid.TryParse(e.Value?.ToString(), out var id))
-        {
-            _selectedPeriodId = id;
-            _selectedPeriod   = _periods.FirstOrDefault(p => p.PeriodId == id);
+        _selectedPeriodId = args.Value;
+        _selectedPeriod   = _periods.FirstOrDefault(p => p.PeriodId == args.Value);
+        if (_selectedPeriodId != Guid.Empty)
             await LoadEntriesAsync();
-        }
         else
         {
-            _selectedPeriodId = Guid.Empty;
-            _selectedPeriod   = null;
-            _entries          = [];
+            _entries = [];
         }
     }
 
@@ -302,9 +309,7 @@
 
     private void OpenAddEntry()
     {
-        _entryWorkDate  = _selectedPeriod is not null
-            ? _selectedPeriod.StartDate.ToDateTime(TimeOnly.MinValue)
-            : DateTime.Today;
+        _entryWorkDate  = _selectedPeriod?.StartDate ?? DateOnly.FromDateTime(DateTime.Today);
         _entryCategory  = "REGULAR";
         _entryDuration  = 8m;
         _entryStartTime = default;
@@ -332,9 +337,8 @@
             return;
         }
 
-        var workDate = DateOnly.FromDateTime(_entryWorkDate);
         if (_selectedPeriod is not null &&
-            (workDate < _selectedPeriod.StartDate || workDate > _selectedPeriod.EndDate))
+            (_entryWorkDate < _selectedPeriod.StartDate || _entryWorkDate > _selectedPeriod.EndDate))
         {
             _entryError = "Work date must fall within the selected period.";
             return;
@@ -346,7 +350,7 @@
             {
                 EmploymentId    = _employmentId.Value,
                 PayrollPeriodId = _selectedPeriodId,
-                WorkDate        = workDate,
+                WorkDate        = _entryWorkDate,
                 TimeCategory    = _entryCategory,
                 Duration        = _entryDuration,
                 StartTime       = _entryStartTime,

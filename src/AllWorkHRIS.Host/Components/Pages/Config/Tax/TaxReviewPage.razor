@@ -5,6 +5,8 @@
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Components.Authorization
 @using AllWorkHRIS.Host.Config.Tax
+@using Syncfusion.Blazor.Grids
+@using Syncfusion.Blazor.Inputs
 @inject ITaxConfigRepository        TaxConfig
 @inject AuthenticationStateProvider AuthState
 
@@ -31,58 +33,52 @@ else if (_items.Count == 0)
 }
 else
 {
-    <div class="grid-container">
-        <table class="data-table">
-            <thead>
-                <tr>
-                    <th>Type</th>
-                    <th>Jurisdiction / Form</th>
-                    <th>Item</th>
-                    <th>Submitted By</th>
-                    <th>Submitted At</th>
-                    <th>Actions</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var item in _items)
-                {
-                    var it = item;
-                    <tr>
-                        <td><span class="type-badge">@(it.EntityType == "step" ? "Step" : "Form Field")</span></td>
-                        <td class="mono">@it.JurisdictionCode</td>
-                        <td>@it.EntityName</td>
-                        <td>@it.SubmittedBy</td>
-                        <td class="mono">@(it.SubmittedAt == DateTime.MinValue ? "—" : it.SubmittedAt.ToString("yyyy-MM-dd HH:mm"))</td>
-                        <td>
-                            @if (_confirmingId == it.EntityId)
-                            {
-                                <div style="display:flex;flex-direction:column;gap:.5rem;">
-                                    <textarea class="form-control" rows="2" placeholder="Note (optional)"
-                                              @bind="_reviewNote" style="font-size:.8rem;" />
-                                    <div style="display:flex;gap:.5rem;">
-                                        <button class="btn-action btn-action--success" @onclick="() => ApproveAsync(it)">Confirm Approve</button>
-                                        <button class="btn-action btn-action--danger"  @onclick="() => RejectAsync(it)">Confirm Reject</button>
-                                        <button class="btn-action" @onclick="CancelConfirm">Cancel</button>
-                                    </div>
-                                </div>
-                            }
-                            else
-                            {
-                                <div style="display:flex;gap:.5rem;">
-                                    <button class="btn-action btn-action--success" @onclick="() => StartConfirm(it.EntityId)">Approve…</button>
-                                    <button class="btn-action btn-action--danger"  @onclick="() => StartConfirm(it.EntityId)">Reject…</button>
-                                </div>
-                            }
-                            @if (_actionErrors.TryGetValue(it.EntityId, out var err) && err is not null)
-                            {
-                                <p style="color:#dc2626;font-size:.75rem;margin:.25rem 0 0;">@err</p>
-                            }
-                        </td>
-                    </tr>
-                }
-            </tbody>
-        </table>
-    </div>
+    <SfGrid DataSource="@_items" AllowSorting="true" CssClass="e-gridhover">
+        <GridColumns>
+            <GridColumn HeaderText="Type" Width="110">
+                <Template>@{ var it = (PendingReviewItem)context; }<span class="type-badge">@(it.EntityType == "step" ? "Step" : "Form Field")</span></Template>
+            </GridColumn>
+            <GridColumn HeaderText="Jurisdiction / Form" Width="170">
+                <Template>@{ var it = (PendingReviewItem)context; }<code>@it.JurisdictionCode</code></Template>
+            </GridColumn>
+            <GridColumn HeaderText="Item">
+                <Template>@{ var it = (PendingReviewItem)context; }@it.EntityName</Template>
+            </GridColumn>
+            <GridColumn HeaderText="Submitted By" Width="160">
+                <Template>@{ var it = (PendingReviewItem)context; }@it.SubmittedBy</Template>
+            </GridColumn>
+            <GridColumn HeaderText="Submitted At" Width="160">
+                <Template>@{ var it = (PendingReviewItem)context; }<code>@(it.SubmittedAt == DateTime.MinValue ? "—" : it.SubmittedAt.ToString("yyyy-MM-dd HH:mm"))</code></Template>
+            </GridColumn>
+            <GridColumn HeaderText="Actions" Width="300" AllowSorting="false">
+                <Template>
+                    @{ var it = (PendingReviewItem)context; }
+                    @if (_confirmingId == it.EntityId)
+                    {
+                        <div style="display:flex;flex-direction:column;gap:.5rem;">
+                            <SfTextBox @bind-Value="_reviewNote" Multiline="true" Placeholder="Note (optional)" />
+                            <div style="display:flex;gap:.5rem;flex-wrap:wrap;">
+                                <button class="btn-action btn-action--success" @onclick="() => ApproveAsync(it)">Confirm Approve</button>
+                                <button class="btn-action btn-action--danger"  @onclick="() => RejectAsync(it)">Confirm Reject</button>
+                                <button class="btn-action" @onclick="CancelConfirm">Cancel</button>
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div style="display:flex;gap:.5rem;">
+                            <button class="btn-action btn-action--success" @onclick="() => StartConfirm(it.EntityId)">Approve…</button>
+                            <button class="btn-action btn-action--danger"  @onclick="() => StartConfirm(it.EntityId)">Reject…</button>
+                        </div>
+                    }
+                    @if (_actionErrors.TryGetValue(it.EntityId, out var err) && err is not null)
+                    {
+                        <p style="color:#dc2626;font-size:.75rem;margin:.25rem 0 0;">@err</p>
+                    }
+                </Template>
+            </GridColumn>
+        </GridColumns>
+    </SfGrid>
 }
 
 @code {

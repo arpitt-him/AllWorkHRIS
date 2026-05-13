@@ -1,12 +1,15 @@
 @page "/hris/employees"
 @layout HrisShell
-@rendermode InteractiveServer
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
 @attribute [Authorize(Roles = "HrisViewer,HrisAdmin,HrisOperator")]
 @implements IDisposable
 @using Microsoft.AspNetCore.Authorization
 @using AllWorkHRIS.Core.Temporal
 @using AllWorkHRIS.Host.Hris.Services
 @using AllWorkHRIS.Host.Hris.Queries
+@using Syncfusion.Blazor.Grids
+@using Syncfusion.Blazor.DropDowns
+@using Syncfusion.Blazor.Inputs
 @inject IEmploymentService  EmploymentService
 @inject ITemporalContext     TemporalContext
 @inject IHrisSessionState   SessionState
@@ -46,29 +49,30 @@
 
     @* Filter bar *@
     <div class="filter-bar">
-        <select class="filter-select" @onchange="OnStatusChanged">
-            <option value="">All Statuses</option>
-            <option value="ACTIVE">Active</option>
-            <option value="ON_LEAVE">On Leave</option>
-            <option value="SUSPENDED">Suspended</option>
-            <option value="TERMINATED">Terminated</option>
-        </select>
-        <select class="filter-select" @onchange="OnTypeChanged">
-            <option value="">All Types</option>
-            <option value="EMPLOYEE">Employee</option>
-            <option value="CONTRACTOR">Contractor</option>
-            <option value="INTERN">Intern</option>
-            <option value="SEASONAL">Seasonal</option>
-            <option value="VOLUNTEER">Volunteer</option>
-        </select>
-        <div class="filter-divider"></div>
-        <input type="text" class="filter-input" placeholder="Search name or employee #…"
-               @bind="_searchInput" @bind:event="oninput" @onkeydown="OnSearchKeyDown" />
-        <button class="btn btn-ghost btn-sm" @onclick="ApplyFilters">Search</button>
-        @if (!string.IsNullOrEmpty(_searchInput))
-        {
-            <button class="btn btn-ghost btn-sm" @onclick="ClearSearch">Clear</button>
-        }
+        <SfDropDownList TValue="string" TItem="FilterOption"
+                        Placeholder="All Statuses"
+                        DataSource="@_statusOptions"
+                        @bind-Value="_statusFilter"
+                        Width="160px">
+            <DropDownListFieldSettings Value="Value" Text="Label" />
+            <DropDownListEvents TValue="string" TItem="FilterOption"
+                                ValueChange="OnStatusChanged" />
+        </SfDropDownList>
+
+        <SfDropDownList TValue="string" TItem="FilterOption"
+                        Placeholder="All Types"
+                        DataSource="@_typeOptions"
+                        @bind-Value="_typeFilter"
+                        Width="160px">
+            <DropDownListFieldSettings Value="Value" Text="Label" />
+            <DropDownListEvents TValue="string" TItem="FilterOption"
+                                ValueChange="OnTypeChanged" />
+        </SfDropDownList>
+
+        <SfTextBox Placeholder="Search name or Emp #…"
+                   @bind-Value="_searchTerm"
+                   Width="240px"
+                   Input="OnSearchInput" />
     </div>
 
     @* Employee grid *@
@@ -77,7 +81,7 @@
         {
             <p class="loading-text">Loading employees…</p>
         }
-        else if (_employees.Count == 0)
+        else if (_allEmployees.Count == 0)
         {
             <div class="empty-state">
                 <p>No employees found.</p>
@@ -90,79 +94,43 @@
         }
         else
         {
-            <table class="employee-table">
-                <thead>
-                    <tr>
-                        <th class="sortable" @onclick='() => SetSort("legal_last_name")'>
-                            Employee <span class="sort-icon">@SortIcon("legal_last_name")</span>
-                        </th>
-                        <th class="sortable" @onclick='() => SetSort("employee_number")'>
-                            Emp # <span class="sort-icon">@SortIcon("employee_number")</span>
-                        </th>
-                        <th class="sortable" @onclick='() => SetSort("job_title")'>
-                            Job Title <span class="sort-icon">@SortIcon("job_title")</span>
-                        </th>
-                        <th class="sortable" @onclick='() => SetSort("department_name")'>
-                            Department <span class="sort-icon">@SortIcon("department_name")</span>
-                        </th>
-                        <th class="sortable" @onclick='() => SetSort("location_name")'>
-                            Location <span class="sort-icon">@SortIcon("location_name")</span>
-                        </th>
-                        <th class="sortable" @onclick='() => SetSort("employment_status")'>
-                            Status <span class="sort-icon">@SortIcon("employment_status")</span>
-                        </th>
-                        <th class="sortable" @onclick='() => SetSort("employment_start_date")'>
-                            Start Date <span class="sort-icon">@SortIcon("employment_start_date")</span>
-                        </th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach (var emp in _employees)
-                    {
-                        <tr>
-                            <td>
-                                <div class="employee-name-cell">
-                                    <span class="avatar @(emp.EmploymentType == "CONTRACTOR" ? "avatar--contractor" : "")">@GetInitials(emp)</span>
-                                    <div class="employee-name-info">
-                                        <a href="/hris/employees/@emp.EmploymentId">
-                                            @emp.LegalFirstName @emp.LegalLastName
-                                        </a>
-                                        @if (emp.EmploymentType == "CONTRACTOR")
-                                        {
-                                            <span class="type-badge type-badge--contractor">Contractor</span>
-                                        }
-                                    </div>
+            <SfGrid TValue="EmploymentListItem" DataSource="@_employees"
+                    AllowSorting="true" AllowPaging="true"
+                    CssClass="e-gridhover">
+                <GridPageSettings PageSize="25" />
+                <GridColumns>
+                    <GridColumn Field="LegalLastName" HeaderText="Employee" AllowSorting="true">
+                        <Template>
+                            @{ var emp = (EmploymentListItem)context; }
+                            <div class="employee-name-cell">
+                                <span class="avatar @(emp.EmploymentType == "CONTRACTOR" ? "avatar--contractor" : "")">@GetInitials(emp)</span>
+                                <div class="employee-name-info">
+                                    <a class="employee-link" href="/hris/employees/@emp.EmploymentId">@emp.LegalFirstName @emp.LegalLastName</a>
+                                    @if (emp.EmploymentType == "CONTRACTOR")
+                                    {
+                                        <span class="type-badge type-badge--contractor">Contractor</span>
+                                    }
                                 </div>
-                            </td>
-                            <td class="emp-number">@emp.EmployeeNumber</td>
-                            <td>@emp.JobTitle</td>
-                            <td>@emp.DepartmentName</td>
-                            <td>@emp.LocationName</td>
-                            <td><span class="status-badge status-@emp.EmploymentStatus.ToLower()">@emp.EmploymentStatus</span></td>
-                            <td>@emp.EmploymentStartDate.ToString("yyyy-MM-dd")</td>
-                        </tr>
-                    }
-                </tbody>
-            </table>
-
-            @* Pagination *@
-            <div class="pagination">
-                <span class="pagination__info">
-                    @if (_totalCount > 0)
-                    {
-                        var first = (_currentPage - 1) * PageSize + 1;
-                        var last  = Math.Min(_currentPage * PageSize, _totalCount);
-                        <text>Showing @first–@last of @_totalCount employees</text>
-                    }
-                </span>
-                <div class="pagination__controls">
-                    <button class="btn btn-ghost btn-sm" @onclick="PrevPage"
-                            disabled="@(_currentPage <= 1)">&#8592; Prev</button>
-                    <span class="pagination__page">Page @_currentPage of @_totalPages</span>
-                    <button class="btn btn-ghost btn-sm" @onclick="NextPage"
-                            disabled="@(_currentPage >= _totalPages)">Next &#8594;</button>
-                </div>
-            </div>
+                            </div>
+                        </Template>
+                    </GridColumn>
+                    <GridColumn Field="EmployeeNumber" HeaderText="Emp #" Width="120" />
+                    <GridColumn Field="JobTitle" HeaderText="Job Title" />
+                    <GridColumn Field="DepartmentName" HeaderText="Department" />
+                    <GridColumn Field="LocationName" HeaderText="Location" />
+                    <GridColumn Field="EmploymentStatus" HeaderText="Status" Width="110">
+                        <Template>
+                            @{ var emp = (EmploymentListItem)context; }
+                            <span class="status-badge status-@emp.EmploymentStatus.ToLower()">@emp.EmploymentStatus</span>
+                        </Template>
+                    </GridColumn>
+                    <GridColumn Field="EmploymentStartDate" HeaderText="Start Date" Width="120">
+                        <Template>
+                            @(((EmploymentListItem)context).EmploymentStartDate.ToString("yyyy-MM-dd"))
+                        </Template>
+                    </GridColumn>
+                </GridColumns>
+            </SfGrid>
         }
     </div>
 
@@ -175,21 +143,34 @@
 }
 
 @code {
-    private const int PageSize = 50;
+    private record FilterOption(string Value, string Label);
 
     private bool _loading       = true;
     private bool _showHirePanel = false;
-    private List<EmploymentListItem> _employees = [];
-    private EmployeeStatCards _stats = new();
 
-    private int    _currentPage   = 1;
-    private int    _totalCount    = 0;
-    private int    _totalPages    = 1;
-    private string _searchInput   = "";
-    private string _statusFilter  = "";
-    private string _typeFilter    = "";
-    private string _sortColumn    = "legal_last_name";
-    private bool   _sortAscending = true;
+    private List<EmploymentListItem> _allEmployees = [];
+    private List<EmploymentListItem> _employees    = [];
+    private EmployeeStatCards        _stats        = new();
+
+    private string _statusFilter = "";
+    private string _typeFilter   = "";
+    private string _searchTerm   = "";
+
+    private readonly List<FilterOption> _statusOptions =
+    [
+        new("", "All Statuses"),
+        new("ACTIVE",     "Active"),
+        new("ON_LEAVE",   "On Leave"),
+        new("SUSPENDED",  "Suspended"),
+        new("TERMINATED", "Terminated"),
+    ];
+
+    private readonly List<FilterOption> _typeOptions =
+    [
+        new("", "All Types"),
+        new("EMPLOYEE",   "Employee"),
+        new("CONTRACTOR", "Contractor"),
+    ];
 
     protected override async Task OnInitializedAsync()
     {
@@ -200,10 +181,6 @@
     private void HandleEntityChanged()
         => InvokeAsync(async () =>
         {
-            _currentPage  = 1;
-            _searchInput  = "";
-            _statusFilter = "";
-            _typeFilter   = "";
             await LoadDataAsync();
             StateHasChanged();
         });
@@ -216,18 +193,15 @@
             var entityId = SessionState.SelectedLegalEntityId;
             var result = await EmploymentService.GetPagedListAsync(new EmployeeListQuery
             {
-                LegalEntityId  = entityId,
-                PageSize       = PageSize,
-                Page           = _currentPage,
-                SearchTerm     = string.IsNullOrWhiteSpace(_searchInput)  ? null : _searchInput.Trim(),
-                Status         = string.IsNullOrWhiteSpace(_statusFilter) ? null : _statusFilter,
-                EmploymentType = string.IsNullOrWhiteSpace(_typeFilter)   ? null : _typeFilter,
-                SortColumn     = _sortColumn,
-                SortAscending  = _sortAscending
+                LegalEntityId = entityId,
+                PageSize      = 2000,
+                Page          = 1,
+                SortColumn    = "legal_last_name",
+                SortAscending = true
             });
-            _employees  = result.Items.ToList();
-            _totalCount = result.TotalCount;
-            _totalPages = result.TotalPages > 0 ? result.TotalPages : 1;
+            _allEmployees = result.Items.ToList();
+            ApplyFilters();
+
             _stats = await EmploymentService.GetStatCardsAsync(
                 DateOnly.FromDateTime(TemporalContext.GetOperativeDate()),
                 entityId);
@@ -238,80 +212,37 @@
         }
     }
 
-    private async Task OnSearchKeyDown(KeyboardEventArgs e)
+    private void ApplyFilters()
     {
-        if (e.Key == "Enter") await ApplyFilters();
+        var search = _searchTerm.Trim();
+        _employees = _allEmployees
+            .Where(e => string.IsNullOrEmpty(_statusFilter)
+                     || e.EmploymentStatus.Equals(_statusFilter, StringComparison.OrdinalIgnoreCase))
+            .Where(e => string.IsNullOrEmpty(_typeFilter)
+                     || e.EmploymentType.Equals(_typeFilter, StringComparison.OrdinalIgnoreCase))
+            .Where(e => string.IsNullOrEmpty(search)
+                     || e.LegalFirstName.Contains(search, StringComparison.OrdinalIgnoreCase)
+                     || e.LegalLastName.Contains(search, StringComparison.OrdinalIgnoreCase)
+                     || e.EmployeeNumber.Contains(search, StringComparison.OrdinalIgnoreCase))
+            .ToList();
     }
 
-    private async Task OnStatusChanged(ChangeEventArgs e)
+    private void OnStatusChanged(ChangeEventArgs<string, FilterOption> args)
     {
-        _statusFilter = e.Value?.ToString() ?? "";
-        _currentPage  = 1;
-        await LoadDataAsync();
-        StateHasChanged();
+        _statusFilter = args.Value ?? "";
+        ApplyFilters();
     }
 
-    private async Task OnTypeChanged(ChangeEventArgs e)
+    private void OnTypeChanged(ChangeEventArgs<string, FilterOption> args)
     {
-        _typeFilter  = e.Value?.ToString() ?? "";
-        _currentPage = 1;
-        await LoadDataAsync();
-        StateHasChanged();
+        _typeFilter = args.Value ?? "";
+        ApplyFilters();
     }
 
-    private async Task ApplyFilters()
+    private void OnSearchInput(InputEventArgs args)
     {
-        _currentPage = 1;
-        await LoadDataAsync();
-        StateHasChanged();
-    }
-
-    private async Task ClearSearch()
-    {
-        _searchInput = "";
-        _currentPage = 1;
-        await LoadDataAsync();
-        StateHasChanged();
-    }
-
-    private async Task SetSort(string column)
-    {
-        if (_sortColumn == column)
-            _sortAscending = !_sortAscending;
-        else
-        {
-            _sortColumn    = column;
-            _sortAscending = true;
-        }
-        _currentPage = 1;
-        await LoadDataAsync();
-        StateHasChanged();
-    }
-
-    private async Task PrevPage()
-    {
-        if (_currentPage > 1)
-        {
-            _currentPage--;
-            await LoadDataAsync();
-            StateHasChanged();
-        }
-    }
-
-    private async Task NextPage()
-    {
-        if (_currentPage < _totalPages)
-        {
-            _currentPage++;
-            await LoadDataAsync();
-            StateHasChanged();
-        }
-    }
-
-    private string SortIcon(string column)
-    {
-        if (_sortColumn != column) return "⇅";
-        return _sortAscending ? "↑" : "↓";
+        _searchTerm = args.Value ?? "";
+        ApplyFilters();
     }
 
     private void OpenHirePanel()
@@ -324,7 +255,6 @@
     private async Task OnHireComplete()
     {
         _showHirePanel = false;
-        _currentPage   = 1;
         await LoadDataAsync();
     }
 
@@ -336,109 +266,18 @@
 }
 
 <style>
-    .page-container {
-        padding: var(--space-6);
-    }
+    .stat-card--active     { border-top: 4px solid #10B981; }
+    .stat-card--leave      { border-top: 4px solid #F59E0B; }
+    .stat-card--contractor { border-top: 4px solid #3B82F6; }
+    .stat-card--dept       { border-top: 4px solid #8B5CF6; }
 
-    .page-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: var(--space-6);
-    }
-
-    .page-title {
-        font-size: var(--font-size-lg);
-        font-weight: var(--font-weight-semibold);
-        color: var(--aw-navy);
-        margin: 0;
-    }
-
-    .stat-cards {
-        display: flex;
-        gap: var(--space-4);
-        margin-bottom: var(--space-6);
-    }
-
-    .stat-card {
-        background: white;
-        border-radius: var(--radius-lg);
-        padding: var(--space-4) var(--space-6);
-        box-shadow: var(--shadow-sm);
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-1);
-        min-width: 120px;
-        border-top: 4px solid transparent;
-    }
-
-    .stat-card--active     { border-top-color: #10B981; }
-    .stat-card--leave      { border-top-color: #F59E0B; }
-    .stat-card--contractor { border-top-color: #3B82F6; }
-    .stat-card--dept       { border-top-color: #8B5CF6; }
-
-    .stat-label {
-        font-size: var(--font-size-sm);
-        color: #6B7280;
-        font-weight: var(--font-weight-medium);
-    }
-
-    .stat-value {
-        font-size: 1.5rem;
-        font-weight: var(--font-weight-semibold);
-        color: var(--aw-navy);
-    }
-
-    /* ── Filter bar ─────────────────────────────────────────── */
     .filter-bar {
         display: flex;
-        align-items: center;
         gap: var(--space-3);
         margin-bottom: var(--space-4);
-        flex-wrap: wrap;
+        align-items: center;
     }
 
-    .filter-divider {
-        width: 1px;
-        height: 24px;
-        background: #D1D5DB;
-        margin: 0 var(--space-2);
-        flex-shrink: 0;
-    }
-
-    .filter-input {
-        flex: 1;
-        min-width: 200px;
-        max-width: 340px;
-        padding: var(--space-2) var(--space-3);
-        border: 1px solid #D1D5DB;
-        border-radius: var(--radius-md);
-        font-size: var(--font-size-sm);
-        color: var(--aw-navy);
-    }
-
-    .filter-input:focus {
-        outline: none;
-        border-color: var(--aw-teal);
-        box-shadow: 0 0 0 2px rgba(0,152,160,0.15);
-    }
-
-    .filter-select {
-        padding: var(--space-2) var(--space-3);
-        border: 1px solid #D1D5DB;
-        border-radius: var(--radius-md);
-        font-size: var(--font-size-sm);
-        color: var(--aw-navy);
-        background: white;
-        cursor: pointer;
-    }
-
-    .filter-select:focus {
-        outline: none;
-        border-color: var(--aw-teal);
-    }
-
-    /* ── Grid ───────────────────────────────────────────────── */
     .grid-container {
         background: white;
         border-radius: var(--radius-lg);
@@ -452,57 +291,6 @@
         text-align: center;
     }
 
-    .empty-state {
-        padding: var(--space-10);
-        text-align: center;
-        color: #6B7280;
-    }
-
-    .employee-table {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: var(--font-size-base);
-    }
-
-    .employee-table th {
-        background: #F9FAFB;
-        padding: var(--space-3) var(--space-4);
-        text-align: left;
-        font-weight: var(--font-weight-medium);
-        color: #6B7280;
-        font-size: var(--font-size-sm);
-        border-bottom: 1px solid #E5E7EB;
-        white-space: nowrap;
-    }
-
-    .employee-table th.sortable {
-        cursor: pointer;
-        user-select: none;
-    }
-
-    .employee-table th.sortable:hover {
-        background: #F3F4F6;
-        color: var(--aw-navy);
-    }
-
-    .sort-icon {
-        font-size: .75rem;
-        color: #9CA3AF;
-        margin-left: 2px;
-    }
-
-    .employee-table td {
-        padding: var(--space-3) var(--space-4);
-        border-bottom: 1px solid #F3F4F6;
-        color: var(--aw-navy);
-    }
-
-    .emp-number {
-        font-family: monospace;
-        font-size: var(--font-size-sm);
-        color: #6B7280;
-    }
-
     .employee-name-cell {
         display: flex;
         align-items: center;
@@ -513,6 +301,16 @@
         display: flex;
         flex-direction: column;
         gap: 2px;
+    }
+
+    .employee-link {
+        font-weight: var(--font-weight-medium);
+        color: var(--aw-navy);
+    }
+
+    .employee-link:hover {
+        color: var(--aw-teal);
+        text-decoration: none;
     }
 
     .avatar {
@@ -529,9 +327,7 @@
         flex-shrink: 0;
     }
 
-    .avatar--contractor {
-        background-color: #3B82F6;
-    }
+    .avatar--contractor { background-color: #3B82F6; }
 
     .type-badge {
         display: inline-block;
@@ -543,10 +339,7 @@
         text-transform: uppercase;
     }
 
-    .type-badge--contractor {
-        background: #DBEAFE;
-        color: #1D4ED8;
-    }
+    .type-badge--contractor { background: #DBEAFE; color: #1D4ED8; }
 
     .status-badge {
         padding: 2px var(--space-2);
@@ -559,63 +352,4 @@
     .status-on_leave   { background: #FEF3C7; color: #92400E; }
     .status-suspended  { background: #FEE2E2; color: #991B1B; }
     .status-terminated { background: #F3F4F6; color: #6B7280; }
-
-    /* ── Pagination ─────────────────────────────────────────── */
-    .pagination {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: var(--space-3) var(--space-4);
-        border-top: 1px solid #F3F4F6;
-        font-size: var(--font-size-sm);
-        color: #6B7280;
-    }
-
-    .pagination__controls {
-        display: flex;
-        align-items: center;
-        gap: var(--space-3);
-    }
-
-    .pagination__page {
-        color: var(--aw-navy);
-        font-weight: var(--font-weight-medium);
-    }
-
-    /* ── Buttons ────────────────────────────────────────────── */
-    .btn-primary {
-        background-color: var(--aw-teal);
-        color: white;
-        border: none;
-        border-radius: var(--radius-md);
-        padding: var(--space-2) var(--space-4);
-        font-size: var(--font-size-base);
-        font-weight: var(--font-weight-medium);
-        cursor: pointer;
-    }
-
-    .btn-primary:hover { opacity: 0.9; }
-
-    .btn-link {
-        color: var(--aw-teal);
-        text-decoration: none;
-        font-weight: var(--font-weight-medium);
-    }
-
-    .panel-overlay {
-        position: fixed;
-        inset: 0;
-        background: rgba(0,0,0,0.4);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 1000;
-    }
-
-    .panel-content {
-        background: white;
-        border-radius: var(--radius-lg);
-        padding: var(--space-6);
-        min-width: 400px;
-    }
 </style>

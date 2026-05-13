@@ -8,6 +8,7 @@
 @inject IBenefitElectionImportService ImportService
 @inject AuthenticationStateProvider   AuthState
 @inject IJSRuntime                    JS
+@using Syncfusion.Blazor.Grids
 
 <PageTitle>Import Elections — AllWork HRIS</PageTitle>
 
@@ -118,15 +119,15 @@
             <h3 class="form-panel__title">Step 2 — Review and Import</h3>
 
             <div class="import-summary">
-                <div class="stat-card">
+                <div class="stat-card stat-card--neutral">
                     <div class="stat-value">@_validationResult.TotalRecords</div>
                     <div class="stat-label">Total Records</div>
                 </div>
-                <div class="stat-card stat-card--success">
+                <div class="stat-card stat-card--valid">
                     <div class="stat-value">@_validationResult.ValidCount</div>
                     <div class="stat-label">Valid</div>
                 </div>
-                <div class="stat-card @(_validationResult.InvalidCount > 0 ? "stat-card--warn" : "stat-card--success")">
+                <div class="stat-card @(_validationResult.InvalidCount > 0 ? "stat-card--invalid" : "stat-card--valid")">
                     <div class="stat-value">@_validationResult.InvalidCount</div>
                     <div class="stat-label">Invalid</div>
                 </div>
@@ -135,21 +136,20 @@
             @if (_validationResult.Errors.Count > 0)
             {
                 <h4 style="margin-top:1.25rem;">Validation Errors</h4>
-                <table class="data-table">
-                    <thead>
-                        <tr><th>Row</th><th>Field</th><th>Error</th></tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var err in _validationResult.Errors)
-                        {
-                            <tr>
-                                <td>@err.RowNumber</td>
-                                <td><code>@err.Field</code></td>
-                                <td>@err.ErrorMessage</td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
+                <SfGrid DataSource="@_validationResult.Errors" AllowSorting="true" CssClass="e-gridhover"
+                        style="margin-top:.5rem;">
+                    <GridColumns>
+                        <GridColumn HeaderText="Row" Width="80">
+                            <Template>@{ var err = (RecordError)context; }@err.RowNumber</Template>
+                        </GridColumn>
+                        <GridColumn HeaderText="Field" Width="200">
+                            <Template>@{ var err = (RecordError)context; }<code>@err.Field</code></Template>
+                        </GridColumn>
+                        <GridColumn HeaderText="Error">
+                            <Template>@{ var err = (RecordError)context; }@err.ErrorMessage</Template>
+                        </GridColumn>
+                    </GridColumns>
+                </SfGrid>
             }
 
             @if (_importError is not null)
@@ -176,6 +176,12 @@
     }
 
 </div>
+
+<style>
+    .stat-card--neutral { border-top: 3px solid #6b7280; }
+    .stat-card--valid   { border-top: 3px solid #16a34a; }
+    .stat-card--invalid { border-top: 3px solid #dc2626; }
+</style>
 
 @code {
 

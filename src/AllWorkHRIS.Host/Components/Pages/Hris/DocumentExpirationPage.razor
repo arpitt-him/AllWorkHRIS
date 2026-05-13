@@ -11,6 +11,9 @@
 @using AllWorkHRIS.Core.Lookups
 @using AllWorkHRIS.Core.Temporal
 @using AllWorkHRIS.Core.Security
+@using Syncfusion.Blazor.Inputs
+@using Syncfusion.Blazor.DropDowns
+@using Syncfusion.Blazor.Grids
 @inject IDocumentRepository DocumentRepository
 @inject IPersonService       PersonService
 @inject ILookupCache         LookupCache
@@ -23,7 +26,7 @@
 
     <div class="page-header">
         <h2 class="page-title">Document Expiration Report</h2>
-        <button class="btn-secondary btn-sm" @onclick="LoadAsync">Refresh</button>
+        <button class="btn-primary btn-sm" @onclick="LoadAsync">Refresh</button>
     </div>
 
     @if (_loading)
@@ -50,22 +53,30 @@
 
         @* ── FILTERS ── *@
         <div class="filter-row">
-            <input type="text" class="filter-input" placeholder="Filter by employee name…"
-                   @bind="_nameFilter" @bind:event="oninput" />
-            <select class="filter-select" @bind="_typeFilter" @bind:event="oninput">
-                <option value="">All document types</option>
-                @foreach (var entry in _docTypes)
-                {
-                    <option value="@entry.Id">@entry.Label</option>
-                }
-            </select>
-            <select class="filter-select" @bind="_statusFilter" @bind:event="oninput">
-                <option value="">All statuses</option>
-                <option value="expired">Expired</option>
-                <option value="expiring30">Expiring ≤ 30 days</option>
-                <option value="expiring90">Expiring 31–90 days</option>
-            </select>
-            @if (!string.IsNullOrWhiteSpace(_nameFilter) || !string.IsNullOrEmpty(_typeFilter) || !string.IsNullOrWhiteSpace(_statusFilter))
+            <SfTextBox Placeholder="Filter by employee name…"
+                       @bind-Value="_nameFilter"
+                       Width="220px"
+                       Input="OnNameInput" />
+            <SfDropDownList TValue="int?" TItem="LookupEntry"
+                            Placeholder="All document types"
+                            DataSource="@_docTypes"
+                            @bind-Value="_typeFilter"
+                            Width="200px"
+                            ShowClearButton="true">
+                <DropDownListFieldSettings Value="Id" Text="Label" />
+                <DropDownListEvents TValue="int?" TItem="LookupEntry"
+                                    ValueChange="OnTypeChanged" />
+            </SfDropDownList>
+            <SfDropDownList TValue="string" TItem="FilterOption"
+                            Placeholder="All statuses"
+                            DataSource="@_statusOptions"
+                            @bind-Value="_statusFilter"
+                            Width="180px">
+                <DropDownListFieldSettings Value="Value" Text="Label" />
+                <DropDownListEvents TValue="string" TItem="FilterOption"
+                                    ValueChange="OnStatusChanged" />
+            </SfDropDownList>
+            @if (!string.IsNullOrWhiteSpace(_nameFilter) || _typeFilter.HasValue || !string.IsNullOrWhiteSpace(_statusFilter))
             {
                 <button class="btn-secondary btn-sm" @onclick="ClearFilters">Clear</button>
             }
@@ -81,53 +92,55 @@
         else
         {
             <div class="grid-container">
-                <table class="data-table">
-                    <thead>
-                        <tr>
-                            <th>Employee</th>
-                            <th>Document Name</th>
-                            <th>Type</th>
-                            <th>Effective</th>
-                            <th>Expiration</th>
-                            <th>Status</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var doc in FilteredDocs)
-                        {
-                            <tr>
-                                <td>
-                                    @if (doc.EmploymentId.HasValue)
-                                    {
-                                        <a href="/hris/employees/@doc.EmploymentId" class="link">
-                                            @EmployeeName(doc.EmploymentId)
-                                        </a>
-                                    }
-                                    else
-                                    {
-                                        <span>@PersonName(doc.PersonId)</span>
-                                    }
-                                </td>
-                                <td>@doc.DocumentName</td>
-                                <td>@DocTypeLabel(doc.DocumentTypeId)</td>
-                                <td>@doc.EffectiveDate.ToString("yyyy-MM-dd")</td>
-                                <td class="@ExpirationClass(doc.ExpirationDate)">
+                <SfGrid TValue="HrDocument" DataSource="@FilteredDocs"
+                        AllowSorting="true" AllowPaging="true" CssClass="e-gridhover">
+                    <GridPageSettings PageSize="25" />
+                    <GridColumns>
+                        <GridColumn Field="DocumentName" HeaderText="Employee" >
+                            <Template>
+                                @{ var doc = (HrDocument)context; }
+                                @if (doc.EmploymentId.HasValue)
+                                {
+                                    <a href="/hris/employees/@doc.EmploymentId">@EmployeeName(doc.EmploymentId)</a>
+                                }
+                                else
+                                {
+                                    <text>@PersonName(doc.PersonId)</text>
+                                }
+                            </Template>
+                        </GridColumn>
+                        <GridColumn Field="DocumentName" HeaderText="Document Name" />
+                        <GridColumn Field="DocumentTypeId" HeaderText="Type">
+                            <Template>@DocTypeLabel(((HrDocument)context).DocumentTypeId)</Template>
+                        </GridColumn>
+                        <GridColumn Field="EffectiveDate" HeaderText="Effective" Width="120">
+                            <Template>@(((HrDocument)context).EffectiveDate.ToString("yyyy-MM-dd"))</Template>
+                        </GridColumn>
+                        <GridColumn Field="ExpirationDate" HeaderText="Expiration" Width="120">
+                            <Template>
+                                @{ var doc = (HrDocument)context; }
+                                <span class="@ExpirationClass(doc.ExpirationDate)">
                                     @(doc.ExpirationDate?.ToString("yyyy-MM-dd") ?? "—")
-                                </td>
-                                <td>
-                                    <span class="status-badge @ExpirationBadgeClass(doc.ExpirationDate)">
-                                        @ExpirationLabel(doc.ExpirationDate)
-                                    </span>
-                                </td>
-                                <td>
-                                    <a href="/api/documents/@doc.DocumentId/content"
-                                       class="btn-secondary btn-xs" target="_blank">Download</a>
-                                </td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
+                                </span>
+                            </Template>
+                        </GridColumn>
+                        <GridColumn Field="ExpirationDate" HeaderText="Status" Width="170">
+                            <Template>
+                                @{ var doc = (HrDocument)context; }
+                                <span class="status-badge @ExpirationBadgeClass(doc.ExpirationDate)">
+                                    @ExpirationLabel(doc.ExpirationDate)
+                                </span>
+                            </Template>
+                        </GridColumn>
+                        <GridColumn HeaderText="" Width="100" AllowSorting="false">
+                            <Template>
+                                @{ var doc = (HrDocument)context; }
+                                <a href="/api/documents/@doc.DocumentId/content"
+                                   class="btn-secondary btn-xs" target="_blank">Download</a>
+                            </Template>
+                        </GridColumn>
+                    </GridColumns>
+                </SfGrid>
             </div>
         }
     }
@@ -142,9 +155,19 @@
     private IReadOnlyList<LookupEntry> _docTypes      = [];
     private Dictionary<int, string>    _docTypeLabels = [];
 
+    private record FilterOption(string Value, string Label);
+
     private string _nameFilter   = "";
-    private string _typeFilter   = "";
+    private int?   _typeFilter;
     private string _statusFilter = "";
+
+    private readonly List<FilterOption> _statusOptions =
+    [
+        new("",           "All statuses"),
+        new("expired",    "Expired"),
+        new("expiring30", "Expiring ≤ 30 days"),
+        new("expiring90", "Expiring 31–90 days"),
+    ];
 
     private List<HrDocument> FilteredDocs
     {
@@ -161,9 +184,7 @@
                     if (!name.Contains(_nameFilter, StringComparison.OrdinalIgnoreCase))
                         return false;
                 }
-                if (!string.IsNullOrEmpty(_typeFilter) &&
-                    int.TryParse(_typeFilter, out var typeId) &&
-                    d.DocumentTypeId != typeId)
+                if (_typeFilter.HasValue && d.DocumentTypeId != _typeFilter.Value)
                     return false;
                 if (!string.IsNullOrWhiteSpace(_statusFilter))
                 {
@@ -234,8 +255,23 @@
     private void ClearFilters()
     {
         _nameFilter   = "";
-        _typeFilter   = "";
+        _typeFilter   = null;
         _statusFilter = "";
+    }
+
+    private void OnNameInput(InputEventArgs args)
+    {
+        _nameFilter = args.Value ?? "";
+    }
+
+    private void OnTypeChanged(ChangeEventArgs<int?, LookupEntry> args)
+    {
+        _typeFilter = args.Value;
+    }
+
+    private void OnStatusChanged(ChangeEventArgs<string, FilterOption> args)
+    {
+        _statusFilter = args.Value ?? "";
     }
 
     private string EmployeeName(Guid? employmentId)
@@ -422,6 +458,14 @@
     .link:hover { text-decoration: underline; }
 
     /* ── Buttons ── */
+    .btn-primary {
+        background: var(--aw-teal); color: white; border: none;
+        border-radius: var(--radius-md); padding: var(--space-2) var(--space-3);
+        font-size: var(--font-size-sm); font-weight: var(--font-weight-medium);
+        cursor: pointer;
+    }
+    .btn-primary:hover { opacity: 0.9; }
+
     .btn-secondary {
         background: white; color: var(--aw-navy); border: 1px solid #D1D5DB;
         border-radius: var(--radius-md); padding: var(--space-2) var(--space-3);

@@ -5,6 +5,7 @@
 @implements IDisposable
 @using Microsoft.AspNetCore.Authorization
 @using AllWorkHRIS.Host.Payroll.Tax
+@using Syncfusion.Blazor.Grids
 @inject ITaxProfileRepository TaxRepo
 @inject IHrisSessionState     SessionState
 
@@ -49,55 +50,52 @@
                     }
                     else
                     {
-                        <table class="data-table">
-                            <thead>
-                                <tr>
-                                    <th>Jurisdiction</th>
-                                    <th>Code</th>
-                                    <th></th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                @foreach (var j in _assigned)
-                                {
-                                    var isFederal = j.JurisdictionCode.EndsWith("-FED", StringComparison.OrdinalIgnoreCase);
-                                    var isConfirming = _confirmRemoveCode == j.JurisdictionCode;
-
-                                    <tr>
-                                        <td>@j.JurisdictionName</td>
-                                        <td><code>@j.JurisdictionCode</code></td>
-                                        <td class="action-cell">
-                                            @if (isFederal)
-                                            {
-                                                <span class="badge badge-info">Federal — required</span>
-                                            }
-                                            else if (isConfirming)
-                                            {
-                                                <span class="confirm-inline">
-                                                    @if (_affectedCount > 0)
-                                                    {
-                                                        <span class="confirm-warning">@_affectedCount employee(s) have active elections in this jurisdiction.</span>
-                                                    }
-                                                    <span>Remove @j.JurisdictionCode?</span>
-                                                    <button class="btn-danger btn-sm" disabled="@_saving"
-                                                            @onclick="() => ConfirmRemoveAsync(j.JurisdictionCode)">
-                                                        @(_saving ? "Removing…" : "Confirm Remove")
-                                                    </button>
-                                                    <button class="btn-secondary btn-sm" @onclick="CancelConfirm">Cancel</button>
-                                                </span>
-                                            }
-                                            else
-                                            {
-                                                <button class="btn-secondary btn-sm"
-                                                        @onclick="() => StartRemoveAsync(j.JurisdictionCode)">
-                                                    Remove
+                        <SfGrid DataSource="@_assigned" CssClass="e-gridhover" AllowSorting="true">
+                            <GridColumns>
+                                <GridColumn HeaderText="Jurisdiction" Field="JurisdictionName" />
+                                <GridColumn HeaderText="Code" Width="130">
+                                    <Template>
+                                        @{ var j = (TaxJurisdictionRow)context; }
+                                        <code>@j.JurisdictionCode</code>
+                                    </Template>
+                                </GridColumn>
+                                <GridColumn HeaderText="" Width="360">
+                                    <Template>
+                                        @{
+                                            var j            = (TaxJurisdictionRow)context;
+                                            var isFederal    = j.JurisdictionCode.EndsWith("-FED", StringComparison.OrdinalIgnoreCase);
+                                            var isConfirming = _confirmRemoveCode == j.JurisdictionCode;
+                                        }
+                                        @if (isFederal)
+                                        {
+                                            <span class="badge badge-info">Federal — required</span>
+                                        }
+                                        else if (isConfirming)
+                                        {
+                                            <span class="confirm-inline">
+                                                @if (_affectedCount > 0)
+                                                {
+                                                    <span class="confirm-warning">@_affectedCount employee(s) have active elections in this jurisdiction.</span>
+                                                }
+                                                <span>Remove @j.JurisdictionCode?</span>
+                                                <button class="btn-danger btn-sm" disabled="@_saving"
+                                                        @onclick="() => ConfirmRemoveAsync(j.JurisdictionCode)">
+                                                    @(_saving ? "Removing…" : "Confirm Remove")
                                                 </button>
-                                            }
-                                        </td>
-                                    </tr>
-                                }
-                            </tbody>
-                        </table>
+                                                <button class="btn-secondary btn-sm" @onclick="CancelConfirm">Cancel</button>
+                                            </span>
+                                        }
+                                        else
+                                        {
+                                            <button class="btn-secondary btn-sm"
+                                                    @onclick="() => StartRemoveAsync(j.JurisdictionCode)">
+                                                Remove
+                                            </button>
+                                        }
+                                    </Template>
+                                </GridColumn>
+                            </GridColumns>
+                        </SfGrid>
                     }
                 </div>
             </div>

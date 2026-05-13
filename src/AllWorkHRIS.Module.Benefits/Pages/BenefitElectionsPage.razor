@@ -14,6 +14,10 @@
 @inject IEmploymentLookup              EmploymentService
 @inject IHrisSessionState              SessionState
 @inject AuthenticationStateProvider   AuthState
+@using Syncfusion.Blazor.Grids
+@using Syncfusion.Blazor.Inputs
+@using Syncfusion.Blazor.DropDowns
+@using Syncfusion.Blazor.Calendars
 
 <PageTitle>Benefit Elections — AllWork HRIS</PageTitle>
 
@@ -119,7 +123,7 @@
                 </p>
                 @if (_activeCodes.Count == 0)
                 {
-                    <p class="empty-state">No active deduction codes are configured. Add codes on the Deduction Codes page first.</p>
+                    <p class="empty-state">No active benefit plans are configured. Add plans on the Benefit Plans page first.</p>
                 }
                 else
                 {
@@ -174,13 +178,8 @@
                         </div>
                         <div class="form-group">
                             <label class="form-label">Contribution % <span class="required">*</span></label>
-                            <div style="position:relative;">
-                                <input class="form-input" type="number" step="0.001" min="0.001" max="100"
-                                       @bind="_addContributionPct" placeholder="e.g. 6"
-                                       style="padding-right:2.25rem;" />
-                                <span style="position:absolute;right:1rem;top:50%;transform:translateY(-50%);
-                                             font-size:1.2rem;color:#6b7280;pointer-events:none;">%</span>
-                            </div>
+                            <SfNumericTextBox TValue="decimal?" @bind-Value="_addContributionPct"
+                                             Min="0.001m" Max="100" Step="0.001m" Placeholder="e.g. 6" />
                             <small class="hint-text">
                                 Enter as a percentage of gross pay — e.g. <strong>6</strong> deducts 6% each period.
                                 @if (_addContributionPct.HasValue && _addContributionPct.Value > 0)
@@ -240,20 +239,16 @@
                         </p>
                         <div class="form-group">
                             <label class="form-label">@GetAmountLabel(mode)</label>
-                            <input class="form-input" type="number" step="0.01" min="0"
-                                   value="@_addEmployeeAmount"
-                                   @onchange="e => _addEmployeeAmount = ParseRoundedDecimal(e.Value?.ToString())"
-                                   placeholder="0.00" />
+                            <SfNumericTextBox TValue="decimal?" @bind-Value="_addEmployeeAmount"
+                                             Min="0" Step="0.01m" Placeholder="0.00" />
                         </div>
                         <div class="form-group">
                             <label class="form-label">
                                 Employer Contribution
                                 <span style="font-size:.8rem;color:#6b7280;">(optional)</span>
                             </label>
-                            <input class="form-input" type="number" step="0.01" min="0"
-                                   value="@_addEmployerAmount"
-                                   @onchange="e => _addEmployerAmount = ParseRoundedDecimal(e.Value?.ToString())"
-                                   placeholder="0.00" />
+                            <SfNumericTextBox TValue="decimal?" @bind-Value="_addEmployerAmount"
+                                             Min="0" Step="0.01m" Placeholder="0.00" />
                             <small class="hint-text">
                                 A fixed employer dollar contribution each period — separate from any percentage-match rule
                                 configured on the deduction code.
@@ -274,7 +269,7 @@
                 <div style="max-width:400px;">
                     <div class="form-group">
                         <label class="form-label">Effective Start <span class="required">*</span></label>
-                        <input class="form-input" type="date" @bind="_addStart" />
+                        <SfDatePicker TValue="DateOnly?" @bind-Value="_addStart" Placeholder="MM/DD/YYYY" />
                         <small class="hint-text">
                             @if (_addStart.HasValue && _addStart.Value > DateOnly.FromDateTime(DateTime.Today))
                             {
@@ -299,7 +294,7 @@
                             Effective End
                             <span style="font-size:.8rem;color:#6b7280;">(optional)</span>
                         </label>
-                        <input class="form-input" type="date" @bind="_addEnd" />
+                        <SfDatePicker TValue="DateOnly?" @bind-Value="_addEnd" Placeholder="MM/DD/YYYY" />
                         <small class="hint-text">
                             Leave blank for ongoing elections. Set an end date for seasonal coverage,
                             a defined benefit period, or a known leave of absence duration.
@@ -425,12 +420,8 @@
                 {
                     <div class="form-group">
                         <label class="form-label">Contribution %</label>
-                        <div style="position:relative;">
-                            <input class="form-input" type="number" step="0.001" min="0.001" max="100"
-                                   @bind="_amendContributionPct" style="padding-right:2.25rem;" />
-                            <span style="position:absolute;right:1rem;top:50%;transform:translateY(-50%);
-                                         color:#6b7280;pointer-events:none;">%</span>
-                        </div>
+                        <SfNumericTextBox TValue="decimal?" @bind-Value="_amendContributionPct"
+                                         Min="0.001m" Max="100" Step="0.001m" Placeholder="e.g. 6" />
                     </div>
                 }
                 else if (_amendTarget.CalculationMode == CalculationMode.CoverageBased)
@@ -465,18 +456,18 @@
                 {
                     <div class="form-group">
                         <label class="form-label">@GetAmountLabel(_amendTarget.CalculationMode)</label>
-                        <input class="form-input" type="number" step="0.01" min="0"
-                               @bind="_amendEmployeeAmount" placeholder="0.00" />
+                        <SfNumericTextBox TValue="decimal?" @bind-Value="_amendEmployeeAmount"
+                                         Min="0" Step="0.01m" Placeholder="0.00" />
                     </div>
                     <div class="form-group">
                         <label class="form-label">Employer Contribution <span style="font-size:.8rem;color:#6b7280;">(optional)</span></label>
-                        <input class="form-input" type="number" step="0.01" min="0"
-                               @bind="_amendEmployerAmount" placeholder="0.00" />
+                        <SfNumericTextBox TValue="decimal?" @bind-Value="_amendEmployerAmount"
+                                         Min="0" Step="0.01m" Placeholder="0.00" />
                     </div>
                 }
                 <div class="form-group">
                     <label class="form-label">Amendment Date <span class="required">*</span></label>
-                    <input class="form-input" type="date" @bind="_amendDate" />
+                    <SfDatePicker TValue="DateOnly" @bind-Value="_amendDate" Placeholder="MM/DD/YYYY" />
                     <small class="hint-text">Prior election is end-dated to the day before this date.</small>
                 </div>
             </div>
@@ -509,15 +500,11 @@
     }
 
     <div class="filter-bar">
-        <input class="form-input filter-input" @bind="_filterCode" @bind:event="oninput"
-               placeholder="Filter by code…" />
-        <select class="form-select filter-select" @bind="_filterStatus">
-            <option value="">All statuses</option>
-            <option value="PENDING">Pending</option>
-            <option value="ACTIVE">Active</option>
-            <option value="SUSPENDED">Suspended</option>
-            <option value="TERMINATED">Terminated</option>
-        </select>
+        <SfTextBox @bind-Value="_filterCode" Placeholder="Filter by code…" />
+        <SfDropDownList TValue="string" TItem="FilterOption" DataSource="@_electionStatusOptions"
+                        @bind-Value="_filterStatus">
+            <DropDownListFieldSettings Value="Value" Text="Label" />
+        </SfDropDownList>
         <button class="btn btn-secondary btn-sm" @onclick="ApplyFiltersAsync">Filter</button>
     </div>
 
@@ -531,74 +518,76 @@
     }
     else
     {
-        <table class="data-table">
-            <thead>
-                <tr>
-                    <th>Employee</th>
-                    <th>Code</th>
-                    <th>Treatment</th>
-                    <th>Contribution</th>
-                    <th>ER Amount</th>
-                    <th>Effective Start</th>
-                    <th>Effective End</th>
-                    <th>Status</th>
-                    <th>Source</th>
-                    <th></th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var item in _page.Items)
-                {
-                    <tr>
-                        <td>
-                            <div>@item.EmployeeDisplayName</div>
-                            <small class="text-muted">@item.EmployeeNumber</small>
-                        </td>
-                        <td><samp>@item.DeductionCode</samp></td>
-                        <td><span class="badge @TreatmentClass(item.TaxTreatment)">@item.TaxTreatment</span></td>
-                        <td>@FormatContribution(item)</td>
-                        <td>@(item.EmployerContributionAmount?.ToString("N2") ?? "—")</td>
-                        <td>@item.EffectiveStartDate.ToString("yyyy-MM-dd")</td>
-                        <td>@(item.EffectiveEndDate?.ToString("yyyy-MM-dd") ?? "—")</td>
-                        <td><span class="badge @StatusClass(item.Status)">@item.Status</span></td>
-                        <td><span class="badge badge-gray">@item.Source</span></td>
-                        <td>
-                            <AuthorizeView Roles="HrisAdmin,BenefitsAdmin">
-                                <Authorized>
+        <SfGrid DataSource="@_page.Items" AllowSorting="true" CssClass="e-gridhover">
+            <GridColumns>
+                <GridColumn HeaderText="Employee" Width="200">
+                    <Template>
+                        @{ var item = (ElectionListItem)context; }
+                        <div>@item.EmployeeDisplayName</div>
+                        <small class="text-muted">@item.EmployeeNumber</small>
+                    </Template>
+                </GridColumn>
+                <GridColumn HeaderText="Code" Width="130">
+                    <Template>@{ var item = (ElectionListItem)context; }<samp>@item.DeductionCode</samp></Template>
+                </GridColumn>
+                <GridColumn HeaderText="Treatment" Width="120">
+                    <Template>@{ var item = (ElectionListItem)context; }<span class="badge @TreatmentClass(item.TaxTreatment)">@item.TaxTreatment</span></Template>
+                </GridColumn>
+                <GridColumn HeaderText="Contribution" Width="140">
+                    <Template>@{ var item = (ElectionListItem)context; }@FormatContribution(item)</Template>
+                </GridColumn>
+                <GridColumn HeaderText="ER Amount" Width="110">
+                    <Template>@{ var item = (ElectionListItem)context; }@(item.EmployerContributionAmount?.ToString("N2") ?? "—")</Template>
+                </GridColumn>
+                <GridColumn HeaderText="Effective Start" Width="130">
+                    <Template>@{ var item = (ElectionListItem)context; }@item.EffectiveStartDate.ToString("yyyy-MM-dd")</Template>
+                </GridColumn>
+                <GridColumn HeaderText="Effective End" Width="130">
+                    <Template>@{ var item = (ElectionListItem)context; }@(item.EffectiveEndDate?.ToString("yyyy-MM-dd") ?? "—")</Template>
+                </GridColumn>
+                <GridColumn HeaderText="Status" Width="110">
+                    <Template>@{ var item = (ElectionListItem)context; }<span class="badge @StatusClass(item.Status)">@item.Status</span></Template>
+                </GridColumn>
+                <GridColumn HeaderText="Source" Width="100">
+                    <Template>@{ var item = (ElectionListItem)context; }<span class="badge badge-gray">@item.Source</span></Template>
+                </GridColumn>
+                <GridColumn HeaderText="" Width="200" AllowSorting="false">
+                    <Template>
+                        @{ var item = (ElectionListItem)context; }
+                        <AuthorizeView Roles="HrisAdmin,BenefitsAdmin">
+                            <Authorized Context="auth">
+                                @if (item.Status is "ACTIVE" or "PENDING")
+                                {
                                     <div style="display:flex;gap:.375rem;flex-wrap:wrap;">
-                                        @if (item.Status is "ACTIVE" or "PENDING")
-                                        {
-                                            <button class="btn btn-sm btn-ghost"
-                                                    @onclick="() => StartWizardForEmployee(item.EmploymentId)"
-                                                    title="Add another election for this employee">Add+</button>
-                                            <button class="btn btn-sm btn-ghost"
-                                                    @onclick="async () => await StartAmendAsync(item)">Amend</button>
-                                            <button class="btn btn-sm btn-ghost"
-                                                    @onclick="() => StartTerminate(item)">Terminate</button>
-                                        }
+                                        <button class="btn btn-sm btn-ghost"
+                                                @onclick="() => StartWizardForEmployee(item.EmploymentId)"
+                                                title="Add another election for this employee">Add+</button>
+                                        <button class="btn btn-sm btn-ghost"
+                                                @onclick="async () => await StartAmendAsync(item)">Amend</button>
+                                        <button class="btn btn-sm btn-ghost"
+                                                @onclick="() => StartTerminate(item)">Terminate</button>
                                     </div>
-                                </Authorized>
-                            </AuthorizeView>
-                        </td>
-                    </tr>
-                }
-                @if (_page.Items.Count == 0)
+                                }
+                            </Authorized>
+                        </AuthorizeView>
+                    </Template>
+                </GridColumn>
+            </GridColumns>
+        </SfGrid>
+
+        @if (_page.Items.Count == 0)
+        {
+            <p class="empty-state" style="margin-top:1rem;">
+                @if (string.IsNullOrWhiteSpace(_filterCode) && string.IsNullOrWhiteSpace(_filterStatus))
                 {
-                    <tr>
-                        <td colspan="10" class="empty-state">
-                            @if (string.IsNullOrWhiteSpace(_filterCode) && string.IsNullOrWhiteSpace(_filterStatus))
-                            {
-                                <span>No benefit elections have been created yet. Use <strong>+ Add Election</strong> to enrol an employee.</span>
-                            }
-                            else
-                            {
-                                <span>No elections match the current filter. Clear the filter to see all elections.</span>
-                            }
-                        </td>
-                    </tr>
+                    <span>No benefit elections have been created yet. Use <strong>+ Add Election</strong> to enrol an employee.</span>
                 }
-            </tbody>
-        </table>
+                else
+                {
+                    <span>No elections match the current filter. Clear the filter to see all elections.</span>
+                }
+            </p>
+        }
 
         @if (_page.TotalPages > 1)
         {
@@ -615,6 +604,18 @@
 </div>
 
 @code {
+
+    // ── Dropdown data sources ────────────────────────────────────────
+    private sealed record FilterOption(string Value, string Label);
+
+    private static readonly List<FilterOption> _electionStatusOptions =
+    [
+        new("",           "All statuses"),
+        new("PENDING",    "Pending"),
+        new("ACTIVE",     "Active"),
+        new("SUSPENDED",  "Suspended"),
+        new("TERMINATED", "Terminated"),
+    ];
 
     // ── Static configuration ─────────────────────────────────────────
     private static readonly (string Label, int Num)[] StepLabels =

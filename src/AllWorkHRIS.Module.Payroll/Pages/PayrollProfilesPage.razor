@@ -14,31 +14,45 @@
 @inject ILookupCache                LookupCache
 @inject ITemporalContext            TemporalContext
 @inject AuthenticationStateProvider AuthState
+@using Syncfusion.Blazor.Grids
+@using Syncfusion.Blazor.Inputs
+@using Syncfusion.Blazor.DropDowns
+@using Syncfusion.Blazor.Calendars
 
 <PageTitle>Payroll Profiles — AllWork HRIS</PageTitle>
+
+<style>
+    .stat-card--enrolled   { border-top: 3px solid var(--color-success); }
+    .stat-card--pending    { border-top: 3px solid var(--color-warning); }
+    .stat-card--suspended  { border-top: 3px solid var(--module-payroll); }
+    .stat-card--terminated { border-top: 3px solid #9CA3AF; }
+</style>
 
 <div class="page-container">
 
     <div class="page-header">
         <h2 class="page-title">Payroll Profiles</h2>
-        <button class="btn-primary" @onclick="ToggleEnrollFormAsync">+ Enroll Employee</button>
+        @if (!_showEnrollForm)
+        {
+            <button class="btn-primary" @onclick="ToggleEnrollFormAsync">+ Enroll Employee</button>
+        }
     </div>
 
     @* Stat cards *@
     <div class="stat-cards">
-        <div class="stat-card">
+        <div class="stat-card stat-card--enrolled">
             <span class="stat-label">Enrolled</span>
             <span class="stat-value">@_profiles.Count(p => p.EnrollmentStatus == "ACTIVE")</span>
         </div>
-        <div class="stat-card">
+        <div class="stat-card stat-card--pending">
             <span class="stat-label">Final Pay Pending</span>
             <span class="stat-value">@_profiles.Count(p => p.EnrollmentStatus == "FINAL_PAY_PENDING")</span>
         </div>
-        <div class="stat-card">
+        <div class="stat-card stat-card--suspended">
             <span class="stat-label">Suspended</span>
             <span class="stat-value">@_profiles.Count(p => p.EnrollmentStatus == "SUSPENDED")</span>
         </div>
-        <div class="stat-card">
+        <div class="stat-card stat-card--terminated">
             <span class="stat-label">Terminated</span>
             <span class="stat-value">@_profiles.Count(p => p.EnrollmentStatus == "TERMINATED")</span>
         </div>
@@ -55,18 +69,15 @@
             <div class="form-grid form-grid-3" style="margin-bottom:var(--space-5)">
                 <div class="form-field">
                     <label class="form-label">Payroll Context <span style="color:var(--color-danger)">*</span></label>
-                    <select class="form-control" value="@_enrollContextId"
-                            @onchange="OnEnrollContextChangedAsync">
-                        <option value="">— select —</option>
-                        @foreach (var ctx in _contexts)
-                        {
-                            <option value="@ctx.PayrollContextId">@ctx.PayrollContextName</option>
-                        }
-                    </select>
+                    <SfDropDownList TValue="Guid" TItem="PayrollContext" DataSource="@_contexts"
+                                    @bind-Value="_enrollContextId" Placeholder="— select —">
+                        <DropDownListFieldSettings Value="PayrollContextId" Text="PayrollContextName" />
+                        <DropDownListEvents TValue="Guid" TItem="PayrollContext" ValueChange="OnEnrollContextChangedAsync" />
+                    </SfDropDownList>
                 </div>
                 <div class="form-field">
                     <label class="form-label">Effective Start Date <span style="color:var(--color-danger)">*</span></label>
-                    <input type="date" class="form-control" @bind="_enrollStartDate" />
+                    <SfDatePicker TValue="DateOnly" @bind-Value="_enrollStartDate" Placeholder="MM/DD/YYYY" />
                 </div>
             </div>
 
@@ -75,60 +86,40 @@
             <div class="form-grid form-grid-3" style="margin-bottom:var(--space-3)">
                 <div class="form-field">
                     <label class="form-label">Division</label>
-                    <select class="form-control" value="@_filterDivId"
-                            @onchange="OnDivFilterChanged">
-                        <option value="">All Divisions</option>
-                        @foreach (var dv in _divisions)
-                        {
-                            <option value="@dv.OrgUnitId">@dv.OrgUnitName</option>
-                        }
-                    </select>
+                    <SfDropDownList TValue="Guid" TItem="GuidOption" DataSource="@_divisionOptions" @bind-Value="_filterDivId">
+                        <DropDownListFieldSettings Value="Value" Text="Label" />
+                        <DropDownListEvents TValue="Guid" TItem="GuidOption" ValueChange="OnDivFilterChanged" />
+                    </SfDropDownList>
                 </div>
                 <div class="form-field">
                     <label class="form-label">Department</label>
-                    <select class="form-control" value="@_filterDeptId"
-                            @onchange="OnDeptFilterChanged">
-                        <option value="">All Departments</option>
-                        @foreach (var d in _departments)
-                        {
-                            <option value="@d.OrgUnitId">@d.OrgUnitName</option>
-                        }
-                    </select>
+                    <SfDropDownList TValue="Guid" TItem="GuidOption" DataSource="@_departmentOptions" @bind-Value="_filterDeptId">
+                        <DropDownListFieldSettings Value="Value" Text="Label" />
+                        <DropDownListEvents TValue="Guid" TItem="GuidOption" ValueChange="OnDeptFilterChanged" />
+                    </SfDropDownList>
                 </div>
                 <div class="form-field">
                     <label class="form-label">Location</label>
-                    <select class="form-control" value="@_filterLocId"
-                            @onchange="OnLocFilterChanged">
-                        <option value="">All Locations</option>
-                        @foreach (var l in _locations)
-                        {
-                            <option value="@l.OrgUnitId">@l.OrgUnitName</option>
-                        }
-                    </select>
+                    <SfDropDownList TValue="Guid" TItem="GuidOption" DataSource="@_locationOptions" @bind-Value="_filterLocId">
+                        <DropDownListFieldSettings Value="Value" Text="Label" />
+                        <DropDownListEvents TValue="Guid" TItem="GuidOption" ValueChange="OnLocFilterChanged" />
+                    </SfDropDownList>
                 </div>
             </div>
             <div class="form-grid form-grid-2" style="margin-bottom:24px">
                 <div class="form-field">
                     <label class="form-label">Rate Type</label>
-                    <select class="form-control" value="@_filterRateTypeCode"
-                            @onchange="OnRateTypeFilterChanged">
-                        <option value="">All Rate Types</option>
-                        @foreach (var rt in _rateTypes)
-                        {
-                            <option value="@rt.Code">@rt.Label</option>
-                        }
-                    </select>
+                    <SfDropDownList TValue="string" TItem="LookupEntry" DataSource="@_rateTypes" @bind-Value="_filterRateTypeCode">
+                        <DropDownListFieldSettings Value="Code" Text="Label" />
+                        <DropDownListEvents TValue="string" TItem="LookupEntry" ValueChange="OnRateTypeFilterChanged" />
+                    </SfDropDownList>
                 </div>
                 <div class="form-field">
                     <label class="form-label">Pay Frequency</label>
-                    <select class="form-control" value="@_filterPayFreqCode"
-                            @onchange="OnPayFreqFilterChanged">
-                        <option value="">All Frequencies</option>
-                        @foreach (var pf in _payFreqs)
-                        {
-                            <option value="@pf.Code">@pf.Label</option>
-                        }
-                    </select>
+                    <SfDropDownList TValue="string" TItem="LookupEntry" DataSource="@_payFreqs" @bind-Value="_filterPayFreqCode">
+                        <DropDownListFieldSettings Value="Code" Text="Label" />
+                        <DropDownListEvents TValue="string" TItem="LookupEntry" ValueChange="OnPayFreqFilterChanged" />
+                    </SfDropDownList>
                 </div>
             </div>
 
@@ -150,41 +141,28 @@
                     <button class="btn-link" @onclick="SelectAll">Select All</button>
                     <button class="btn-link" @onclick="DeselectAll">Deselect All</button>
                 </div>
-                <div style="max-height:280px;overflow-y:auto;border:1px solid #E5E7EB;border-radius:var(--radius-md);margin-bottom:var(--space-4)">
-                    <table class="data-table" style="margin:0">
-                        <thead>
-                            <tr>
-                                <th style="width:2.5rem"></th>
-                                <th>Name</th>
-                                <th>Employee #</th>
-                                <th>Division</th>
-                                <th>Department</th>
-                                <th>Location</th>
-                                <th>Rate Type</th>
-                                <th>Pay Frequency</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @foreach (var emp in _filteredEmployees)
-                            {
-                                <tr>
-                                    <td>
-                                        <input type="checkbox"
-                                               checked="@_selectedIds.Contains(emp.EmploymentId)"
-                                               @onchange="e => ToggleSelection(emp.EmploymentId, (bool)e.Value!)" />
-                                    </td>
-                                    <td>@emp.LegalLastName, @emp.LegalFirstName</td>
-                                    <td style="font-family:monospace">@emp.EmployeeNumber</td>
-                                    <td>@(emp.DivisionName ?? "—")</td>
-                                    <td>@(emp.DepartmentName ?? "—")</td>
-                                    <td>@(emp.LocationName ?? "—")</td>
-                                    <td>@(emp.RateTypeCode ?? "—")</td>
-                                    <td>@(emp.PayFrequencyCode ?? "—")</td>
-                                </tr>
-                            }
-                        </tbody>
-                    </table>
-                </div>
+                <SfGrid DataSource="@_filteredEmployees" AllowSorting="true"
+                        Height="280px" CssClass="e-gridhover" style="margin-bottom:var(--space-4)">
+                    <GridColumns>
+                        <GridColumn HeaderText="" Width="50" AllowSorting="false">
+                            <Template>
+                                @{ var emp = (EmploymentListItem)context; }
+                                <input type="checkbox"
+                                       checked="@_selectedIds.Contains(emp.EmploymentId)"
+                                       @onchange="e => ToggleSelection(emp.EmploymentId, (bool)e.Value!)" />
+                            </Template>
+                        </GridColumn>
+                        <GridColumn HeaderText="Name" Width="190">
+                            <Template>@{ var emp = (EmploymentListItem)context; }@emp.LegalLastName, @emp.LegalFirstName</Template>
+                        </GridColumn>
+                        <GridColumn Field="EmployeeNumber" HeaderText="Employee #" Width="130" />
+                        <GridColumn Field="DivisionName" HeaderText="Division" Width="140" />
+                        <GridColumn Field="DepartmentName" HeaderText="Department" Width="140" />
+                        <GridColumn Field="LocationName" HeaderText="Location" Width="140" />
+                        <GridColumn Field="RateTypeCode" HeaderText="Rate Type" Width="110" />
+                        <GridColumn Field="PayFrequencyCode" HeaderText="Pay Frequency" Width="130" />
+                    </GridColumns>
+                </SfGrid>
             }
 
             @if (_enrollError is not null)
@@ -205,18 +183,22 @@
         </div>
     }
 
-    @if (_contexts.Count > 1)
-    {
-        <div class="filter-row">
+    <div class="filter-row">
+        @if (_contexts.Count > 1)
+        {
             <label class="filter-label">Payroll Context</label>
-            <select class="filter-select" value="@_selectedContextId" @onchange="OnContextChangedAsync">
-                @foreach (var ctx in _contexts)
-                {
-                    <option value="@ctx.PayrollContextId">@ctx.PayrollContextName</option>
-                }
-            </select>
-        </div>
-    }
+            <SfDropDownList TValue="Guid" TItem="PayrollContext" DataSource="@_contexts"
+                            @bind-Value="_selectedContextId" Width="220px">
+                <DropDownListFieldSettings Value="PayrollContextId" Text="PayrollContextName" />
+                <DropDownListEvents TValue="Guid" TItem="PayrollContext" ValueChange="OnContextChangedAsync" />
+            </SfDropDownList>
+        }
+        <label class="filter-label" style="@(_contexts.Count > 1 ? "margin-left:var(--space-4)" : "")">Status</label>
+        <SfDropDownList TValue="string" TItem="FilterOption" DataSource="@_profileStatusOptions"
+                        @bind-Value="_profileStatusFilter" Width="180px">
+            <DropDownListFieldSettings Value="Value" Text="Label" />
+        </SfDropDownList>
+    </div>
 
     @if (_loading)
     {
@@ -228,45 +210,53 @@
     }
     else
     {
-        <table class="data-table">
-            <thead>
-                <tr>
-                    <th>Employee</th>
-                    <th>Payroll Context</th>
-                    <th>Enrollment Status</th>
-                    <th>Source</th>
-                    <th>Effective From</th>
-                    <th>Effective To</th>
-                    <th>Final Pay</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var p in _profiles.OrderBy(p => GetName(p.EmploymentId)))
-                {
-                    <tr>
-                        <td>
-                            <a href="/hris/employees/@p.EmploymentId" class="table-link">@GetName(p.EmploymentId)</a>
-                        </td>
-                        <td>@GetContextName(p.PayrollContextId)</td>
-                        <td><span class="badge @GetStatusClass(p.EnrollmentStatus)">@p.EnrollmentStatus</span></td>
-                        <td>@p.EnrollmentSource</td>
-                        <td>@p.EffectiveStartDate.ToString("yyyy-MM-dd")</td>
-                        <td>@(p.EffectiveEndDate?.ToString("yyyy-MM-dd") ?? "—")</td>
-                        <td>@(p.FinalPayFlag ? "Yes" : "—")</td>
-                    </tr>
-                }
-            </tbody>
-        </table>
+        <SfGrid DataSource="@_profiles.Where(p => string.IsNullOrEmpty(_profileStatusFilter) || p.EnrollmentStatus == _profileStatusFilter).OrderBy(p => GetName(p.EmploymentId)).ToList()" AllowSorting="true" AllowPaging="true" CssClass="e-gridhover">
+            <GridPageSettings PageSize="20" />
+            <GridColumns>
+                <GridColumn HeaderText="Employee" Width="200">
+                    <Template>@{ var p = (PayrollProfile)context; }<a href="/hris/employees/@p.EmploymentId" class="table-link">@GetName(p.EmploymentId)</a></Template>
+                </GridColumn>
+                <GridColumn HeaderText="Payroll Context" Width="200">
+                    <Template>@{ var p = (PayrollProfile)context; }@GetContextName(p.PayrollContextId)</Template>
+                </GridColumn>
+                <GridColumn HeaderText="Enrollment Status" Width="160">
+                    <Template>@{ var p = (PayrollProfile)context; }<span class="badge @GetStatusClass(p.EnrollmentStatus)">@p.EnrollmentStatus</span></Template>
+                </GridColumn>
+                <GridColumn Field="EnrollmentSource" HeaderText="Source" Width="120" />
+                <GridColumn HeaderText="Effective From" Width="130">
+                    <Template>@{ var p = (PayrollProfile)context; }@p.EffectiveStartDate.ToString("yyyy-MM-dd")</Template>
+                </GridColumn>
+                <GridColumn HeaderText="Effective To" Width="130">
+                    <Template>@{ var p = (PayrollProfile)context; }@(p.EffectiveEndDate?.ToString("yyyy-MM-dd") ?? "—")</Template>
+                </GridColumn>
+                <GridColumn HeaderText="Final Pay" Width="100">
+                    <Template>@{ var p = (PayrollProfile)context; }@(p.FinalPayFlag ? "Yes" : "—")</Template>
+                </GridColumn>
+            </GridColumns>
+        </SfGrid>
     }
 
 </div>
 
 @code {
+    private record GuidOption(Guid Value, string Label);
+    private record FilterOption(string Value, string Label);
+
+    private static readonly List<FilterOption> _profileStatusOptions =
+    [
+        new("",                 "All Statuses"),
+        new("ACTIVE",           "Active"),
+        new("FINAL_PAY_PENDING","Final Pay Pending"),
+        new("SUSPENDED",        "Suspended"),
+        new("TERMINATED",       "Terminated"),
+    ];
+
     // ── Profile list state ────────────────────────────────────────
     private List<PayrollContext>      _contexts          = [];
     private List<PayrollProfile>      _profiles          = [];
     private Dictionary<Guid, string>  _names             = new();
     private Guid                      _selectedContextId;
+    private string                    _profileStatusFilter = "";
     private bool                      _loading           = true;
     private Guid                      _currentUserId;
 
@@ -285,6 +275,9 @@
     private List<OrgUnitOption>       _divisions           = [];
     private List<OrgUnitOption>       _departments         = [];
     private List<OrgUnitOption>       _locations           = [];
+    private List<GuidOption>          _divisionOptions     = [];
+    private List<GuidOption>          _departmentOptions   = [];
+    private List<GuidOption>          _locationOptions     = [];
     private Guid                      _filterDivId;
     private Guid                      _filterDeptId;
     private Guid                      _filterLocId;
@@ -301,8 +294,12 @@
         SessionState.OnChanged += HandleEntityChanged;
 
         _enrollStartDate = DateOnly.FromDateTime(TemporalContext.GetOperativeDate());
-        _rateTypes       = LookupCache.GetAll(LookupTables.CompensationRateType).OrderBy(e => e.Label).ToList();
-        _payFreqs        = LookupCache.GetAll(LookupTables.PayFrequency).OrderBy(e => e.Label).ToList();
+        _rateTypes = new[] { new LookupEntry { Id = 0, Code = "", Label = "All Rate Types" } }
+            .Concat(LookupCache.GetAll(LookupTables.CompensationRateType).OrderBy(e => e.Label))
+            .ToList();
+        _payFreqs = new[] { new LookupEntry { Id = 0, Code = "", Label = "All Frequencies" } }
+            .Concat(LookupCache.GetAll(LookupTables.PayFrequency).OrderBy(e => e.Label))
+            .ToList();
 
         await LoadForEntityAsync();
     }
@@ -361,6 +358,12 @@
             _divisions   = divs.OrderBy(d => d.OrgUnitName).ToList();
             _departments = depts.OrderBy(d => d.OrgUnitName).ToList();
             _locations   = locs.OrderBy(l => l.OrgUnitName).ToList();
+            _divisionOptions   = new GuidOption[] { new(Guid.Empty, "All Divisions") }
+                .Concat(_divisions.Select(d => new GuidOption(d.OrgUnitId, d.OrgUnitName))).ToList();
+            _departmentOptions = new GuidOption[] { new(Guid.Empty, "All Departments") }
+                .Concat(_departments.Select(d => new GuidOption(d.OrgUnitId, d.OrgUnitName))).ToList();
+            _locationOptions   = new GuidOption[] { new(Guid.Empty, "All Locations") }
+                .Concat(_locations.Select(l => new GuidOption(l.OrgUnitId, l.OrgUnitName))).ToList();
 
             await LoadUnenrolledAsync(_enrollContextId);
         }
@@ -371,6 +374,9 @@
             _divisions           = [];
             _departments         = [];
             _locations           = [];
+            _divisionOptions     = [];
+            _departmentOptions   = [];
+            _locationOptions     = [];
         }
     }
 
@@ -386,33 +392,33 @@
         ApplyFilters();
     }
 
-    private void OnDivFilterChanged(ChangeEventArgs e)
+    private void OnDivFilterChanged(ChangeEventArgs<Guid, GuidOption> args)
     {
-        _filterDivId = Guid.TryParse(e.Value?.ToString(), out var id) ? id : Guid.Empty;
+        _filterDivId = args.Value;
         ApplyFilters();
     }
 
-    private void OnDeptFilterChanged(ChangeEventArgs e)
+    private void OnDeptFilterChanged(ChangeEventArgs<Guid, GuidOption> args)
     {
-        _filterDeptId = Guid.TryParse(e.Value?.ToString(), out var id) ? id : Guid.Empty;
+        _filterDeptId = args.Value;
         ApplyFilters();
     }
 
-    private void OnLocFilterChanged(ChangeEventArgs e)
+    private void OnLocFilterChanged(ChangeEventArgs<Guid, GuidOption> args)
     {
-        _filterLocId = Guid.TryParse(e.Value?.ToString(), out var id) ? id : Guid.Empty;
+        _filterLocId = args.Value;
         ApplyFilters();
     }
 
-    private void OnRateTypeFilterChanged(ChangeEventArgs e)
+    private void OnRateTypeFilterChanged(ChangeEventArgs<string, LookupEntry> args)
     {
-        _filterRateTypeCode = e.Value?.ToString() ?? "";
+        _filterRateTypeCode = args.Value ?? "";
         ApplyFilters();
     }
 
-    private void OnPayFreqFilterChanged(ChangeEventArgs e)
+    private void OnPayFreqFilterChanged(ChangeEventArgs<string, LookupEntry> args)
     {
-        _filterPayFreqCode = e.Value?.ToString() ?? "";
+        _filterPayFreqCode = args.Value ?? "";
         ApplyFilters();
     }
 
@@ -426,19 +432,14 @@
             .Where(e => _filterPayFreqCode   == ""         || e.PayFrequencyCode == _filterPayFreqCode)
             .ToList();
 
-        // Drop any selections no longer in view
-        var visibleIds = _filteredEmployees.Select(e => e.EmploymentId).ToHashSet();
-        _selectedIds.IntersectWith(visibleIds);
+        _selectedIds = [];
     }
 
-    private async Task OnEnrollContextChangedAsync(ChangeEventArgs e)
+    private async Task OnEnrollContextChangedAsync(ChangeEventArgs<Guid, PayrollContext> args)
     {
-        if (Guid.TryParse(e.Value?.ToString(), out var id))
-        {
-            _enrollContextId = id;
-            _selectedIds     = [];
-            await LoadUnenrolledAsync(id);
-        }
+        _enrollContextId = args.Value;
+        _selectedIds     = [];
+        await LoadUnenrolledAsync(args.Value);
     }
 
     // ── Selection helpers ─────────────────────────────────────────
@@ -520,13 +521,10 @@
         _loading = false;
     }
 
-    private async Task OnContextChangedAsync(ChangeEventArgs e)
+    private async Task OnContextChangedAsync(ChangeEventArgs<Guid, PayrollContext> args)
     {
-        if (Guid.TryParse(e.Value?.ToString(), out var id))
-        {
-            _selectedContextId = id;
-            await LoadProfilesAsync();
-        }
+        _selectedContextId = args.Value;
+        await LoadProfilesAsync();
     }
 
     private string GetName(Guid employmentId)
