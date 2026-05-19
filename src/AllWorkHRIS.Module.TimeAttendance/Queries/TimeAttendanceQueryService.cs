@@ -80,7 +80,7 @@ public sealed class TimeAttendanceQueryService
             JOIN   payroll_context pc ON pc.payroll_context_id = pp.payroll_context_id
             WHERE  pc.legal_entity_id = @LegalEntityId
               AND  pp.calendar_status NOT IN ('CLOSED','FINALIZED')
-            ORDER  BY pp.period_start_date DESC
+            ORDER  BY pp.period_start_date ASC
             """,
             new { LegalEntityId = legalEntityId });
 

@@ -8,6 +8,7 @@
 @using System.Text
 @using Microsoft.JSInterop
 @using Syncfusion.Blazor.Inputs
+@using Syncfusion.Blazor.Grids
 @inject IHrisSessionState       SessionState
 @inject PayRegisterQueryService QueryService
 @inject IJSRuntime              JS
@@ -119,43 +120,39 @@
                             <Authorized>
                                 <div class="summary-section">
                                     <h3 class="summary-section__title">Payroll Cost Summary</h3>
-                                    <table class="summary-table">
-                                        <tbody>
-                                            <tr><td>Total Gross Payroll</td><td class="amount">@Fmt(_summary.TotalGrossPayroll)</td></tr>
-                                            <tr><td>Total Employer Taxes</td><td class="amount">@Fmt(_summary.TotalEmployerTaxes)</td></tr>
-                                            <tr><td>Total Employer Benefit Contributions</td><td class="amount">@Fmt(_summary.TotalEmployerBenefitContrib)</td></tr>
-                                            <tr class="summary-table__subtotal"><td><strong>Total Employer Cost</strong></td><td class="amount"><strong>@Fmt(_summary.TotalEmployerCost)</strong></td></tr>
-                                            <tr><td>Total Employee Tax Withholdings</td><td class="amount">@Fmt(_summary.TotalEmployeeTaxWithholdings)</td></tr>
-                                            <tr><td>Total Employee Benefit Deductions</td><td class="amount">@Fmt(_summary.TotalEmployeeBenefitDeducts)</td></tr>
-                                            <tr class="summary-table__subtotal"><td><strong>Total Net Pay</strong></td><td class="amount"><strong>@Fmt(_summary.TotalNetPay)</strong></td></tr>
-                                            <tr class="summary-table__highlight"><td><strong>Total Cash Required (ACH)</strong></td><td class="amount"><strong>@Fmt(_summary.TotalCashRequired)</strong></td></tr>
-                                        </tbody>
-                                    </table>
+                                    <div class="summary-rows">
+                                        <div class="summary-row"><span>Total Gross Payroll</span><span class="amount">@Fmt(_summary.TotalGrossPayroll)</span></div>
+                                        <div class="summary-row"><span>Total Employer Taxes</span><span class="amount">@Fmt(_summary.TotalEmployerTaxes)</span></div>
+                                        <div class="summary-row"><span>Total Employer Benefit Contributions</span><span class="amount">@Fmt(_summary.TotalEmployerBenefitContrib)</span></div>
+                                        <div class="summary-row summary-row--subtotal"><span><strong>Total Employer Cost</strong></span><span class="amount"><strong>@Fmt(_summary.TotalEmployerCost)</strong></span></div>
+                                        <div class="summary-row"><span>Total Employee Tax Withholdings</span><span class="amount">@Fmt(_summary.TotalEmployeeTaxWithholdings)</span></div>
+                                        <div class="summary-row"><span>Total Employee Benefit Deductions</span><span class="amount">@Fmt(_summary.TotalEmployeeBenefitDeducts)</span></div>
+                                        <div class="summary-row summary-row--subtotal"><span><strong>Total Net Pay</strong></span><span class="amount"><strong>@Fmt(_summary.TotalNetPay)</strong></span></div>
+                                        <div class="summary-row summary-row--highlight"><span><strong>Total Cash Required (ACH)</strong></span><span class="amount"><strong>@Fmt(_summary.TotalCashRequired)</strong></span></div>
+                                    </div>
                                 </div>
 
                                 <div class="summary-section">
                                     <h3 class="summary-section__title">Tax Liability Summary</h3>
-                                    <table class="summary-table">
-                                        <tbody>
-                                            <tr><td>Federal Income Tax Withheld</td><td class="amount">@Fmt(_summary.FederalIncomeTax)</td></tr>
-                                            <tr><td>Social Security — Employee</td><td class="amount">@Fmt(_summary.SocialSecurityEe)</td></tr>
-                                            <tr><td>Social Security — Employer</td><td class="amount">@Fmt(_summary.SocialSecurityEr)</td></tr>
-                                            <tr><td>Medicare — Employee</td><td class="amount">@Fmt(_summary.MedicareEe)</td></tr>
-                                            <tr><td>Medicare — Employer</td><td class="amount">@Fmt(_summary.MedicareEr)</td></tr>
-                                            @foreach (var row in _summary.StateAndLocalTax)
-                                            {
-                                                <tr><td>@row.Label</td><td class="amount">@Fmt(row.Amount)</td></tr>
-                                            }
-                                            @if (_summary.Futa != 0)
-                                            {
-                                                <tr><td>FUTA</td><td class="amount">@Fmt(_summary.Futa)</td></tr>
-                                            }
-                                            @foreach (var row in _summary.SutaByState)
-                                            {
-                                                <tr><td>@row.Label</td><td class="amount">@Fmt(row.Amount)</td></tr>
-                                            }
-                                        </tbody>
-                                    </table>
+                                    <div class="summary-rows">
+                                        <div class="summary-row"><span>Federal Income Tax Withheld</span><span class="amount">@Fmt(_summary.FederalIncomeTax)</span></div>
+                                        <div class="summary-row"><span>Social Security — Employee</span><span class="amount">@Fmt(_summary.SocialSecurityEe)</span></div>
+                                        <div class="summary-row"><span>Social Security — Employer</span><span class="amount">@Fmt(_summary.SocialSecurityEr)</span></div>
+                                        <div class="summary-row"><span>Medicare — Employee</span><span class="amount">@Fmt(_summary.MedicareEe)</span></div>
+                                        <div class="summary-row"><span>Medicare — Employer</span><span class="amount">@Fmt(_summary.MedicareEr)</span></div>
+                                        @foreach (var row in _summary.StateAndLocalTax)
+                                        {
+                                            <div class="summary-row"><span>@row.Label</span><span class="amount">@Fmt(row.Amount)</span></div>
+                                        }
+                                        @if (_summary.Futa != 0)
+                                        {
+                                            <div class="summary-row"><span>FUTA</span><span class="amount">@Fmt(_summary.Futa)</span></div>
+                                        }
+                                        @foreach (var row in _summary.SutaByState)
+                                        {
+                                            <div class="summary-row"><span>@row.Label</span><span class="amount">@Fmt(row.Amount)</span></div>
+                                        }
+                                    </div>
                                 </div>
                             </Authorized>
                         </AuthorizeView>
@@ -163,13 +160,11 @@
                         @* Benefit Summary — visible to all authorized roles *@
                         <div class="summary-section">
                             <h3 class="summary-section__title">Benefit Summary</h3>
-                            <table class="summary-table">
-                                <tbody>
-                                    <tr><td>Total Employee Deductions</td><td class="amount">@Fmt(_summary.TotalEmployeeDeductions)</td></tr>
-                                    <tr><td>Total Employer Contributions</td><td class="amount">@Fmt(_summary.TotalEmployerContributions)</td></tr>
-                                    <tr><td>Total Retirement Deductions (EE)</td><td class="amount">@Fmt(_summary.TotalRetirementDeductions)</td></tr>
-                                </tbody>
-                            </table>
+                            <div class="summary-rows">
+                                <div class="summary-row"><span>Total Employee Deductions</span><span class="amount">@Fmt(_summary.TotalEmployeeDeductions)</span></div>
+                                <div class="summary-row"><span>Total Employer Contributions</span><span class="amount">@Fmt(_summary.TotalEmployerContributions)</span></div>
+                                <div class="summary-row"><span>Total Retirement Deductions (EE)</span><span class="amount">@Fmt(_summary.TotalRetirementDeductions)</span></div>
+                            </div>
                         </div>
 
                         @* Headcount — hidden from BenefitsAdmin *@
@@ -177,12 +172,10 @@
                             <Authorized>
                                 <div class="summary-section">
                                     <h3 class="summary-section__title">Headcount</h3>
-                                    <table class="summary-table">
-                                        <tbody>
-                                            <tr><td>Employees Included</td><td class="amount">@_summary.EmployeesIncluded</td></tr>
-                                            <tr><td>Employees with Supplemental Pay</td><td class="amount">@_summary.EmployeesWithSupplementalPay</td></tr>
-                                        </tbody>
-                                    </table>
+                                    <div class="summary-rows">
+                                        <div class="summary-row"><span>Employees Included</span><span class="amount">@_summary.EmployeesIncluded</span></div>
+                                        <div class="summary-row"><span>Employees with Supplemental Pay</span><span class="amount">@_summary.EmployeesWithSupplementalPay</span></div>
+                                    </div>
                                 </div>
                                 <div class="export-row">
                                     <button class="btn-link" @onclick="ExportSummaryCsvAsync">Download CSV</button>
@@ -196,7 +189,7 @@
 
             @* ── Org Rollup ─────────────────────────────────────────────── *@
             <AuthorizeView Roles="PayrollOperator,PayrollAdmin,HrisAdmin">
-                <Authorized>
+                <Authorized Context="authCtx">
                     @if (_activeTab == "org")
                     {
                         <div class="tab-content">
@@ -220,98 +213,90 @@
                             }
                             else
                             {
-                                <table class="data-table">
-                                    <thead>
-                                        <tr>
-                                            <th>@OrgGroupLabel</th>
-                                            <th class="num-col">Headcount</th>
-                                            <th class="num-col">Gross Wages</th>
-                                            <th class="num-col">EE Tax Withheld</th>
-                                            <th class="num-col">ER Tax Cost</th>
-                                            <th class="num-col">ER Benefit Cost</th>
-                                            <th class="num-col">Net Pay</th>
-                                            <th class="num-col">Total ER Cost</th>
-                                            <th style="width:40px;"></th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        @foreach (var row in _orgRows)
+                                <SfGrid TValue="PayRegisterOrgRow" DataSource="@_orgRows.ToList()" AllowSorting="true" CssClass="e-gridhover">
+                                    <GridEvents TValue="PayRegisterOrgRow" DetailsExpanded="OnOrgRowExpandingAsync" />
+                                    <GridColumns>
+                                        <GridColumn HeaderText="@OrgGroupLabel" Field="GroupName" />
+                                        <GridColumn HeaderText="Headcount" Field="Headcount" TextAlign="TextAlign.Right" Width="100" />
+                                        <GridColumn HeaderText="Gross Wages" Field="GrossWages" TextAlign="TextAlign.Right" Width="110">
+                                            <Template>@{ var r = (PayRegisterOrgRow)context; }@Fmt(r.GrossWages)</Template>
+                                        </GridColumn>
+                                        <GridColumn HeaderText="EE Tax Withheld" Field="EmployeeTaxWithheld" TextAlign="TextAlign.Right" Width="120">
+                                            <Template>@{ var r = (PayRegisterOrgRow)context; }@Fmt(r.EmployeeTaxWithheld)</Template>
+                                        </GridColumn>
+                                        <GridColumn HeaderText="ER Tax Cost" Field="EmployerTaxCost" TextAlign="TextAlign.Right" Width="100">
+                                            <Template>@{ var r = (PayRegisterOrgRow)context; }@Fmt(r.EmployerTaxCost)</Template>
+                                        </GridColumn>
+                                        <GridColumn HeaderText="ER Benefit Cost" Field="EmployerBenefitCost" TextAlign="TextAlign.Right" Width="120">
+                                            <Template>@{ var r = (PayRegisterOrgRow)context; }@Fmt(r.EmployerBenefitCost)</Template>
+                                        </GridColumn>
+                                        <GridColumn HeaderText="Net Pay" Field="NetPay" TextAlign="TextAlign.Right" Width="100">
+                                            <Template>@{ var r = (PayRegisterOrgRow)context; }@Fmt(r.NetPay)</Template>
+                                        </GridColumn>
+                                        <GridColumn HeaderText="Total ER Cost" Field="TotalEmployerCost" TextAlign="TextAlign.Right" Width="110">
+                                            <Template>@{ var r = (PayRegisterOrgRow)context; }@Fmt(r.TotalEmployerCost)</Template>
+                                        </GridColumn>
+                                    </GridColumns>
+                                    <GridAggregates>
+                                        <GridAggregate>
+                                            <GridAggregateColumns>
+                                                <GridAggregateColumn Field="Headcount" Type="AggregateType.Sum">
+                                                    <FooterTemplate>@{ var a = (AggregateTemplateContext)context; }<strong>@Convert.ToInt64(a.Sum)</strong></FooterTemplate>
+                                                </GridAggregateColumn>
+                                                <GridAggregateColumn Field="GrossWages" Type="AggregateType.Sum">
+                                                    <FooterTemplate>@{ var a = (AggregateTemplateContext)context; }<strong>@Fmt(Convert.ToDecimal(a.Sum))</strong></FooterTemplate>
+                                                </GridAggregateColumn>
+                                                <GridAggregateColumn Field="EmployeeTaxWithheld" Type="AggregateType.Sum">
+                                                    <FooterTemplate>@{ var a = (AggregateTemplateContext)context; }<strong>@Fmt(Convert.ToDecimal(a.Sum))</strong></FooterTemplate>
+                                                </GridAggregateColumn>
+                                                <GridAggregateColumn Field="EmployerTaxCost" Type="AggregateType.Sum">
+                                                    <FooterTemplate>@{ var a = (AggregateTemplateContext)context; }<strong>@Fmt(Convert.ToDecimal(a.Sum))</strong></FooterTemplate>
+                                                </GridAggregateColumn>
+                                                <GridAggregateColumn Field="EmployerBenefitCost" Type="AggregateType.Sum">
+                                                    <FooterTemplate>@{ var a = (AggregateTemplateContext)context; }<strong>@Fmt(Convert.ToDecimal(a.Sum))</strong></FooterTemplate>
+                                                </GridAggregateColumn>
+                                                <GridAggregateColumn Field="NetPay" Type="AggregateType.Sum">
+                                                    <FooterTemplate>@{ var a = (AggregateTemplateContext)context; }<strong>@Fmt(Convert.ToDecimal(a.Sum))</strong></FooterTemplate>
+                                                </GridAggregateColumn>
+                                                <GridAggregateColumn Field="TotalEmployerCost" Type="AggregateType.Sum">
+                                                    <FooterTemplate>@{ var a = (AggregateTemplateContext)context; }<strong>@Fmt(Convert.ToDecimal(a.Sum))</strong></FooterTemplate>
+                                                </GridAggregateColumn>
+                                            </GridAggregateColumns>
+                                        </GridAggregate>
+                                    </GridAggregates>
+                                    <GridTemplates><DetailTemplate Context="orgCtx">
+                                        @{ var orgRow = (PayRegisterOrgRow)orgCtx; }
+                                        @if (_orgGroupEmployees.TryGetValue(orgRow.GroupId, out var subEmps))
                                         {
-                                            var expanded = _expandedOrgGroups.Contains(row.GroupId);
-                                            <tr class="data-row">
-                                                <td>@row.GroupName</td>
-                                                <td class="num-col">@row.Headcount</td>
-                                                <td class="num-col">@Fmt(row.GrossWages)</td>
-                                                <td class="num-col">@Fmt(row.EmployeeTaxWithheld)</td>
-                                                <td class="num-col">@Fmt(row.EmployerTaxCost)</td>
-                                                <td class="num-col">@Fmt(row.EmployerBenefitCost)</td>
-                                                <td class="num-col">@Fmt(row.NetPay)</td>
-                                                <td class="num-col">@Fmt(row.TotalEmployerCost)</td>
-                                                <td>
-                                                    <a href="" class="btn-link"
-                                                       @onclick="() => ToggleOrgGroupAsync(row.GroupId)"
-                                                       @onclick:preventDefault>
-                                                        @(expanded ? "Close" : "View")
-                                                    </a>
-                                                </td>
-                                            </tr>
-                                            @if (expanded && _orgGroupEmployees.TryGetValue(row.GroupId, out var empRows))
-                                            {
-                                                <tr class="expansion-row">
-                                                    <td colspan="9">
-                                                        <table class="emp-sub-table">
-                                                            <thead>
-                                                                <tr>
-                                                                    <th>#</th>
-                                                                    <th>Employee</th>
-                                                                    <th>Dept</th>
-                                                                    <th class="num-col">Gross</th>
-                                                                    <th class="num-col">Fed Tax</th>
-                                                                    <th class="num-col">SS (EE)</th>
-                                                                    <th class="num-col">Med (EE)</th>
-                                                                    <th class="num-col">Net Pay</th>
-                                                                </tr>
-                                                            </thead>
-                                                            <tbody>
-                                                                @foreach (var e in empRows)
-                                                                {
-                                                                    <tr>
-                                                                        <td>@e.EmployeeNumber</td>
-                                                                        <td>@e.EmployeeName</td>
-                                                                        <td style="font-size:.75rem;color:#6b7280;">@e.DepartmentName</td>
-                                                                        <td class="num-col">@Fmt(e.Gross)</td>
-                                                                        <td class="num-col">@Fmt(e.FederalTax)</td>
-                                                                        <td class="num-col">@Fmt(e.SsEe)</td>
-                                                                        <td class="num-col">@Fmt(e.MedicareEe)</td>
-                                                                        <td class="num-col">@Fmt(e.NetPay)</td>
-                                                                    </tr>
-                                                                }
-                                                            </tbody>
-                                                        </table>
-                                                    </td>
-                                                </tr>
-                                            }
-                                            else if (expanded)
-                                            {
-                                                <tr class="expansion-row">
-                                                    <td colspan="9"><span class="tab-loading">Loading…</span></td>
-                                                </tr>
-                                            }
+                                            <SfGrid TValue="PayRegisterEmployeeRow" DataSource="@subEmps.ToList()" CssClass="e-gridhover">
+                                                <GridColumns>
+                                                    <GridColumn HeaderText="#" Field="EmployeeNumber" Width="60" />
+                                                    <GridColumn HeaderText="Employee" Field="EmployeeName" />
+                                                    <GridColumn HeaderText="Dept" Field="DepartmentName" Width="100" />
+                                                    <GridColumn HeaderText="Gross" TextAlign="TextAlign.Right" Width="80">
+                                                        <Template>@{ var e = (PayRegisterEmployeeRow)context; }@Fmt(e.Gross)</Template>
+                                                    </GridColumn>
+                                                    <GridColumn HeaderText="Fed Tax" TextAlign="TextAlign.Right" Width="70">
+                                                        <Template>@{ var e = (PayRegisterEmployeeRow)context; }@Fmt(e.FederalTax)</Template>
+                                                    </GridColumn>
+                                                    <GridColumn HeaderText="SS (EE)" TextAlign="TextAlign.Right" Width="70">
+                                                        <Template>@{ var e = (PayRegisterEmployeeRow)context; }@Fmt(e.SsEe)</Template>
+                                                    </GridColumn>
+                                                    <GridColumn HeaderText="Med (EE)" TextAlign="TextAlign.Right" Width="70">
+                                                        <Template>@{ var e = (PayRegisterEmployeeRow)context; }@Fmt(e.MedicareEe)</Template>
+                                                    </GridColumn>
+                                                    <GridColumn HeaderText="Net Pay" TextAlign="TextAlign.Right" Width="80">
+                                                        <Template>@{ var e = (PayRegisterEmployeeRow)context; }@Fmt(e.NetPay)</Template>
+                                                    </GridColumn>
+                                                </GridColumns>
+                                            </SfGrid>
                                         }
-                                        @* Totals row *@
-                                        <tr class="totals-row">
-                                            <td><strong>Total</strong></td>
-                                            <td class="num-col"><strong>@_orgRows.Sum(r => r.Headcount)</strong></td>
-                                            <td class="num-col"><strong>@Fmt(_orgRows.Sum(r => r.GrossWages))</strong></td>
-                                            <td class="num-col"><strong>@Fmt(_orgRows.Sum(r => r.EmployeeTaxWithheld))</strong></td>
-                                            <td class="num-col"><strong>@Fmt(_orgRows.Sum(r => r.EmployerTaxCost))</strong></td>
-                                            <td class="num-col"><strong>@Fmt(_orgRows.Sum(r => r.EmployerBenefitCost))</strong></td>
-                                            <td class="num-col"><strong>@Fmt(_orgRows.Sum(r => r.NetPay))</strong></td>
-                                            <td class="num-col"><strong>@Fmt(_orgRows.Sum(r => r.TotalEmployerCost))</strong></td>
-                                            <td></td>
-                                        </tr>
-                                    </tbody>
-                                </table>
+                                        else
+                                        {
+                                            <span class="tab-loading">Loading…</span>
+                                        }
+                                    </DetailTemplate></GridTemplates>
+                                </SfGrid>
                                 <div class="export-row">
                                     <button class="btn-link" @onclick="ExportOrgCsvAsync">Download CSV</button>
                                 </div>
@@ -335,132 +320,101 @@
                             }
                             else
                             {
-                                <div class="table-scroll">
-                                    <table class="data-table data-table--detail">
-                                        <thead>
-                                            <tr>
-                                                <th><a href="" class="sort-link" @onclick='() => SortBy("number")' @onclick:preventDefault>
-                                                    # @SortIcon("number")</a></th>
-                                                <th><a href="" class="sort-link" @onclick='() => SortBy("name")' @onclick:preventDefault>
-                                                    Employee @SortIcon("name")</a></th>
-                                                <th>Dept</th>
-                                                <th class="num-col"><a href="" class="sort-link" @onclick='() => SortBy("gross")' @onclick:preventDefault>
-                                                    Gross @SortIcon("gross")</a></th>
-                                                <th class="num-col">@_columnLabels.LabelFederalTax</th>
-                                                <th class="num-col">@_columnLabels.LabelPensionEe</th>
-                                                <th class="num-col">@_columnLabels.LabelInsuranceEe</th>
-                                                <th class="num-col">@_columnLabels.LabelStateTax</th>
-                                                @if (_columnLabels.LabelLocalTax is not null)
-                                                {
-                                                    <th class="num-col">@_columnLabels.LabelLocalTax</th>
-                                                }
-                                                <th class="num-col">Benefits</th>
-                                                <th class="num-col">Retire (EE)</th>
-                                                <th class="num-col">Garnish</th>
-                                                <th class="num-col"><a href="" class="sort-link" @onclick='() => SortBy("net")' @onclick:preventDefault>
-                                                    Net Pay @SortIcon("net")</a></th>
-                                                <th class="num-col">@_columnLabels.LabelErPension</th>
-                                                <th class="num-col">@_columnLabels.LabelErInsurance</th>
-                                                <th class="num-col">ER Benefit</th>
-                                                <th style="width:40px;"></th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            @foreach (var emp in PagedEmployeeRows)
-                                            {
-                                                var expEmp = _expandedEmployees.Contains(emp.EmployeePayrollResultId);
-                                                <tr class="data-row">
-                                                    <td>@emp.EmployeeNumber</td>
-                                                    <td>@emp.EmployeeName</td>
-                                                    <td style="font-size:.8rem;color:#6b7280;">@emp.DepartmentName</td>
-                                                    <td class="num-col">@Fmt(emp.Gross)</td>
-                                                    <td class="num-col">@Fmt(emp.FederalTax)</td>
-                                                    <td class="num-col">@Fmt(emp.SsEe)</td>
-                                                    <td class="num-col">@Fmt(emp.MedicareEe)</td>
-                                                    <td class="num-col">@Fmt(emp.StateTax)</td>
-                                                    @if (_columnLabels.LabelLocalTax is not null)
-                                                    {
-                                                        <td class="num-col">@Fmt(emp.LocalTax)</td>
-                                                    }
-                                                    <td class="num-col">@Fmt(emp.BenefitDeductions)</td>
-                                                    <td class="num-col">@Fmt(emp.RetirementDeductions)</td>
-                                                    <td class="num-col">@Fmt(emp.Garnishments)</td>
-                                                    <td class="num-col"><strong>@Fmt(emp.NetPay)</strong></td>
-                                                    <td class="num-col">@Fmt(emp.EmployerSs)</td>
-                                                    <td class="num-col">@Fmt(emp.EmployerMedicare)</td>
-                                                    <td class="num-col">@Fmt(emp.EmployerBenefit)</td>
-                                                    <td>
-                                                        <a href="" class="btn-link"
-                                                           @onclick="() => ToggleEmployeeLineDetailAsync(emp.EmployeePayrollResultId)"
-                                                           @onclick:preventDefault>
-                                                            @(expEmp ? "Close" : "View")
-                                                        </a>
-                                                    </td>
-                                                </tr>
-                                                @if (expEmp && _lineDetailCache.TryGetValue(emp.EmployeePayrollResultId, out var lines))
-                                                {
-                                                    <tr class="expansion-row">
-                                                        <td colspan="@EmpDetailColCount">
-                                                            <table class="line-detail-table">
-                                                                <thead>
-                                                                    <tr>
-                                                                        <th>Category</th>
-                                                                        <th>Code</th>
-                                                                        <th>Description</th>
-                                                                        <th class="num-col">Amount</th>
-                                                                    </tr>
-                                                                </thead>
-                                                                <tbody>
-                                                                    @foreach (var line in lines)
-                                                                    {
-                                                                        <tr class="@(line.Amount < 0 ? "line-negative" : "")">
-                                                                            <td style="color:#6b7280;font-size:.8rem;">@line.Category</td>
-                                                                            <td>@line.Code</td>
-                                                                            <td style="color:#6b7280;font-size:.8rem;">@line.Description</td>
-                                                                            <td class="num-col @(line.Amount < 0 ? "amount-negative" : "")">@Fmt(line.Amount)</td>
-                                                                        </tr>
-                                                                    }
-                                                                </tbody>
-                                                            </table>
-                                                        </td>
-                                                    </tr>
-                                                }
-                                            }
-                                        </tbody>
-                                        <tfoot>
-                                            <tr class="totals-row">
-                                                <td colspan="3"><strong>Total (@FilteredCount)</strong></td>
-                                                <td class="num-col"><strong>@Fmt(FilteredEmployeeRows.Sum(r => r.Gross))</strong></td>
-                                                <td class="num-col"><strong>@Fmt(FilteredEmployeeRows.Sum(r => r.FederalTax))</strong></td>
-                                                <td class="num-col"><strong>@Fmt(FilteredEmployeeRows.Sum(r => r.SsEe))</strong></td>
-                                                <td class="num-col"><strong>@Fmt(FilteredEmployeeRows.Sum(r => r.MedicareEe))</strong></td>
-                                                <td class="num-col"><strong>@Fmt(FilteredEmployeeRows.Sum(r => r.StateTax))</strong></td>
-                                                @if (_columnLabels.LabelLocalTax is not null)
-                                                {
-                                                    <td class="num-col"><strong>@Fmt(FilteredEmployeeRows.Sum(r => r.LocalTax))</strong></td>
-                                                }
-                                                <td class="num-col"><strong>@Fmt(FilteredEmployeeRows.Sum(r => r.BenefitDeductions))</strong></td>
-                                                <td class="num-col"><strong>@Fmt(FilteredEmployeeRows.Sum(r => r.RetirementDeductions))</strong></td>
-                                                <td class="num-col"><strong>@Fmt(FilteredEmployeeRows.Sum(r => r.Garnishments))</strong></td>
-                                                <td class="num-col"><strong>@Fmt(FilteredEmployeeRows.Sum(r => r.NetPay))</strong></td>
-                                                <td class="num-col"><strong>@Fmt(FilteredEmployeeRows.Sum(r => r.EmployerSs))</strong></td>
-                                                <td class="num-col"><strong>@Fmt(FilteredEmployeeRows.Sum(r => r.EmployerMedicare))</strong></td>
-                                                <td class="num-col"><strong>@Fmt(FilteredEmployeeRows.Sum(r => r.EmployerBenefit))</strong></td>
-                                                <td></td>
-                                            </tr>
-                                        </tfoot>
-                                    </table>
-                                </div>
+                                <SfGrid TValue="PayRegisterEmployeeRow" DataSource="@FilteredEmployeeRows.ToList()"
+                                        AllowSorting="true" AllowPaging="true" CssClass="e-gridhover">
+                                    <GridEvents TValue="PayRegisterEmployeeRow" DetailsExpanded="OnEmpRowExpandingAsync" />
+                                    <GridPageSettings PageSize="20" />
+                                    <GridColumns>
+                                        <GridColumn HeaderText="#" Field="EmployeeNumber" Width="60" />
+                                        <GridColumn HeaderText="Employee" Field="EmployeeName" />
+                                        <GridColumn HeaderText="Dept" Field="DepartmentName" Width="90" />
+                                        <GridColumn HeaderText="Gross" Field="Gross" TextAlign="TextAlign.Right" Width="80">
+                                            <Template>@{ var e = (PayRegisterEmployeeRow)context; }@Fmt(e.Gross)</Template>
+                                        </GridColumn>
+                                        <GridColumn HeaderText="@_columnLabels.LabelFederalTax" Field="FederalTax" TextAlign="TextAlign.Right" Width="70">
+                                            <Template>@{ var e = (PayRegisterEmployeeRow)context; }@Fmt(e.FederalTax)</Template>
+                                        </GridColumn>
+                                        <GridColumn HeaderText="@_columnLabels.LabelPensionEe" Field="SsEe" TextAlign="TextAlign.Right" Width="70">
+                                            <Template>@{ var e = (PayRegisterEmployeeRow)context; }@Fmt(e.SsEe)</Template>
+                                        </GridColumn>
+                                        <GridColumn HeaderText="@_columnLabels.LabelInsuranceEe" Field="MedicareEe" TextAlign="TextAlign.Right" Width="70">
+                                            <Template>@{ var e = (PayRegisterEmployeeRow)context; }@Fmt(e.MedicareEe)</Template>
+                                        </GridColumn>
+                                        <GridColumn HeaderText="@_columnLabels.LabelStateTax" Field="StateTax" TextAlign="TextAlign.Right" Width="70">
+                                            <Template>@{ var e = (PayRegisterEmployeeRow)context; }@Fmt(e.StateTax)</Template>
+                                        </GridColumn>
+                                        <GridColumn HeaderText="@(_columnLabels.LabelLocalTax ?? "Local Tax")" Field="LocalTax"
+                                                    Visible="@(_columnLabels.LabelLocalTax is not null)" TextAlign="TextAlign.Right" Width="70">
+                                            <Template>@{ var e = (PayRegisterEmployeeRow)context; }@Fmt(e.LocalTax)</Template>
+                                        </GridColumn>
+                                        <GridColumn HeaderText="Benefits" Field="BenefitDeductions" TextAlign="TextAlign.Right" Width="80">
+                                            <Template>@{ var e = (PayRegisterEmployeeRow)context; }@Fmt(e.BenefitDeductions)</Template>
+                                        </GridColumn>
+                                        <GridColumn HeaderText="Retire" Field="RetirementDeductions" TextAlign="TextAlign.Right" Width="65">
+                                            <Template>@{ var e = (PayRegisterEmployeeRow)context; }@Fmt(e.RetirementDeductions)</Template>
+                                        </GridColumn>
+                                        <GridColumn HeaderText="Garnish" Field="Garnishments" TextAlign="TextAlign.Right" Width="70">
+                                            <Template>@{ var e = (PayRegisterEmployeeRow)context; }@Fmt(e.Garnishments)</Template>
+                                        </GridColumn>
+                                        <GridColumn HeaderText="Net Pay" Field="NetPay" TextAlign="TextAlign.Right" Width="80">
+                                            <Template>@{ var e = (PayRegisterEmployeeRow)context; }<strong>@Fmt(e.NetPay)</strong></Template>
+                                        </GridColumn>
+                                        <GridColumn HeaderText="@_columnLabels.LabelErPension" Field="EmployerSs" TextAlign="TextAlign.Right" Width="70">
+                                            <Template>@{ var e = (PayRegisterEmployeeRow)context; }@Fmt(e.EmployerSs)</Template>
+                                        </GridColumn>
+                                        <GridColumn HeaderText="@_columnLabels.LabelErInsurance" Field="EmployerMedicare" TextAlign="TextAlign.Right" Width="70">
+                                            <Template>@{ var e = (PayRegisterEmployeeRow)context; }@Fmt(e.EmployerMedicare)</Template>
+                                        </GridColumn>
+                                        <GridColumn HeaderText="ER Benefit" Field="EmployerBenefit" TextAlign="TextAlign.Right" Width="80">
+                                            <Template>@{ var e = (PayRegisterEmployeeRow)context; }@Fmt(e.EmployerBenefit)</Template>
+                                        </GridColumn>
+                                    </GridColumns>
+                                    <GridTemplates><DetailTemplate Context="empCtx">
+                                        @{ var emp = (PayRegisterEmployeeRow)empCtx; }
+                                        @if (_lineDetailCache.TryGetValue(emp.EmployeePayrollResultId, out var lines))
+                                        {
+                                            <SfGrid TValue="PayRegisterLineItem" DataSource="@lines.ToList()" CssClass="e-gridhover">
+                                                <GridColumns>
+                                                    <GridColumn HeaderText="Category" Field="Category" Width="120" />
+                                                    <GridColumn HeaderText="Code" Field="Code" Width="80" />
+                                                    <GridColumn HeaderText="Description" Field="Description" />
+                                                    <GridColumn HeaderText="Amount" Field="Amount" TextAlign="TextAlign.Right" Width="90">
+                                                        <Template>
+                                                            @{ var li = (PayRegisterLineItem)context; }
+                                                            <span class="@(li.Amount < 0 ? "amount-negative" : "")">@Fmt(li.Amount)</span>
+                                                        </Template>
+                                                    </GridColumn>
+                                                </GridColumns>
+                                            </SfGrid>
+                                        }
+                                        else
+                                        {
+                                            <span class="tab-loading">Loading…</span>
+                                        }
+                                    </DetailTemplate></GridTemplates>
+                                </SfGrid>
 
-                                @* Pagination *@
-                                @if (TotalEmpPages > 1)
+                                @* Totals bar — aggregates all filtered employees, not just the current page *@
+                                @if (!_empLoading && FilteredEmployeeRows.Any())
                                 {
-                                    <div class="pagination">
-                                        <button class="btn-link" disabled="@(_empPage <= 1)"
-                                                @onclick="() => _empPage--">‹ Prev</button>
-                                        <span>Page @_empPage of @TotalEmpPages</span>
-                                        <button class="btn-link" disabled="@(_empPage >= TotalEmpPages)"
-                                                @onclick="() => _empPage++">Next ›</button>
+                                    <div class="emp-totals-bar">
+                                        <span><strong>Total (@FilteredCount)</strong></span>
+                                        <span>Gross: <strong>@Fmt(FilteredEmployeeRows.Sum(r => r.Gross))</strong></span>
+                                        <span>Fed Tax: <strong>@Fmt(FilteredEmployeeRows.Sum(r => r.FederalTax))</strong></span>
+                                        <span>SS EE: <strong>@Fmt(FilteredEmployeeRows.Sum(r => r.SsEe))</strong></span>
+                                        <span>Med EE: <strong>@Fmt(FilteredEmployeeRows.Sum(r => r.MedicareEe))</strong></span>
+                                        <span>State Tax: <strong>@Fmt(FilteredEmployeeRows.Sum(r => r.StateTax))</strong></span>
+                                        @if (_columnLabels.LabelLocalTax is not null)
+                                        {
+                                            <span>Local Tax: <strong>@Fmt(FilteredEmployeeRows.Sum(r => r.LocalTax))</strong></span>
+                                        }
+                                        <span>Benefits: <strong>@Fmt(FilteredEmployeeRows.Sum(r => r.BenefitDeductions))</strong></span>
+                                        <span>Retire: <strong>@Fmt(FilteredEmployeeRows.Sum(r => r.RetirementDeductions))</strong></span>
+                                        <span>Garnish: <strong>@Fmt(FilteredEmployeeRows.Sum(r => r.Garnishments))</strong></span>
+                                        <span>Net Pay: <strong>@Fmt(FilteredEmployeeRows.Sum(r => r.NetPay))</strong></span>
+                                        <span>ER SS: <strong>@Fmt(FilteredEmployeeRows.Sum(r => r.EmployerSs))</strong></span>
+                                        <span>ER Med: <strong>@Fmt(FilteredEmployeeRows.Sum(r => r.EmployerMedicare))</strong></span>
+                                        <span>ER Benefit: <strong>@Fmt(FilteredEmployeeRows.Sum(r => r.EmployerBenefit))</strong></span>
                                     </div>
                                 }
 
@@ -501,7 +455,6 @@
     private string                                              _orgDimension = "DEPARTMENT";
     private IReadOnlyList<PayRegisterOrgRow>                    _orgRows      = [];
     private bool                                                _orgLoading;
-    private readonly HashSet<Guid>                              _expandedOrgGroups    = [];
     private readonly Dictionary<Guid, IReadOnlyList<PayRegisterEmployeeRow>> _orgGroupEmployees = new();
 
     // Column labels (country-driven)
@@ -511,11 +464,6 @@
     private IReadOnlyList<PayRegisterEmployeeRow> _allEmployeeRows = [];
     private bool                                  _empLoading;
     private string                                _empFilter  = "";
-    private string                                _empSortCol = "number";
-    private bool                                  _empSortAsc = true;
-    private int                                   _empPage    = 1;
-    private const int                             EmpPageSize = 20;
-    private readonly HashSet<Guid>                _expandedEmployees = [];
     private readonly Dictionary<Guid, IReadOnlyList<PayRegisterLineItem>> _lineDetailCache = new();
 
     // ── Computed ──────────────────────────────────────────────────────────────
@@ -529,19 +477,6 @@
 
     private int FilteredCount => FilteredEmployeeRows.Count();
 
-    private IEnumerable<PayRegisterEmployeeRow> SortedEmployeeRows => _empSortCol switch
-    {
-        "name"  => _empSortAsc ? FilteredEmployeeRows.OrderBy(r => r.EmployeeName)  : FilteredEmployeeRows.OrderByDescending(r => r.EmployeeName),
-        "gross" => _empSortAsc ? FilteredEmployeeRows.OrderBy(r => r.Gross)          : FilteredEmployeeRows.OrderByDescending(r => r.Gross),
-        "net"   => _empSortAsc ? FilteredEmployeeRows.OrderBy(r => r.NetPay)         : FilteredEmployeeRows.OrderByDescending(r => r.NetPay),
-        _       => _empSortAsc ? FilteredEmployeeRows.OrderBy(r => r.EmployeeNumber) : FilteredEmployeeRows.OrderByDescending(r => r.EmployeeNumber),
-    };
-
-    private IEnumerable<PayRegisterEmployeeRow> PagedEmployeeRows =>
-        SortedEmployeeRows.Skip((_empPage - 1) * EmpPageSize).Take(EmpPageSize);
-
-    private int  TotalEmpPages    => (int)Math.Ceiling(FilteredCount / (double)EmpPageSize);
-    private int  EmpDetailColCount => _columnLabels.LabelLocalTax is null ? 16 : 17;
     private string OrgGroupLabel =>
         _orgDimension switch
         {
@@ -589,12 +524,9 @@
         _summary       = null;
         _allEmployeeRows = [];
         _orgRows         = [];
-        _expandedOrgGroups.Clear();
         _orgGroupEmployees.Clear();
-        _expandedEmployees.Clear();
         _lineDetailCache.Clear();
         _empFilter  = "";
-        _empPage    = 1;
 
         var dimensionsTask   = QueryService.GetAvailableOrgDimensionsAsync(runId);
         var columnLabelsTask = QueryService.GetColumnLabelsAsync(runId);
@@ -631,7 +563,6 @@
     private async Task SwitchOrgDimensionAsync(string dimension)
     {
         _orgDimension = dimension;
-        _expandedOrgGroups.Clear();
         _orgGroupEmployees.Clear();
         await LoadOrgAsync();
     }
@@ -665,60 +596,44 @@
         _empLoading = false;
     }
 
-    // ── Expansion ─────────────────────────────────────────────────────────────
+    // ── Row expansion (SfGrid RowExpanding events) ────────────────────────────
 
-    private async Task ToggleOrgGroupAsync(Guid groupId)
+    private async Task OnOrgRowExpandingAsync(DetailsExpandedEventArgs<PayRegisterOrgRow> args)
     {
-        if (!_expandedOrgGroups.Remove(groupId))
+        if (args.Data is null) return;
+        var groupId = args.Data.GroupId;
+        if (_orgGroupEmployees.ContainsKey(groupId) || !_selectedRunId.HasValue) return;
+
+        if (!_allEmployeeRows.Any())
+            _allEmployeeRows = await QueryService.GetEmployeeDetailAsync(_selectedRunId.Value);
+
+        IReadOnlyList<Guid> ids = _orgDimension switch
         {
-            _expandedOrgGroups.Add(groupId);
-            if (!_orgGroupEmployees.ContainsKey(groupId) && _selectedRunId.HasValue)
-            {
-                if (!_allEmployeeRows.Any())
-                    _allEmployeeRows = await QueryService.GetEmployeeDetailAsync(_selectedRunId.Value);
+            "JOB"      => await QueryService.GetEmploymentIdsForJobAsync(_selectedRunId.Value, groupId),
+            "LOCATION" => await QueryService.GetEmploymentIdsForLocationAsync(_selectedRunId.Value, groupId),
+            _          => await QueryService.GetEmploymentIdsForOrgUnitAsync(_selectedRunId.Value, groupId)
+        };
 
-                IReadOnlyList<Guid> ids = _orgDimension switch
-                {
-                    "JOB"      => await QueryService.GetEmploymentIdsForJobAsync(_selectedRunId.Value, groupId),
-                    "LOCATION" => await QueryService.GetEmploymentIdsForLocationAsync(_selectedRunId.Value, groupId),
-                    _          => await QueryService.GetEmploymentIdsForOrgUnitAsync(_selectedRunId.Value, groupId)
-                };
-
-                var idSet = ids.ToHashSet();
-                _orgGroupEmployees[groupId] = _allEmployeeRows.Where(e => idSet.Contains(e.EmploymentId)).ToList();
-            }
-        }
+        var idSet = ids.ToHashSet();
+        _orgGroupEmployees[groupId] = _allEmployeeRows.Where(e => idSet.Contains(e.EmploymentId)).ToList();
+        await InvokeAsync(StateHasChanged);
     }
 
-    private async Task ToggleEmployeeLineDetailAsync(Guid resultId)
+    private async Task OnEmpRowExpandingAsync(DetailsExpandedEventArgs<PayRegisterEmployeeRow> args)
     {
-        if (!_expandedEmployees.Remove(resultId))
-        {
-            _expandedEmployees.Add(resultId);
-            if (!_lineDetailCache.ContainsKey(resultId))
-                _lineDetailCache[resultId] = await QueryService.GetLineDetailAsync(resultId);
-        }
+        if (args.Data is null) return;
+        var resultId = args.Data.EmployeePayrollResultId;
+        if (_lineDetailCache.ContainsKey(resultId)) return;
+        _lineDetailCache[resultId] = await QueryService.GetLineDetailAsync(resultId);
+        await InvokeAsync(StateHasChanged);
     }
 
-    // ── Sorting ───────────────────────────────────────────────────────────────
-
-    private void ResetEmpPage() => _empPage = 1;
+    // ── Filter ────────────────────────────────────────────────────────────────
 
     private void OnEmpFilterInput(InputEventArgs args)
     {
         _empFilter = args.Value;
-        ResetEmpPage();
     }
-
-    private void SortBy(string col)
-    {
-        if (_empSortCol == col) _empSortAsc = !_empSortAsc;
-        else { _empSortCol = col; _empSortAsc = true; }
-        _empPage = 1;
-    }
-
-    private string SortIcon(string col) =>
-        _empSortCol != col ? "" : _empSortAsc ? "▲" : "▼";
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -758,7 +673,7 @@
         if (_runHeader is null) return;
         var sb = new StringBuilder();
         sb.AppendLine("Employee #,Name,Department,Gross,Fed Tax,SS (EE),Medicare (EE),State Tax,Local Tax,Benefits,Retire (EE),Garnish,Net Pay,ER SS,ER Medicare,ER Benefit");
-        foreach (var r in SortedEmployeeRows)
+        foreach (var r in FilteredEmployeeRows.OrderBy(r => r.EmployeeNumber))
             sb.AppendLine($"{r.EmployeeNumber},\"{r.EmployeeName}\",\"{r.DepartmentName}\",{r.Gross:F2},{r.FederalTax:F2},{r.SsEe:F2},{r.MedicareEe:F2},{r.StateTax:F2},{r.LocalTax:F2},{r.BenefitDeductions:F2},{r.RetirementDeductions:F2},{r.Garnishments:F2},{r.NetPay:F2},{r.EmployerSs:F2},{r.EmployerMedicare:F2},{r.EmployerBenefit:F2}");
         await DownloadCsvAsync($"pay-register-employees-{_runHeader.PayDate:yyyy-MM-dd}.csv", sb.ToString());
     }
@@ -791,7 +706,7 @@
 <style>
     .register-layout {
         display: flex;
-        height: calc(100vh - 60px);
+        height: calc(100vh - var(--topbar-height) - 2 * var(--space-6));
         overflow: hidden;
     }
 
@@ -923,20 +838,51 @@
         letter-spacing: .05em;
         margin-bottom: var(--space-2);
     }
-    .summary-table {
-        width: 400px;
-        border-collapse: collapse;
+    .summary-rows {
+        display: flex;
+        flex-direction: column;
+        width: 420px;
         font-size: var(--font-size-sm);
     }
-    .summary-table td { padding: var(--space-1) var(--space-3); border-bottom: 1px solid #f3f4f6; }
-    .summary-table td:first-child { color: var(--aw-navy); }
-    .summary-table .amount { text-align: right; font-variant-numeric: tabular-nums; color: var(--aw-navy); }
-    .summary-table__subtotal td { border-top: 1px solid #e5e7eb; background: #f9fafb; }
-    .summary-table__highlight td { background: #d1fae5; color: #065f46; }
+    .summary-row {
+        display: flex;
+        justify-content: space-between;
+        padding: var(--space-1) var(--space-3);
+        border-bottom: 1px solid #f3f4f6;
+        color: var(--aw-navy);
+    }
+    .summary-row .amount { font-variant-numeric: tabular-nums; }
+    .summary-row--subtotal { border-top: 1px solid #e5e7eb; background: #f9fafb; }
+    .summary-row--highlight { background: #d1fae5; color: #065f46; }
 
     .num-col { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 
     .data-table--detail { font-size: .75rem; }
+
+    .expand-col { padding: 0 2px; text-align: center; }
+
+    .row-expand-btn {
+        background: none;
+        border: none;
+        cursor: pointer;
+        color: #6b7280;
+        font-size: .9rem;
+        line-height: 1;
+        padding: 1px 3px;
+        display: inline-block;
+        transition: transform 0.15s ease, color 0.15s ease;
+    }
+    .row-expand-btn:hover { color: var(--aw-navy); }
+    .row-expand-btn--open { transform: rotate(90deg); color: var(--module-payroll, #0f766e); }
+
+    .dept-col {
+        font-size: .75rem;
+        color: #6b7280;
+        max-width: 72px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
 
     .expansion-row > td {
         padding: 0;
@@ -984,15 +930,18 @@
 
     .table-scroll { overflow-x: auto; }
 
-    .pagination {
+    .emp-totals-bar {
         display: flex;
-        align-items: center;
-        gap: var(--space-3);
+        flex-wrap: wrap;
+        gap: var(--space-3) var(--space-5);
         font-size: var(--font-size-sm);
-        color: #6b7280;
-        margin-top: var(--space-2);
+        color: var(--aw-navy);
+        background: #f9fafb;
+        border: 1px solid #e5e7eb;
+        border-top: 2px solid #d1d5db;
+        padding: var(--space-2) var(--space-3);
+        margin-top: -1px;
     }
-    .pagination button:disabled { opacity: .4; cursor: default; }
 
     .export-row {
         display: flex;

@@ -29,12 +29,13 @@ public sealed class TaxNavContributor : INavContributor
             items.Add(new("Jurisdictions", "/payroll/tax-setup/jurisdictions"));
 
         if (isTaxAdmin || isPayrollAdmin)
-            items.Add(new("Rate Tables", "/payroll/tax/rates"));
+            items.Add(new("Tax Rate Tables", "/payroll/tax/rates"));
 
         // Tax configuration — TaxAdmin, ComplianceReviewer, PayrollAdmin
         if (isTaxAdmin || isComplianceReviewer || isPayrollAdmin)
         {
-            items.Add(new("Calculation Steps",  "/config/tax/steps"));
+            items.Add(new("Rate Reference",      "/config/tax/reference"));
+            items.Add(new("Calculation Steps",   "/config/tax/steps"));
             items.Add(new("Form Fields",         "/config/tax/form-fields"));
             items.Add(new("Review & Approve",    "/config/tax/review"));
             items.Add(new("Preview Sandbox",     "/config/tax/preview"));

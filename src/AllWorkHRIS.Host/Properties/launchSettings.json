@@ -16,6 +16,22 @@
 		  "AUTH_CLIENT_SECRET": "JqiuAlM6mZLvmCpOARlJ2Lk7AwL0vRx2",
 		  "TEMPORAL_OVERRIDE_ENABLED": "true"
         }
+      },
+      "https-test": {
+        "commandName": "Project",
+        "dotnetRunMessages": true,
+        "launchBrowser": true,
+        "applicationUrl": "https://localhost:5001;http://localhost:5000",
+        "environmentVariables": {
+          "ASPNETCORE_ENVIRONMENT": "Production",
+		  "DATABASE_CONNECTION_STRING": "Host=localhost;Database=allworkhris_tst;Username=postgres;Password=dev",
+		  "DATABASE_PROVIDER": "postgresql",
+		  "APP_ENVIRONMENT": "Test",
+		  "AUTH_AUTHORITY": "http://localhost:8080/realms/allworkhris",
+		  "AUTH_CLIENT_ID": "allworkhris-app",
+		  "AUTH_CLIENT_SECRET": "JqiuAlM6mZLvmCpOARlJ2Lk7AwL0vRx2",
+		  "TEMPORAL_OVERRIDE_ENABLED": "true"
+        }
       }
     }
 }

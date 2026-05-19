@@ -1034,6 +1034,39 @@ public sealed class PayrollContextRepository : IPayrollContextRepository
         ));
     }
 
+    public async Task UpdateContextSettingsAsync(Guid payrollContextId, decimal otWeeklyThresholdHours, int workweekStartDay, Guid updatedBy)
+    {
+        const string sql = """
+            UPDATE payroll_context
+            SET ot_weekly_threshold_hours = @OtWeeklyThresholdHours,
+                workweek_start_day        = @WorkweekStartDay,
+                last_updated_by           = @UpdatedBy,
+                last_update_timestamp     = CURRENT_TIMESTAMP
+            WHERE payroll_context_id = @PayrollContextId
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        await conn.ExecuteAsync(sql, new
+        {
+            PayrollContextId      = payrollContextId,
+            OtWeeklyThresholdHours = otWeeklyThresholdHours,
+            WorkweekStartDay      = workweekStartDay,
+            UpdatedBy             = updatedBy
+        });
+
+        await _auditService.LogAsync(new AuditEventRecord(
+            EventType:     "UPDATE",
+            EntityType:    "PayrollContext",
+            EntityId:      payrollContextId,
+            ModuleName:    "PAYROLL",
+            ChangeSummary: $"OT threshold updated to {otWeeklyThresholdHours} hrs, workweek start updated to {workweekStartDay}",
+            AfterJson:     JsonSerializer.Serialize(new
+            {
+                ot_weekly_threshold_hours = otWeeklyThresholdHours,
+                workweek_start_day        = workweekStartDay
+            })
+        ));
+    }
+
     public async Task<PayrollPeriod?> GetPeriodByIdAsync(Guid periodId)
     {
         const string sql = "SELECT * FROM payroll_period WHERE period_id = @PeriodId";
@@ -1059,7 +1092,7 @@ public sealed class PayrollContextRepository : IPayrollContextRepository
         const string sql = """
             SELECT * FROM payroll_period
             WHERE payroll_context_id = @PayrollContextId
-              AND calendar_status    = 'OPEN'
+              AND calendar_status    IN ('OPEN', 'LOCKED')
             ORDER BY period_year, period_number
             """;
         using var conn = _connectionFactory.CreateConnection();

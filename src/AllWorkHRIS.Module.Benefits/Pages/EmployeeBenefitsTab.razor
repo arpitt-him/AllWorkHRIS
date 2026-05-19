@@ -1,4 +1,5 @@
 @using AllWorkHRIS.Module.Benefits.Repositories
+@using Syncfusion.Blazor.Grids
 @inject IBenefitElectionRepository BenefitElectionRepo
 
 @if (_loading)
@@ -11,33 +12,31 @@ else if (_elections.Count == 0)
 }
 else
 {
-    <table class="data-table">
-        <thead>
-            <tr>
-                <th>Code</th>
-                <th>Treatment</th>
-                <th>Emp Election</th>
-                <th>ER Amount</th>
-                <th>Effective Start</th>
-                <th>Effective End</th>
-                <th>Status</th>
-            </tr>
-        </thead>
-        <tbody>
-            @foreach (var e in _elections)
-            {
-                <tr>
-                    <td><samp>@e.DeductionCode</samp></td>
-                    <td><span class="badge @(e.TaxTreatment == "PRE_TAX" ? "badge-blue" : "badge-orange")">@e.TaxTreatment</span></td>
-                    <td>@EmpAmountDisplay(e)</td>
-                    <td>@ErAmountDisplay(e)</td>
-                    <td>@e.EffectiveStartDate.ToString("yyyy-MM-dd")</td>
-                    <td>@(e.EffectiveEndDate?.ToString("yyyy-MM-dd") ?? "—")</td>
-                    <td><span class="badge badge-green">@e.Status</span></td>
-                </tr>
-            }
-        </tbody>
-    </table>
+    <SfGrid TValue="BenefitDeductionElection" DataSource="@_elections" AllowSorting="true" CssClass="e-gridhover">
+        <GridColumns>
+            <GridColumn HeaderText="Code" Width="130">
+                <Template>@{ var e = (BenefitDeductionElection)context; }<samp>@e.DeductionCode</samp></Template>
+            </GridColumn>
+            <GridColumn HeaderText="Treatment" Width="130">
+                <Template>@{ var e = (BenefitDeductionElection)context; }<span class="badge @(e.TaxTreatment == "PRE_TAX" ? "badge-blue" : "badge-orange")">@e.TaxTreatment</span></Template>
+            </GridColumn>
+            <GridColumn HeaderText="Emp Election" Width="130">
+                <Template>@{ var e = (BenefitDeductionElection)context; }@EmpAmountDisplay(e)</Template>
+            </GridColumn>
+            <GridColumn HeaderText="ER Amount" Width="120">
+                <Template>@{ var e = (BenefitDeductionElection)context; }@ErAmountDisplay(e)</Template>
+            </GridColumn>
+            <GridColumn HeaderText="Effective Start" Width="140">
+                <Template>@{ var e = (BenefitDeductionElection)context; }@e.EffectiveStartDate.ToString("yyyy-MM-dd")</Template>
+            </GridColumn>
+            <GridColumn HeaderText="Effective End" Width="130">
+                <Template>@{ var e = (BenefitDeductionElection)context; }@(e.EffectiveEndDate?.ToString("yyyy-MM-dd") ?? "—")</Template>
+            </GridColumn>
+            <GridColumn HeaderText="Status" Width="110">
+                <Template>@{ var e = (BenefitDeductionElection)context; }<span class="badge badge-green">@e.Status</span></Template>
+            </GridColumn>
+        </GridColumns>
+    </SfGrid>
 }
 
 @code {

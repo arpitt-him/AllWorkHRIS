@@ -156,68 +156,40 @@
             {
                 @if (_rateTables.Count > 0)
                 {
-                    <table class="data-table" style="margin-bottom:1rem;">
-                        <thead>
-                            <tr>
-                                <th>Effective From</th>
-                                <th>Effective To</th>
-                                <th>Description</th>
-                                <th></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @foreach (var tbl in _rateTables)
+                    <SfGrid TValue="DeductionRateTable" DataSource="@_rateTables.ToList()" CssClass="e-gridhover" AllowSorting="true" style="margin-bottom:1rem;">
+                        <GridEvents TValue="DeductionRateTable" DetailsExpanded="OnRateTableRowExpandingAsync" />
+                        <GridColumns>
+                            <GridColumn HeaderText="Effective From" Width="140">
+                                <Template>@{ var tbl = (DeductionRateTable)context; }@tbl.EffectiveFrom.ToString("yyyy-MM-dd")</Template>
+                            </GridColumn>
+                            <GridColumn HeaderText="Effective To" Width="130">
+                                <Template>@{ var tbl = (DeductionRateTable)context; }@(tbl.EffectiveTo?.ToString("yyyy-MM-dd") ?? "—")</Template>
+                            </GridColumn>
+                            <GridColumn HeaderText="Description">
+                                <Template>@{ var tbl = (DeductionRateTable)context; }@(tbl.Description ?? "—")</Template>
+                            </GridColumn>
+                        </GridColumns>
+                        <GridTemplates><DetailTemplate Context="rateCtx">
+                            @{ var tbl = (DeductionRateTable)rateCtx; }
+                            @if (_tableEntries.TryGetValue(tbl.RateTableId, out var entries))
                             {
-                                <tr>
-                                    <td>@tbl.EffectiveFrom.ToString("yyyy-MM-dd")</td>
-                                    <td>@(tbl.EffectiveTo?.ToString("yyyy-MM-dd") ?? "—")</td>
-                                    <td>@(tbl.Description ?? "—")</td>
-                                    <td>
-                                        <button class="btn btn-sm btn-ghost"
-                                                @onclick="() => ToggleTableEntries(tbl.RateTableId)">
-                                            @(_expandedTableId == tbl.RateTableId ? "Hide" : "Rates")
-                                        </button>
-                                    </td>
-                                </tr>
-                                @if (_expandedTableId == tbl.RateTableId
-                                     && _tableEntries.TryGetValue(tbl.RateTableId, out var entries))
-                                {
-                                    <tr>
-                                        <td colspan="4" style="padding:.5rem 1.25rem;background:#f9fafb;">
-                                            <table style="width:auto;border-collapse:collapse;font-size:.875rem;">
-                                                <thead>
-                                                    <tr>
-                                                        <th style="text-align:left;padding:.3rem .75rem .3rem 0;
-                                                                   color:#6b7280;font-weight:600;">Tier</th>
-                                                        <th style="text-align:right;padding:.3rem .75rem;
-                                                                   color:#6b7280;font-weight:600;">EE Rate</th>
-                                                        <th style="text-align:right;padding:.3rem 0 .3rem .75rem;
-                                                                   color:#6b7280;font-weight:600;">ER Rate</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody>
-                                                    @foreach (var e in entries)
-                                                    {
-                                                        <tr>
-                                                            <td style="padding:.25rem .75rem .25rem 0;">
-                                                                <samp>@e.TierCode</samp>
-                                                            </td>
-                                                            <td style="padding:.25rem .75rem;text-align:right;">
-                                                                $@e.EmployeeRate.ToString("N2")
-                                                            </td>
-                                                            <td style="padding:.25rem 0 .25rem .75rem;text-align:right;">
-                                                                @(e.EmployerRate.HasValue ? $"${e.EmployerRate.Value:N2}" : "—")
-                                                            </td>
-                                                        </tr>
-                                                    }
-                                                </tbody>
-                                            </table>
-                                        </td>
-                                    </tr>
-                                }
+                                <SfGrid TValue="DeductionRateEntry" DataSource="@entries.ToList()" CssClass="e-gridhover">
+                                    <GridColumns>
+                                        <GridColumn HeaderText="Tier" Width="200">
+                                            <Template>@{ var e = (DeductionRateEntry)context; }<samp>@e.TierCode</samp></Template>
+                                        </GridColumn>
+                                        <GridColumn HeaderText="EE Rate" TextAlign="TextAlign.Right" Width="130">
+                                            <Template>@{ var e = (DeductionRateEntry)context; }$@e.EmployeeRate.ToString("N2")</Template>
+                                        </GridColumn>
+                                        <GridColumn HeaderText="ER Rate" TextAlign="TextAlign.Right" Width="130">
+                                            <Template>@{ var e = (DeductionRateEntry)context; }@(e.EmployerRate.HasValue ? $"${e.EmployerRate.Value:N2}" : "—")</Template>
+                                        </GridColumn>
+                                    </GridColumns>
+                                </SfGrid>
                             }
-                        </tbody>
-                    </table>
+                            else { <span class="tab-loading">Loading…</span> }
+                        </DetailTemplate></GridTemplates>
+                    </SfGrid>
                 }
                 else if (!_showRateTableForm)
                 {
@@ -316,36 +288,31 @@
             {
                 @if (_matchRules.Count > 0)
                 {
-                    <table class="data-table" style="margin-bottom:1rem;">
-                        <thead>
-                            <tr>
-                                <th>Match %</th>
-                                <th>Cap % of Gross</th>
-                                <th>Annual Cap ($)</th>
-                                <th>Type</th>
-                                <th>Effective From</th>
-                                <th>Effective To</th>
-                                <th></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @foreach (var rule in _matchRules)
-                            {
-                                <tr>
-                                    <td>@(rule.MatchRate * 100m)%</td>
-                                    <td>@(rule.MatchCapPctOfGross.HasValue ? $"{rule.MatchCapPctOfGross.Value * 100m:N2}%" : "—")</td>
-                                    <td>@(rule.MatchCapAnnualAmount?.ToString("N2") ?? "—")</td>
-                                    <td><span class="badge badge-gray">@rule.MatchType</span></td>
-                                    <td>@rule.EffectiveFrom.ToString("yyyy-MM-dd")</td>
-                                    <td>@(rule.EffectiveTo?.ToString("yyyy-MM-dd") ?? "—")</td>
-                                    <td>
-                                        <button class="btn btn-sm btn-ghost"
-                                                @onclick="() => StartEditMatch(rule)">Edit</button>
-                                    </td>
-                                </tr>
-                            }
-                        </tbody>
-                    </table>
+                    <SfGrid TValue="DeductionEmployerMatch" DataSource="@_matchRules.ToList()" CssClass="e-gridhover" AllowSorting="true" style="margin-bottom:1rem;">
+                        <GridColumns>
+                            <GridColumn HeaderText="Match %" Width="110">
+                                <Template>@{ var rule = (DeductionEmployerMatch)context; }@(rule.MatchRate * 100m)%</Template>
+                            </GridColumn>
+                            <GridColumn HeaderText="Cap % of Gross" Width="145">
+                                <Template>@{ var rule = (DeductionEmployerMatch)context; }@(rule.MatchCapPctOfGross.HasValue ? $"{rule.MatchCapPctOfGross.Value * 100m:N2}%" : "—")</Template>
+                            </GridColumn>
+                            <GridColumn HeaderText="Annual Cap ($)" Width="140">
+                                <Template>@{ var rule = (DeductionEmployerMatch)context; }@(rule.MatchCapAnnualAmount?.ToString("N2") ?? "—")</Template>
+                            </GridColumn>
+                            <GridColumn HeaderText="Type" Width="140">
+                                <Template>@{ var rule = (DeductionEmployerMatch)context; }<span class="badge badge-gray">@rule.MatchType</span></Template>
+                            </GridColumn>
+                            <GridColumn HeaderText="Effective From" Width="140">
+                                <Template>@{ var rule = (DeductionEmployerMatch)context; }@rule.EffectiveFrom.ToString("yyyy-MM-dd")</Template>
+                            </GridColumn>
+                            <GridColumn HeaderText="Effective To" Width="130">
+                                <Template>@{ var rule = (DeductionEmployerMatch)context; }@(rule.EffectiveTo?.ToString("yyyy-MM-dd") ?? "—")</Template>
+                            </GridColumn>
+                            <GridColumn HeaderText="" Width="90" AllowSorting="false">
+                                <Template>@{ var rule = (DeductionEmployerMatch)context; }<button class="btn btn-sm btn-ghost" @onclick="() => StartEditMatch(rule)">Edit</button></Template>
+                            </GridColumn>
+                        </GridColumns>
+                    </SfGrid>
                 }
                 else if (!_showMatchForm)
                 {
@@ -437,7 +404,6 @@
     private Deduction?                                  _rateTableDeduction;
     private List<DeductionRateTable>                    _rateTables       = [];
     private bool                                        _rateTableLoading;
-    private Guid?                                       _expandedTableId;
     private Dictionary<Guid, List<DeductionRateEntry>>  _tableEntries     = new();
 
     private bool            _showRateTableForm;
@@ -584,15 +550,12 @@
         _showMatchForm       = false;
         _rateTableDeduction  = deduction;
         _showRateTableForm   = false;
-        _expandedTableId     = null;
         _tableEntries        = new();
         _rateFormError       = null;
         _rateTableLoading    = true;
         try
         {
             _rateTables = (await RateTableRepo.GetAllByDeductionIdAsync(deduction.DeductionId)).ToList();
-            if (_rateTables.Count > 0)
-                await ToggleTableEntries(_rateTables[0].RateTableId);
         }
         catch (Exception ex) { _rateFormError = ex.Message; }
         finally { _rateTableLoading = false; }
@@ -603,17 +566,17 @@
         _rateTableDeduction = null;
         _rateTables         = [];
         _tableEntries       = new();
-        _expandedTableId    = null;
         _showRateTableForm  = false;
         _rateFormError      = null;
     }
 
-    private async Task ToggleTableEntries(Guid tableId)
+    private async Task OnRateTableRowExpandingAsync(DetailsExpandedEventArgs<DeductionRateTable> args)
     {
-        if (_expandedTableId == tableId) { _expandedTableId = null; return; }
-        _expandedTableId = tableId;
-        if (!_tableEntries.ContainsKey(tableId))
-            _tableEntries[tableId] = (await RateTableRepo.GetEntriesAsync(tableId)).ToList();
+        if (args.Data is null) return;
+        var tableId = args.Data.RateTableId;
+        if (_tableEntries.ContainsKey(tableId)) return;
+        _tableEntries[tableId] = (await RateTableRepo.GetEntriesAsync(tableId)).ToList();
+        await InvokeAsync(StateHasChanged);
     }
 
     private void ShowAddRateTableForm()
@@ -677,10 +640,7 @@
 
             _showRateTableForm = false;
             _tableEntries.Clear();
-            _expandedTableId = null;
             _rateTables = (await RateTableRepo.GetAllByDeductionIdAsync(_rateTableDeduction.DeductionId)).ToList();
-            if (_rateTables.Count > 0)
-                await ToggleTableEntries(_rateTables[0].RateTableId);
         }
         catch (Exception ex) { _rateFormError = ex.Message; }
         finally { _rateFormSaving = false; }

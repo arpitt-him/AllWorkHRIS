@@ -136,7 +136,7 @@ public sealed class PayrollDashboardContributor : IDashboardContributor
                     AccentColor: AccentColor));
             }
 
-            // Tax elections incomplete for employees in imminent payroll runs
+            // Withholding instructions incomplete for employees in imminent payroll runs
             var today2 = DateOnly.FromDateTime(_temporal.GetOperativeDate());
             const string notReadySql = """
                 WITH imminent_runs AS (
@@ -231,7 +231,7 @@ public sealed class PayrollDashboardContributor : IDashboardContributor
                     : DashboardItemUrgency.Attention;
 
                 items.Add(new DashboardItem(
-                    Title:       "Tax elections incomplete",
+                    Title:       "Withholding instructions incomplete",
                     Subtitle:    $"{row.MissingCount} employee{(row.MissingCount == 1 ? "" : "s")} not ready · {row.ContextName} · pay {row.NextPayDate:MMM d, yyyy}",
                     EntityId:    row.EntityId,
                     EntityName:  row.EntityName,

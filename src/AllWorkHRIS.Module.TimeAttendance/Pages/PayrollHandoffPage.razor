@@ -136,8 +136,8 @@
                         </Template>
                     </GridColumn>
                 </GridColumns>
-                <GridTemplates><DetailTemplate>
-                    @{ var row = (HandoffPeriodRow)context; }
+                <GridTemplates><DetailTemplate Context="periodCtx">
+                    @{ var row = (HandoffPeriodRow)periodCtx; }
                     @if (_previewCache.TryGetValue(row.PeriodId, out var entries))
                     {
                         @if (!entries.Any())
@@ -146,35 +146,39 @@
                         }
                         else
                         {
-                            <table class="preview-table">
-                                <thead>
-                                    <tr>
-                                        <th>Employee</th>
-                                        <th>Work Date</th>
-                                        <th>Category</th>
-                                        <th>Status</th>
-                                        <th style="text-align:right;">Hours</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    @foreach (var e in entries)
-                                    {
-                                        <tr>
-                                            <td>@e.EmployeeName <span class="preview-emp-num">#@e.EmployeeNumber</span></td>
-                                            <td>@e.WorkDate.ToString("MMM d, yyyy")</td>
-                                            <td><span class="badge badge--category">@e.TimeCategory</span></td>
-                                            <td><span class="badge badge--entry-status badge--entry-@e.StatusCode.ToLower()">@e.StatusCode</span></td>
-                                            <td style="text-align:right;">@e.Duration.ToString("0.##")</td>
-                                        </tr>
-                                    }
-                                </tbody>
-                                <tfoot>
-                                    <tr>
-                                        <td colspan="4" style="text-align:right;font-weight:600;">Total</td>
-                                        <td style="text-align:right;font-weight:600;">@entries.Sum(e => e.Duration).ToString("0.##")</td>
-                                    </tr>
-                                </tfoot>
-                            </table>
+                            <div style="max-width:720px;">
+                                <SfGrid TValue="HandoffPreviewEntry" DataSource="@entries.ToList()" CssClass="e-gridhover" AllowSorting="true">
+                                    <GridColumns>
+                                        <GridColumn HeaderText="Employee" Width="220">
+                                            <Template>
+                                                @{ var e = (HandoffPreviewEntry)context; }
+                                                @e.EmployeeName <span class="preview-emp-num">#@e.EmployeeNumber</span>
+                                            </Template>
+                                        </GridColumn>
+                                        <GridColumn HeaderText="Work Date" Width="130">
+                                            <Template>@{ var e = (HandoffPreviewEntry)context; }@e.WorkDate.ToString("MMM d, yyyy")</Template>
+                                        </GridColumn>
+                                        <GridColumn HeaderText="Category" Width="120">
+                                            <Template>@{ var e = (HandoffPreviewEntry)context; }<span class="badge badge--category">@e.TimeCategory</span></Template>
+                                        </GridColumn>
+                                        <GridColumn HeaderText="Status" Width="110">
+                                            <Template>@{ var e = (HandoffPreviewEntry)context; }<span class="badge badge--entry-status badge--entry-@e.StatusCode.ToLower()">@e.StatusCode</span></Template>
+                                        </GridColumn>
+                                        <GridColumn HeaderText="Hours" Field="Duration" TextAlign="TextAlign.Right" Width="80">
+                                            <Template>@{ var e = (HandoffPreviewEntry)context; }@e.Duration.ToString("0.##")</Template>
+                                        </GridColumn>
+                                    </GridColumns>
+                                    <GridAggregates>
+                                        <GridAggregate>
+                                            <GridAggregateColumns>
+                                                <GridAggregateColumn Field="Duration" Type="AggregateType.Sum">
+                                                    <FooterTemplate>@{ var a = (AggregateTemplateContext)context; }<strong>@Convert.ToDecimal(a.Sum).ToString("0.##")</strong></FooterTemplate>
+                                                </GridAggregateColumn>
+                                            </GridAggregateColumns>
+                                        </GridAggregate>
+                                    </GridAggregates>
+                                </SfGrid>
+                            </div>
                         }
                     }
                     else

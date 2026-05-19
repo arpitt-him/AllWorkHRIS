@@ -8,6 +8,10 @@
 @using AllWorkHRIS.Host.Hris.Domain
 @using AllWorkHRIS.Host.Hris.Services
 @using AllWorkHRIS.Core.Temporal
+@using Syncfusion.Blazor.Grids
+@using Syncfusion.Blazor.Calendars
+@using Syncfusion.Blazor.Inputs
+@using Syncfusion.Blazor.DropDowns
 @inject IOrgStructureService OrgStructureService
 @inject ITemporalContext     TemporalContext
 @inject ILookupCache         LookupCache
@@ -37,49 +41,49 @@
     }
     else
     {
-        <div class="grid-container">
-            <table class="data-table">
-                <thead>
-                    <tr>
-                        <th>Name</th>
-                        <th>Code</th>
-                        <th>Type</th>
-                        <th>Tax ID</th>
-                        <th>State of Inc.</th>
-                        <th>Country</th>
-                        <th>Effective Start</th>
-                        <th>Status</th>
-                        <th></th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach (var e in _entities)
-                    {
-                        <tr>
-                            <td>@e.OrgUnitName</td>
-                            <td class="mono">@e.OrgUnitCode</td>
-                            <td>@EntityTypeLabel(e.LegalEntityTypeId)</td>
-                            <td class="mono">@(e.TaxRegistrationNumber ?? "—")</td>
-                            <td>@(e.StateOfIncorporation ?? "—")</td>
-                            <td class="mono">@(e.CountryCode ?? "—")</td>
-                            <td>@e.EffectiveStartDate.ToString("yyyy-MM-dd")</td>
-                            <td>
-                                <span class="status-badge status-@StatusCode(e.OrgStatusId)">
-                                    @StatusLabel(e.OrgStatusId)
-                                </span>
-                            </td>
-                            <td>
-                                <AuthorizeView Roles="SystemAdmin">
-                                    <Authorized>
-                                        <button class="btn-link" @onclick="() => OpenEditPanel(e)">Edit</button>
-                                    </Authorized>
-                                </AuthorizeView>
-                            </td>
-                        </tr>
-                    }
-                </tbody>
-            </table>
-        </div>
+        <SfGrid TValue="OrgUnit" DataSource="@_entities" AllowSorting="true" AllowPaging="true" CssClass="e-gridhover">
+            <GridPageSettings PageSize="25" />
+            <GridColumns>
+                <GridColumn Field="OrgUnitName"            HeaderText="Name" />
+                <GridColumn Field="OrgUnitCode"            HeaderText="Code"           Width="100" />
+                <GridColumn Field="LegalEntityTypeId"      HeaderText="Type">
+                    <Template>@EntityTypeLabel(((OrgUnit)context).LegalEntityTypeId)</Template>
+                </GridColumn>
+                <GridColumn Field="TaxRegistrationNumber"  HeaderText="Tax ID"         Width="120">
+                    <Template>@(((OrgUnit)context).TaxRegistrationNumber ?? "—")</Template>
+                </GridColumn>
+                <GridColumn Field="StateOfIncorporation"   HeaderText="State of Inc."  Width="110">
+                    <Template>@(((OrgUnit)context).StateOfIncorporation ?? "—")</Template>
+                </GridColumn>
+                <GridColumn Field="CountryCode"            HeaderText="Country"        Width="85">
+                    <Template>@(((OrgUnit)context).CountryCode ?? "—")</Template>
+                </GridColumn>
+                <GridColumn Field="OtWeeklyThresholdHours" HeaderText="OT Hrs"        Width="115">
+                    <Template>
+                        @{ var ot = (OrgUnit)context; }
+                        @(ot.OtWeeklyThresholdHours.HasValue ? ot.OtWeeklyThresholdHours.Value.ToString("0.##") + " hrs" : "40 hrs")
+                    </Template>
+                </GridColumn>
+                <GridColumn Field="DefaultWorkweekStartDay" HeaderText="WW Start"       Width="125">
+                    <Template>@WorkweekDayLabel(((OrgUnit)context).DefaultWorkweekStartDay)</Template>
+                </GridColumn>
+                <GridColumn Field="EffectiveStartDate"     HeaderText="Eff. Start"     Width="120">
+                    <Template>@(((OrgUnit)context).EffectiveStartDate.ToString("yyyy-MM-dd"))</Template>
+                </GridColumn>
+                <GridColumn Field="OrgStatusId"            HeaderText="Status"         Width="100">
+                    <Template>
+                        @{ var se = (OrgUnit)context; }
+                        <span class="status-badge status-@StatusCode(se.OrgStatusId)">@StatusLabel(se.OrgStatusId)</span>
+                    </Template>
+                </GridColumn>
+                <GridColumn HeaderText="" Width="70" TextAlign="TextAlign.Right">
+                    <Template>
+                        @{ var ed = (OrgUnit)context; }
+                        <button class="btn-link" @onclick="@(() => OpenEditPanel(ed))">Edit</button>
+                    </Template>
+                </GridColumn>
+            </GridColumns>
+        </SfGrid>
     }
 
 </div>
@@ -103,17 +107,16 @@
                 </div>
                 <div class="form-field">
                     <label class="form-label">Effective Start Date <span class="required">*</span></label>
-                    <input type="date" class="form-input" @bind="_effectiveDt" />
+                    <SfDatePicker TValue="DateTime" @bind-Value="_effectiveDt" />
                 </div>
                 <div class="form-field">
                     <label class="form-label">Legal Entity Type</label>
-                    <select class="form-input" @bind="_entityTypeId">
-                        <option value="">Select type…</option>
-                        @foreach (var t in LookupCache.GetAll(LookupTables.LegalEntityType))
-                        {
-                            <option value="@t.Id">@t.Label</option>
-                        }
-                    </select>
+                    <SfDropDownList TValue="string" TItem="DropItem"
+                                    DataSource="@EntityTypeOptions"
+                                    @bind-Value="_entityTypeId"
+                                    Placeholder="Select type…">
+                        <DropDownListFieldSettings Value="Value" Text="Label" />
+                    </SfDropDownList>
                 </div>
                 <div class="form-field">
                     <label class="form-label">Tax Registration Number (EIN)</label>
@@ -132,23 +135,18 @@
                 </div>
                 <div class="form-field">
                     <label class="form-label">OT Weekly Threshold (hrs)</label>
-                    <input type="number" class="form-input" @bind="_otThreshold"
-                           min="1" max="40" step="0.5"
-                           title="Hours per workweek that trigger overtime. FLSA floor is 40; set lower only if company policy is more generous." />
+                    <SfNumericTextBox TValue="decimal" @bind-Value="_otThreshold"
+                                     Min="1" Max="40" Step="0.5m" Format="n2" />
                     <span style="font-size:var(--font-size-sm);color:#6B7280">Default 40.00 — applies to all payroll contexts for this entity unless overridden.</span>
                 </div>
                 <div class="form-field">
                     <label class="form-label">Default Workweek Start Day</label>
-                    <select class="form-input" @bind="_defaultWorkweekStartDay">
-                        <option value="">— system default (Monday) —</option>
-                        <option value="0">Sunday</option>
-                        <option value="1">Monday</option>
-                        <option value="2">Tuesday</option>
-                        <option value="3">Wednesday</option>
-                        <option value="4">Thursday</option>
-                        <option value="5">Friday</option>
-                        <option value="6">Saturday</option>
-                    </select>
+                    <SfDropDownList TValue="string" TItem="DropItem"
+                                    DataSource="@_workweekOptions"
+                                    @bind-Value="_defaultWorkweekStartDay"
+                                    Placeholder="— system default (Monday) —">
+                        <DropDownListFieldSettings Value="Value" Text="Label" />
+                    </SfDropDownList>
                     <span style="font-size:var(--font-size-sm);color:#6B7280">Pre-populates new payroll contexts. Most employers use Monday or Sunday.</span>
                 </div>
             </div>
@@ -185,13 +183,12 @@
                 </div>
                 <div class="form-field">
                     <label class="form-label">Legal Entity Type</label>
-                    <select class="form-input" @bind="_editEntityTypeId">
-                        <option value="">Select type…</option>
-                        @foreach (var t in LookupCache.GetAll(LookupTables.LegalEntityType))
-                        {
-                            <option value="@t.Id">@t.Label</option>
-                        }
-                    </select>
+                    <SfDropDownList TValue="string" TItem="DropItem"
+                                    DataSource="@EntityTypeOptions"
+                                    @bind-Value="_editEntityTypeId"
+                                    Placeholder="Select type…">
+                        <DropDownListFieldSettings Value="Value" Text="Label" />
+                    </SfDropDownList>
                 </div>
                 <div class="form-field">
                     <label class="form-label">Tax Registration Number (EIN)</label>
@@ -207,23 +204,18 @@
                 </div>
                 <div class="form-field">
                     <label class="form-label">OT Weekly Threshold (hrs)</label>
-                    <input type="number" class="form-input" @bind="_editOtThreshold"
-                           min="1" max="40" step="0.5"
-                           title="Hours per workweek that trigger overtime. FLSA floor is 40." />
+                    <SfNumericTextBox TValue="decimal" @bind-Value="_editOtThreshold"
+                                     Min="1" Max="40" Step="0.5m" Format="n2" />
                     <span style="font-size:var(--font-size-sm);color:#6B7280">Changing this does not automatically update existing payroll contexts.</span>
                 </div>
                 <div class="form-field">
                     <label class="form-label">Default Workweek Start Day</label>
-                    <select class="form-input" @bind="_editDefaultWorkweekStartDay">
-                        <option value="">— system default (Monday) —</option>
-                        <option value="0">Sunday</option>
-                        <option value="1">Monday</option>
-                        <option value="2">Tuesday</option>
-                        <option value="3">Wednesday</option>
-                        <option value="4">Thursday</option>
-                        <option value="5">Friday</option>
-                        <option value="6">Saturday</option>
-                    </select>
+                    <SfDropDownList TValue="string" TItem="DropItem"
+                                    DataSource="@_workweekOptions"
+                                    @bind-Value="_editDefaultWorkweekStartDay"
+                                    Placeholder="— system default (Monday) —">
+                        <DropDownListFieldSettings Value="Value" Text="Label" />
+                    </SfDropDownList>
                     <span style="font-size:var(--font-size-sm);color:#6B7280">Changing this does not automatically update existing payroll contexts.</span>
                 </div>
             </div>
@@ -245,6 +237,24 @@
 
 @code {
     [CascadingParameter] private Task<AuthenticationState> AuthStateTask { get; set; } = default!;
+
+    private record DropItem(string Value, string Label);
+
+    private List<DropItem> EntityTypeOptions => new List<DropItem> { new DropItem("", "Select type…") }
+        .Concat(LookupCache.GetAll(LookupTables.LegalEntityType).Select(t => new DropItem(t.Id.ToString(), t.Label)))
+        .ToList();
+
+    private static readonly List<DropItem> _workweekOptions =
+    [
+        new DropItem("",  "— system default (Monday) —"),
+        new DropItem("0", "Sunday"),
+        new DropItem("1", "Monday"),
+        new DropItem("2", "Tuesday"),
+        new DropItem("3", "Wednesday"),
+        new DropItem("4", "Thursday"),
+        new DropItem("5", "Friday"),
+        new DropItem("6", "Saturday"),
+    ];
 
     private bool          _loading = true;
     private List<OrgUnit> _entities = [];
@@ -412,10 +422,22 @@
 
     private string StatusCode(int statusId)
         => LookupCache.GetCode(LookupTables.OrgStatus, statusId).ToLower();
+
+    private static string WorkweekDayLabel(int? day) => day switch
+    {
+        0 => "Sunday",
+        1 => "Monday",
+        2 => "Tuesday",
+        3 => "Wednesday",
+        4 => "Thursday",
+        5 => "Friday",
+        6 => "Saturday",
+        _ => "Monday"
+    };
 }
 
 <style>
-    .page-container { padding: var(--space-6); max-width: 1200px; }
+    .page-container { padding: var(--space-6); }
 
     .page-header {
         display: flex;
@@ -437,40 +459,6 @@
         color: #6B7280;
         margin: 0;
     }
-
-    .grid-container {
-        background: white;
-        border-radius: var(--radius-lg);
-        box-shadow: var(--shadow-sm);
-        overflow: hidden;
-    }
-
-    .data-table {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: var(--font-size-sm);
-    }
-
-    .data-table th {
-        background: #F9FAFB;
-        padding: var(--space-3) var(--space-4);
-        text-align: left;
-        font-weight: var(--font-weight-medium);
-        color: #6B7280;
-        border-bottom: 1px solid #E5E7EB;
-        white-space: nowrap;
-    }
-
-    .data-table td {
-        padding: var(--space-3) var(--space-4);
-        border-bottom: 1px solid #F3F4F6;
-        color: var(--aw-navy);
-    }
-
-    .data-table tr:last-child td { border-bottom: none; }
-    .data-table tbody tr:hover td { background: #F9FAFB; }
-
-    .mono { font-family: monospace; font-size: var(--font-size-sm); }
 
     .status-badge {
         display: inline-block;

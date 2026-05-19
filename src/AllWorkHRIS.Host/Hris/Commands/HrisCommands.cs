@@ -30,6 +30,7 @@ public sealed record HireEmployeeCommand
     public Guid?             ManagerEmploymentId  { get; init; }
 
     // Initial compensation
+    public int?              PayTypeId            { get; init; }
     public required int      RateTypeId           { get; init; }
     public required decimal  BaseRate             { get; init; }
     public required int      PayFrequencyId       { get; init; }

@@ -120,8 +120,8 @@
                         </Template>
                     </GridColumn>
                 </GridColumns>
-                <GridTemplates><DetailTemplate>
-                    @{ var row = (TimecardSummaryRow)context; }
+                <GridTemplates><DetailTemplate Context="tcRow">
+                    @{ var row = (TimecardSummaryRow)tcRow; }
                     <div class="detail-panel">
                         @if (_detailLoading && _detailEmploymentId == row.EmploymentId)
                         {
@@ -135,62 +135,54 @@
                             }
                             else
                             {
-                                <table class="data-table data-table--inner">
-                                    <thead>
-                                        <tr>
-                                            <th>Date</th>
-                                            <th>Category</th>
-                                            <th class="text-right">Hours</th>
-                                            <th>Time</th>
-                                            <th>Status</th>
-                                            <th>Notes</th>
-                                            <th>Actions</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        @foreach (var entry in entries)
-                                        {
-                                            <tr>
-                                                <td>@entry.WorkDate.ToString("ddd MMM d")</td>
-                                                <td><span class="cat-badge cat-@entry.TimeCategoryCode.ToLower()">@entry.TimeCategoryCode</span></td>
-                                                <td class="text-right">@entry.Duration.ToString("F2")</td>
-                                                <td style="font-size:.8rem;color:#6b7280;">
-                                                    @(entry.StartTime.HasValue ? $"{entry.StartTime:HH:mm}–{entry.EndTime:HH:mm}" : "—")
-                                                </td>
-                                                <td><span class="status-badge status-@entry.StatusCode.ToLower()">@entry.StatusCode</span></td>
-                                                <td style="font-size:.8rem;color:#6b7280;max-width:200px;overflow:hidden;text-overflow:ellipsis;">
-                                                    @(entry.RejectionReason ?? entry.Notes ?? "")
-                                                </td>
-                                                <td>
-                                                    @if (entry.StatusCode is "SUBMITTED" or "CORRECTED")
-                                                    {
-                                                        <div style="display:flex;gap:.35rem;">
-                                                            <button class="btn-sm btn-primary"
-                                                                    @onclick="() => ApproveEntryAsync(row.EmploymentId, entry.TimeEntryId)">✓</button>
-                                                            <button class="btn-sm btn-danger"
-                                                                    @onclick="() => StartReject(entry.TimeEntryId)">✗</button>
-                                                        </div>
-                                                    }
-                                                </td>
-                                            </tr>
-                                            @if (_rejectEntryId == entry.TimeEntryId)
-                                            {
-                                                <tr style="background:#fff7ed;">
-                                                    <td colspan="7" style="padding:.75rem 1rem;">
-                                                        <div style="display:flex;gap:.5rem;align-items:center;">
-                                                            <SfTextBox @bind-Value="_rejectReason"
-                                                                       Placeholder="Rejection reason (required)"
-                                                                       CssClass="flex-1" />
-                                                            <button class="btn-sm btn-danger" @onclick="ConfirmRejectAsync"
-                                                                    disabled="@string.IsNullOrWhiteSpace(_rejectReason)">Reject</button>
-                                                            <button class="btn-sm btn-ghost" @onclick="CancelReject">Cancel</button>
-                                                        </div>
-                                                    </td>
-                                                </tr>
-                                            }
-                                        }
-                                    </tbody>
-                                </table>
+                                <SfGrid TValue="TimeEntryRow" DataSource="@entries.ToList()" CssClass="e-gridhover" AllowSorting="true">
+                                    <GridColumns>
+                                        <GridColumn HeaderText="Date" Width="130">
+                                            <Template>@{ var entry = (TimeEntryRow)context; }@entry.WorkDate.ToString("ddd MMM d")</Template>
+                                        </GridColumn>
+                                        <GridColumn HeaderText="Category" Width="120">
+                                            <Template>@{ var entry = (TimeEntryRow)context; }<span class="cat-badge cat-@entry.TimeCategoryCode.ToLower()">@entry.TimeCategoryCode</span></Template>
+                                        </GridColumn>
+                                        <GridColumn HeaderText="Hours" TextAlign="TextAlign.Right" Width="80">
+                                            <Template>@{ var entry = (TimeEntryRow)context; }@entry.Duration.ToString("F2")</Template>
+                                        </GridColumn>
+                                        <GridColumn HeaderText="Time" Width="130">
+                                            <Template>@{ var entry = (TimeEntryRow)context; }<span style="font-size:.8rem;color:#6b7280;">@(entry.StartTime.HasValue ? $"{entry.StartTime:HH:mm}–{entry.EndTime:HH:mm}" : "—")</span></Template>
+                                        </GridColumn>
+                                        <GridColumn HeaderText="Status" Width="120">
+                                            <Template>@{ var entry = (TimeEntryRow)context; }<span class="status-badge status-@entry.StatusCode.ToLower()">@entry.StatusCode</span></Template>
+                                        </GridColumn>
+                                        <GridColumn HeaderText="Notes">
+                                            <Template>@{ var entry = (TimeEntryRow)context; }<span style="font-size:.8rem;color:#6b7280;">@(entry.RejectionReason ?? entry.Notes ?? "")</span></Template>
+                                        </GridColumn>
+                                        <GridColumn HeaderText="Actions" Width="110" AllowSorting="false">
+                                            <Template>
+                                                @{ var entry = (TimeEntryRow)context; }
+                                                @if (entry.StatusCode is "SUBMITTED" or "CORRECTED")
+                                                {
+                                                    <div style="display:flex;gap:.35rem;">
+                                                        <button class="btn-sm btn-primary"
+                                                                @onclick="() => ApproveEntryAsync(row.EmploymentId, entry.TimeEntryId)">✓</button>
+                                                        <button class="btn-sm btn-danger"
+                                                                @onclick="() => StartReject(entry.TimeEntryId)">✗</button>
+                                                    </div>
+                                                }
+                                            </Template>
+                                        </GridColumn>
+                                    </GridColumns>
+                                </SfGrid>
+
+                                @if (_rejectEntryId is not null && entries.Any(e => e.TimeEntryId == _rejectEntryId))
+                                {
+                                    <div style="display:flex;gap:.5rem;align-items:center;padding:.5rem .75rem;background:#fff7ed;border:1px solid #fed7aa;border-top:none;border-radius:0 0 6px 6px;margin-top:-1px;">
+                                        <SfTextBox @bind-Value="_rejectReason"
+                                                   Placeholder="Rejection reason (required)"
+                                                   CssClass="flex-1" />
+                                        <button class="btn-sm btn-danger" @onclick="ConfirmRejectAsync"
+                                                disabled="@string.IsNullOrWhiteSpace(_rejectReason)">Reject</button>
+                                        <button class="btn-sm btn-ghost" @onclick="CancelReject">Cancel</button>
+                                    </div>
+                                }
 
                                 @if (entries.Any(e => e.TimeCategoryCode == "OVERTIME"))
                                 {
@@ -439,11 +431,7 @@
 
     .ot-summary { display:flex;gap:.5rem;align-items:center;padding:.5rem 1rem;font-size:.85rem;color:#92400e;background:#fef3c7;border-radius:6px;margin-top:.5rem; }
 
-    .data-table--inner { font-size:.85rem; }
-    .data-table--inner th { padding:.4rem .75rem; }
-    .data-table--inner td { padding:.4rem .75rem; }
-
-    .btn-sm { padding:2px 10px;font-size:.8rem;border-radius:4px;cursor:pointer;border:1px solid transparent; }
+.btn-sm { padding:2px 10px;font-size:.8rem;border-radius:4px;cursor:pointer;border:1px solid transparent; }
     .btn-primary { background:var(--aw-blue,#2563eb);color:#fff;border-color:var(--aw-blue,#2563eb); }
     .btn-danger  { background:#ef4444;color:#fff;border-color:#ef4444; }
     .btn-ghost   { background:#f3f4f6;color:#374151;border-color:#e5e7eb; }

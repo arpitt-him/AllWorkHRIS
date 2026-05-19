@@ -9,4 +9,5 @@ public interface IPayrollContextLookup
 {
     Task<IReadOnlyList<(Guid Id, string Name)>> GetActiveContextsAsync();
     Task<IReadOnlyList<(Guid Id, string Name)>> GetActiveContextsByLegalEntityAsync(Guid legalEntityId);
+    Task<decimal> GetOtThresholdForEmploymentAsync(Guid employmentId);
 }

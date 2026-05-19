@@ -139,6 +139,13 @@ html, body {
     min-height: var(--topbar-height);
     display: flex;
     align-items: center;
+    gap: var(--space-3);
+}
+
+.shell-brand-logo {
+    width: 40px;
+    height: 40px;
+    flex-shrink: 0;
 }
 
 .shell-brand-name {
@@ -325,6 +332,7 @@ html, body {
     font-weight: var(--font-weight-medium);
     text-align: left;
     text-decoration: none;
+    white-space: nowrap;
     cursor: pointer;
     opacity: 0.8;
     transition: opacity 0.15s ease;
@@ -334,6 +342,7 @@ html, body {
 .nav-switch-client:hover {
     opacity: 1;
     color: var(--sidebar-text-active);
+    text-decoration: none;
 }
 
 /* Entity name shown below Switch Client when locked */
@@ -472,6 +481,7 @@ html, body {
     color: var(--aw-navy);
     margin: 0;
 }
+.page-title:focus, h1:focus, h2:focus { outline: none; }
 
 /* Stat cards */
 .stat-cards {

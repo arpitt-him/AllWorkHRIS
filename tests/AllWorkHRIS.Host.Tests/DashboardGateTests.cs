@@ -296,11 +296,11 @@ file sealed class NullTaxProfileRepository : ITaxProfileRepository
     public Task<IReadOnlyList<TaxJurisdictionRow>>         GetJurisdictionsByLegalEntityAsync(Guid legalEntityId)                                                    => Task.FromResult<IReadOnlyList<TaxJurisdictionRow>>([]);
     public Task<IReadOnlyList<EmployeeJurisdictionRow>>    GetJurisdictionsByEmployeeAsync(Guid legalEntityId, Guid employmentId, DateOnly operativeDate, int lookAheadDays = 60) => Task.FromResult<IReadOnlyList<EmployeeJurisdictionRow>>([]);
     public Task<IReadOnlyList<TaxFilingStatusRow>>         GetFilingStatusesAsync(string jurisdictionCode)                                                           => Task.FromResult<IReadOnlyList<TaxFilingStatusRow>>([]);
-    public Task<IReadOnlyList<MissingElectionRow>>         GetEmployeesMissingElectionsAsync(Guid legalEntityId, DateOnly operativeDate, int page, int pageSize)     => Task.FromResult<IReadOnlyList<MissingElectionRow>>([]);
+    public Task<IReadOnlyList<MissingWithholdingRow>>       GetEmployeesMissingWithholdingAsync(Guid legalEntityId, DateOnly operativeDate, int page, int pageSize)   => Task.FromResult<IReadOnlyList<MissingWithholdingRow>>([]);
     public Task<TaxProfileRow?>                            GetActiveProfileAsync(Guid employmentId, string jurisdictionCode, DateOnly asOfDate)                      => Task.FromResult<TaxProfileRow?>(null);
     public Task                                            SaveProfileAsync(Guid employmentId, string jurisdictionCode, TaxProfileSaveModel model, string createdBy, DateOnly effectiveFrom) => Task.CompletedTask;
     public Task                                            AssignJurisdictionsAsync(Guid legalEntityId, IEnumerable<string> jurisdictionCodes)                       => Task.CompletedTask;
     public Task                                            RemoveJurisdictionAsync(Guid legalEntityId, string jurisdictionCode)                                       => Task.CompletedTask;
     public Task<long>                                      GetEmployeesInJurisdictionScopeCountAsync(Guid legalEntityId, string jurisdictionCode)                     => Task.FromResult(0L);
-    public Task<IReadOnlyList<ElectionHistoryRow>>         GetElectionHistoryAsync(Guid employmentId, string jurisdictionCode)                                        => Task.FromResult<IReadOnlyList<ElectionHistoryRow>>([]);
+    public Task<IReadOnlyList<WithholdingHistoryRow>>      GetWithholdingHistoryAsync(Guid employmentId, string jurisdictionCode)                                     => Task.FromResult<IReadOnlyList<WithholdingHistoryRow>>([]);
 }

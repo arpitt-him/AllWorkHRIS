@@ -68,20 +68,40 @@ public sealed class TimeEntryService : ITimeEntryService
 
         var entry = TimeEntry.Create(command, submittedStatusId, timeCategoryId, entryMethodId);
 
+        Guid entryId;
         using var uow = new UnitOfWork(_connectionFactory);
         try
         {
-            var entryId = await _repository.InsertAsync(entry, uow);
+            entryId = await _repository.InsertAsync(entry, uow);
             uow.Commit();
-
-            await _notifier.NotifyTimeApprovalAsync(entryId, command.EmploymentId);
-            return entryId;
         }
         catch
         {
             uow.Rollback();
             throw;
         }
+
+        await _notifier.NotifyTimeApprovalAsync(entryId, command.EmploymentId);
+
+        // OT detection runs at submission so the manager sees REGULAR/OT split before approving
+        var anchor    = await _workSchedules.ResolveWorkweekAnchorAsync(command.PayrollPeriodId, command.EmploymentId);
+        var diff      = ((int)command.WorkDate.DayOfWeek - anchor + 7) % 7;
+        var weekStart = command.WorkDate.AddDays(-diff);
+        using var otUow = new UnitOfWork(_connectionFactory);
+        try
+        {
+            await _overtimeService.DetectAndReclassifyAsync(command.EmploymentId, weekStart, otUow);
+            otUow.Commit();
+        }
+        catch (Exception ex)
+        {
+            otUow.Rollback();
+            _logger.LogWarning(ex,
+                "Overtime detection failed after submitting entry {EntryId} — submission stands",
+                entryId);
+        }
+
+        return entryId;
     }
 
     public async Task ApproveTimeEntryAsync(ApproveTimeEntryCommand command)
@@ -104,24 +124,6 @@ public sealed class TimeEntryService : ITimeEntryService
         {
             uow.Rollback();
             throw;
-        }
-
-        // Overtime detection runs after approval in its own transaction
-        var anchor    = await _workSchedules.ResolveWorkweekAnchorAsync(entry.PayrollPeriodId, entry.EmploymentId);
-        var diff      = ((int)entry.WorkDate.DayOfWeek - anchor + 7) % 7;
-        var weekStart = entry.WorkDate.AddDays(-diff);
-        using var otUow = new UnitOfWork(_connectionFactory);
-        try
-        {
-            await _overtimeService.DetectAndReclassifyAsync(entry.EmploymentId, weekStart, otUow);
-            otUow.Commit();
-        }
-        catch (Exception ex)
-        {
-            otUow.Rollback();
-            _logger.LogWarning(ex,
-                "Overtime detection failed after approving entry {TimeEntryId} — approval stands",
-                command.TimeEntryId);
         }
     }
 

@@ -5,11 +5,13 @@
 @inject IReadOnlyList<IPlatformModule> Modules
 @inject ITemporalOverrideService TemporalOverride
 
-<PageTitle>About — AllWork HRIS</PageTitle>
+<PageTitle>System Settings — AllWork HRIS</PageTitle>
 
 <div class="page-header">
-    <h1 class="page-title">About</h1>
-    <p class="page-subtitle">AllWork HRIS Platform — loaded modules and version information.</p>
+    <div>
+        <h1 class="page-title">System Settings</h1>
+        <p class="page-subtitle">AllWork HRIS Platform — loaded modules and version information.</p>
+    </div>
 </div>
 
 <div class="about-section">
@@ -68,7 +70,7 @@
 @if (TemporalOverride.IsEnabled)
 {
     <div class="about-section">
-        <h2 class="section-title">Developer Tools</h2>
+        <h2 class="section-title">Testing Tools</h2>
         <TemporalOverrideBar />
     </div>
 }

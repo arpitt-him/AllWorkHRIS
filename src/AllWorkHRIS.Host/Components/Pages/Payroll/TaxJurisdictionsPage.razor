@@ -36,6 +36,13 @@
             <div class="alert-error">@_error</div>
         }
 
+        @if (_autoAddedFederals.Count > 0)
+        {
+            <div class="alert-info" style="margin-bottom:1rem;">
+                Federal jurisdiction@(_autoAddedFederals.Count > 1 ? "s" : "") automatically included: <strong>@string.Join(", ", _autoAddedFederals)</strong> — required for payroll processing.
+            </div>
+        }
+
         <div class="jurisdiction-panels">
 
             <!-- ── Assigned panel ── -->
@@ -46,10 +53,16 @@
                 <div class="card-body">
                     @if (_assigned.Count == 0)
                     {
-                        <p class="text-muted">No jurisdictions assigned. Assign at least US-FED before running payroll.</p>
+                        <p class="text-muted">No jurisdictions assigned. At least one federal jurisdiction is required before running payroll.</p>
                     }
                     else
                     {
+                        @if (_missingFederals.Count > 0)
+                        {
+                            <div class="alert-warning" style="margin-bottom:.75rem;">
+                                Missing required federal jurisdiction@(_missingFederals.Count > 1 ? "s" : ""): <strong>@string.Join(", ", _missingFederals)</strong>. These must be assigned before payroll can run.
+                            </div>
+                        }
                         <SfGrid DataSource="@_assigned" CssClass="e-gridhover" AllowSorting="true">
                             <GridColumns>
                                 <GridColumn HeaderText="Jurisdiction" Field="JurisdictionName" />
@@ -118,27 +131,28 @@
                                 @(_saving ? "Assigning…" : $"Assign Selected ({_selected.Count})")
                             </button>
                         </div>
-                        <table class="data-table">
-                            <thead>
-                                <tr>
-                                    <th><input type="checkbox" @onchange="ToggleSelectAll" checked="@(_selected.Count == _available.Count && _available.Count > 0)" /></th>
-                                    <th>Jurisdiction</th>
-                                    <th>Code</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                @foreach (var j in _available)
-                                {
-                                    var isChecked = _selected.Contains(j.JurisdictionCode);
-                                    <tr>
-                                        <td><input type="checkbox" checked="@isChecked"
-                                                   @onchange="e => ToggleSelect(j.JurisdictionCode, (bool)(e.Value ?? false))" /></td>
-                                        <td>@j.JurisdictionName</td>
-                                        <td><code>@j.JurisdictionCode</code></td>
-                                    </tr>
-                                }
-                            </tbody>
-                        </table>
+                        <SfGrid TValue="TaxJurisdictionRow" DataSource="@_available.ToList()" AllowSorting="true" CssClass="e-gridhover">
+                            <GridColumns>
+                                <GridColumn Width="44">
+                                    <HeaderTemplate>
+                                        <input type="checkbox" @onchange="ToggleSelectAll"
+                                               checked="@(_selected.Count == _available.Count && _available.Count > 0)" />
+                                    </HeaderTemplate>
+                                    <Template>
+                                        @{
+                                            var j = (TaxJurisdictionRow)context;
+                                            var isChecked = _selected.Contains(j.JurisdictionCode);
+                                        }
+                                        <input type="checkbox" checked="@isChecked"
+                                               @onchange="e => ToggleSelect(j.JurisdictionCode, (bool)(e.Value ?? false))" />
+                                    </Template>
+                                </GridColumn>
+                                <GridColumn HeaderText="Jurisdiction" Field="JurisdictionName" />
+                                <GridColumn HeaderText="Code" Width="100">
+                                    <Template>@{ var j = (TaxJurisdictionRow)context; }<code>@j.JurisdictionCode</code></Template>
+                                </GridColumn>
+                            </GridColumns>
+                        </SfGrid>
                     }
                 </div>
             </div>
@@ -152,6 +166,7 @@
     private IReadOnlyList<TaxJurisdictionRow> _assigned  = [];
     private IReadOnlyList<TaxJurisdictionRow> _all       = [];
     private HashSet<string>                   _selected  = [];
+    private List<string>                      _autoAddedFederals = [];
     private string?  _confirmRemoveCode;
     private long     _affectedCount;
     private bool     _loading = true;
@@ -160,6 +175,19 @@
 
     private List<TaxJurisdictionRow> _available =>
         _all.Where(j => !_assigned.Any(a => a.JurisdictionCode == j.JurisdictionCode)).ToList();
+
+    // Countries in the assigned set whose -FED jurisdiction exists in the system but is not assigned.
+    private List<string> _missingFederals =>
+        _assigned
+            .Select(a => a.CountryCode)
+            .Distinct()
+            .SelectMany(cc =>
+                _all
+                    .Where(j => j.CountryCode == cc &&
+                                j.JurisdictionCode.EndsWith("-FED", StringComparison.OrdinalIgnoreCase) &&
+                                !_assigned.Any(a => a.JurisdictionCode == j.JurisdictionCode))
+                    .Select(j => j.JurisdictionCode))
+            .ToList();
 
     protected override async Task OnInitializedAsync()
     {
@@ -206,9 +234,31 @@
         if (!SessionState.HasEntity || _selected.Count == 0) return;
         _saving = true;
         _error  = null;
+        _autoAddedFederals.Clear();
         try
         {
-            await TaxRepo.AssignJurisdictionsAsync(SessionState.SelectedLegalEntityId!.Value, _selected);
+            var toAssign = new HashSet<string>(_selected);
+
+            // For each selected jurisdiction, auto-include the country's federal jurisdiction
+            // if it exists in the system and is not already assigned or selected.
+            foreach (var code in _selected)
+            {
+                var j = _all.FirstOrDefault(x => x.JurisdictionCode == code);
+                if (j is null) continue;
+
+                var federal = _all.FirstOrDefault(x =>
+                    x.CountryCode == j.CountryCode &&
+                    x.JurisdictionCode.EndsWith("-FED", StringComparison.OrdinalIgnoreCase));
+
+                if (federal is not null &&
+                    !_assigned.Any(a => a.JurisdictionCode == federal.JurisdictionCode) &&
+                    toAssign.Add(federal.JurisdictionCode))
+                {
+                    _autoAddedFederals.Add(federal.JurisdictionCode);
+                }
+            }
+
+            await TaxRepo.AssignJurisdictionsAsync(SessionState.SelectedLegalEntityId!.Value, toAssign);
             _selected.Clear();
             await LoadAsync();
         }

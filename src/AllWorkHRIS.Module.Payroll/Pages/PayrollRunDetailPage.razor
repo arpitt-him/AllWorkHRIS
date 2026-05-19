@@ -49,7 +49,7 @@
         @* Tab bar *@
         <div class="tab-bar">
             <button class="tab-item @(_activeTab == "summary"  ? "active" : "")" @onclick='() => _activeTab = "summary"'>Summary</button>
-            <button class="tab-item @(_activeTab == "register" ? "active" : "")" @onclick="SwitchToRegisterAsync">Pay Register</button>
+            <button class="tab-item @(_activeTab == "register" ? "active" : "")" @onclick="SwitchToRegisterAsync">Detail</button>
         </div>
 
         @* ── Summary tab ─────────────────────────────────────────────── *@

@@ -18,10 +18,11 @@ public sealed class SystemAdminNavContributor : INavContributor
             AccentColor: null,
             Items:
             [
-                new("Dashboard",             "/admin"),
+                new("Dashboard",             "/"),
                 new("Legal Entities",        "/config/legal-entities"),
-                new("Tax Rates & Brackets",  "/payroll/tax/rates"),
-                new("Calculation Steps",     "/config/tax/steps"),
+                new("Tax Rate Tables",        "/payroll/tax/rates"),
+                new("Rate Reference",         "/config/tax/reference"),
+                new("Calculation Steps",      "/config/tax/steps"),
                 new("Tax Review",            "/config/tax/review"),
                 new("Form Definitions",      "/config/tax/form-fields"),
                 new("Preview Sandbox",       "/config/tax/preview"),

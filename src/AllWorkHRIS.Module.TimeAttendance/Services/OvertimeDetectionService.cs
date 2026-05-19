@@ -9,23 +9,24 @@ namespace AllWorkHRIS.Module.TimeAttendance.Services;
 
 public sealed class OvertimeDetectionService : IOvertimeDetectionService
 {
-    private const decimal FlsaWeeklyThreshold = 40m;
-
-    private readonly ITimeEntryRepository  _repository;
-    private readonly IConnectionFactory    _connectionFactory;
-    private readonly ILookupCache          _lookupCache;
-    private readonly ITimeApprovalNotifier _notifier;
+    private readonly ITimeEntryRepository   _repository;
+    private readonly IConnectionFactory     _connectionFactory;
+    private readonly ILookupCache           _lookupCache;
+    private readonly ITimeApprovalNotifier  _notifier;
+    private readonly IPayrollContextLookup  _payrollContextLookup;
 
     public OvertimeDetectionService(
         ITimeEntryRepository  repository,
         IConnectionFactory    connectionFactory,
         ILookupCache          lookupCache,
-        ITimeApprovalNotifier notifier)
+        ITimeApprovalNotifier notifier,
+        IPayrollContextLookup payrollContextLookup)
     {
-        _repository        = repository;
-        _connectionFactory = connectionFactory;
-        _lookupCache       = lookupCache;
-        _notifier          = notifier;
+        _repository           = repository;
+        _connectionFactory    = connectionFactory;
+        _lookupCache          = lookupCache;
+        _notifier             = notifier;
+        _payrollContextLookup = payrollContextLookup;
     }
 
     public async Task<OvertimeDetectionResult> DetectAndReclassifyAsync(
@@ -37,20 +38,21 @@ public sealed class OvertimeDetectionService : IOvertimeDetectionService
         if (flsaCode is not null && flsaCode.StartsWith("EXEMPT", StringComparison.OrdinalIgnoreCase))
             return OvertimeDetectionResult.NotApplicable(employmentId);
 
+        var otThreshold = await _payrollContextLookup.GetOtThresholdForEmploymentAsync(employmentId);
         var weekEntries = await _repository.GetWorkweekEntriesAsync(employmentId, workweekStart);
 
         var approved = weekEntries
-            .Where(e => e.Status == TimeEntryStatus.Approved
+            .Where(e => e.Status is TimeEntryStatus.Approved or TimeEntryStatus.Submitted
                      && e.TimeCategoryCode == "REGULAR")
             .OrderBy(e => e.WorkDate)
             .ToList();
 
         var totalRegularHours = approved.Sum(e => e.Duration);
 
-        if (totalRegularHours <= FlsaWeeklyThreshold)
+        if (totalRegularHours <= otThreshold)
             return OvertimeDetectionResult.NoOvertime(employmentId, totalRegularHours);
 
-        var overtimeHours = totalRegularHours - FlsaWeeklyThreshold;
+        var overtimeHours = totalRegularHours - otThreshold;
         var reclassified  = new List<Guid>();
 
         decimal remaining = overtimeHours;
@@ -68,7 +70,7 @@ public sealed class OvertimeDetectionService : IOvertimeDetectionService
             else
             {
                 // Split: update original to remaining regular hours, insert new OT entry
-                await SplitAndReclassifyAsync(entry, hoursToReclassify, uow);
+                await SplitAndReclassifyAsync(entry, hoursToReclassify, entry.StatusId, uow);
                 reclassified.Add(entry.TimeEntryId);
             }
 
@@ -82,7 +84,7 @@ public sealed class OvertimeDetectionService : IOvertimeDetectionService
     }
 
     private async Task SplitAndReclassifyAsync(
-        TimeEntry entry, decimal overtimeHours, IUnitOfWork uow)
+        TimeEntry entry, decimal overtimeHours, int statusId, IUnitOfWork uow)
     {
         var regularHours = entry.Duration - overtimeHours;
 
@@ -100,9 +102,8 @@ public sealed class OvertimeDetectionService : IOvertimeDetectionService
             TimeEntryId = entry.TimeEntryId
         }, uow.Transaction);
 
-        // Insert new OVERTIME entry for the split hours
+        // Insert new OVERTIME entry for the split hours — preserve original entry's status
         var overtimeCategoryId = _lookupCache.GetId(TimeAttendanceLookupTables.TimeCategory, "OVERTIME");
-        var approvedStatusId   = _lookupCache.GetId(TimeAttendanceLookupTables.TimeEntryStatus, "APPROVED");
 
         const string insertSql = """
             INSERT INTO time_entry (
@@ -124,7 +125,7 @@ public sealed class OvertimeDetectionService : IOvertimeDetectionService
             WorkDate        = entry.WorkDate.ToDateTime(TimeOnly.MinValue),
             TimeCategoryId  = overtimeCategoryId,
             Duration        = overtimeHours,
-            StatusId        = approvedStatusId,
+            StatusId        = statusId,
             entry.EntryMethodId,
             entry.SubmittedBy,
             entry.SubmittedAt,

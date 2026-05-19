@@ -20,7 +20,7 @@ public sealed record EmployeeJurisdictionRow(
     string    CountryCode,
     DateOnly? PendingEffectiveDate);
 
-public sealed record MissingElectionRow(
+public sealed record MissingWithholdingRow(
     Guid    EmploymentId,
     string  LegalFirstName,
     string  LegalLastName,
@@ -70,7 +70,7 @@ public sealed class TaxProfileSaveModel
     public decimal  AdditionalTaxAmount   { get; set; }
 }
 
-public sealed record ElectionHistoryRow(
+public sealed record WithholdingHistoryRow(
     DateOnly EffectiveFrom,
     DateOnly EffectiveTo,
     string   FormTypeCode,
@@ -89,13 +89,13 @@ public interface ITaxProfileRepository
     Task<IReadOnlyList<TaxJurisdictionRow>> GetJurisdictionsByLegalEntityAsync(Guid legalEntityId);
     Task<IReadOnlyList<EmployeeJurisdictionRow>> GetJurisdictionsByEmployeeAsync(Guid legalEntityId, Guid employmentId, DateOnly operativeDate, int lookAheadDays = 60);
     Task<IReadOnlyList<TaxFilingStatusRow>> GetFilingStatusesAsync(string jurisdictionCode);
-    Task<IReadOnlyList<MissingElectionRow>> GetEmployeesMissingElectionsAsync(Guid legalEntityId, DateOnly operativeDate, int page, int pageSize);
+    Task<IReadOnlyList<MissingWithholdingRow>> GetEmployeesMissingWithholdingAsync(Guid legalEntityId, DateOnly operativeDate, int page, int pageSize);
     Task<TaxProfileRow?>                   GetActiveProfileAsync(Guid employmentId, string jurisdictionCode, DateOnly asOfDate);
     Task                                   SaveProfileAsync(Guid employmentId, string jurisdictionCode, TaxProfileSaveModel model, string createdBy, DateOnly effectiveFrom);
     Task                                   AssignJurisdictionsAsync(Guid legalEntityId, IEnumerable<string> jurisdictionCodes);
     Task                                   RemoveJurisdictionAsync(Guid legalEntityId, string jurisdictionCode);
     Task<long>                             GetEmployeesInJurisdictionScopeCountAsync(Guid legalEntityId, string jurisdictionCode);
-    Task<IReadOnlyList<ElectionHistoryRow>> GetElectionHistoryAsync(Guid employmentId, string jurisdictionCode);
+    Task<IReadOnlyList<WithholdingHistoryRow>> GetWithholdingHistoryAsync(Guid employmentId, string jurisdictionCode);
 }
 
 // ============================================================
@@ -241,7 +241,7 @@ public sealed class TaxProfileRepository : ITaxProfileRepository
             .ToList();
     }
 
-    public async Task<IReadOnlyList<MissingElectionRow>> GetEmployeesMissingElectionsAsync(
+    public async Task<IReadOnlyList<MissingWithholdingRow>> GetEmployeesMissingWithholdingAsync(
         Guid legalEntityId, DateOnly operativeDate, int page, int pageSize)
     {
         var asOf   = operativeDate.ToDateTime(TimeOnly.MinValue);
@@ -330,7 +330,7 @@ public sealed class TaxProfileRepository : ITaxProfileRepository
             """;
 
         using var conn = _db.CreateConnection();
-        var rows = await conn.QueryAsync<MissingElectionRow>(sql, new
+        var rows = await conn.QueryAsync<MissingWithholdingRow>(sql, new
         {
             LegalEntityId = legalEntityId,
             AsOf          = asOf,
@@ -526,7 +526,7 @@ public sealed class TaxProfileRepository : ITaxProfileRepository
         return await conn.ExecuteScalarAsync<long>(sql, new { LegalEntityId = legalEntityId, JurisdictionCode = jurisdictionCode });
     }
 
-    public async Task<IReadOnlyList<ElectionHistoryRow>> GetElectionHistoryAsync(
+    public async Task<IReadOnlyList<WithholdingHistoryRow>> GetWithholdingHistoryAsync(
         Guid employmentId, string jurisdictionCode)
     {
         const string sql = """
@@ -547,7 +547,7 @@ public sealed class TaxProfileRepository : ITaxProfileRepository
             ORDER  BY s.effective_from DESC, s.creation_timestamp DESC
             """;
         using var conn = _db.CreateConnection();
-        var rows = await conn.QueryAsync<ElectionHistoryRow>(sql,
+        var rows = await conn.QueryAsync<WithholdingHistoryRow>(sql,
             new { EmploymentId = employmentId, JurisdictionCode = jurisdictionCode });
         return rows.AsList();
     }

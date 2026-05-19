@@ -193,7 +193,7 @@ public sealed class TimeAttendanceImportGateTests : IAsyncLifetime
                                  _connectionFactory);
         var notifier       = new NullTimeApprovalNotifier();
         var otService      = new OvertimeDetectionService(entryRepo, _connectionFactory,
-                                 _lookupCache, notifier);
+                                 _lookupCache, notifier, new AllWorkHRIS.Core.Composition.NullPayrollContextLookup());
         var entryService   = new TimeEntryService(entryRepo, otService, workSchedules, _connectionFactory,
                                  _lookupCache, notifier, NullLogger<TimeEntryService>.Instance);
         return new TimeImportService(_connectionFactory, _lookupCache, entryService);

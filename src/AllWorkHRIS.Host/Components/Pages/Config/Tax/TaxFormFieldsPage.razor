@@ -53,7 +53,7 @@ else if (_fields.Count > 0)
                 <Template>@{ var f = (FormFieldConfigRow)context; }<code>@f.FieldKey</code></Template>
             </GridColumn>
             <GridColumn HeaderText="Type" Width="100">
-                <Template>@{ var f = (FormFieldConfigRow)context; }<span class="type-badge">@f.FieldType</span></Template>
+                <Template>@{ var f = (FormFieldConfigRow)context; }<span class="type-badge">@FieldTypeLabel(f.FieldType)</span></Template>
             </GridColumn>
             <GridColumn HeaderText="Required" Width="120">
                 <Template>
@@ -144,6 +144,17 @@ else if (_fields.Count > 0)
         }
         catch (Exception ex) { _actionErrors[field.FieldDefinitionId] = ex.Message; }
     }
+
+    private static string FieldTypeLabel(string fieldType) => fieldType switch
+    {
+        "ENUM"    => "Dropdown",
+        "DECIMAL" => "Amount",
+        "INTEGER" => "Number",
+        "BOOLEAN" => "Yes / No",
+        "TEXT"    => "Text",
+        "DATE"    => "Date",
+        _         => fieldType
+    };
 
     private async Task SubmitForReviewAsync(FormFieldConfigRow field) => await TransitionAsync(field, "PENDING_REVIEW");
     private async Task ActivateAsync(FormFieldConfigRow field)        => await TransitionAsync(field, "ACTIVE");

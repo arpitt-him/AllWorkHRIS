@@ -306,7 +306,6 @@
                                                     .Select(r => (DateOnly?)r.PayDate)
                                                     .DefaultIfEmpty(null).Max();
     private DateOnly? _nextPayDate          => _openPeriods.Select(p => (DateOnly?)p.PayDate)
-                                                           .Where(d => d >= DateOnly.FromDateTime(TemporalContext.GetOperativeDate()))
                                                            .DefaultIfEmpty(null).Min();
 
     protected override async Task OnInitializedAsync()

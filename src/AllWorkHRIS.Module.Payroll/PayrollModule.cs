@@ -56,6 +56,7 @@ public sealed class PayrollModule : IPlatformModule
 
         // Query services
         builder.RegisterType<PayRegisterQueryService>().InstancePerLifetimeScope();
+        builder.RegisterType<AccumulatorQueryService>().InstancePerLifetimeScope();
 
         // Services
         builder.RegisterType<PayrollRunService>().As<IPayrollRunService>().InstancePerLifetimeScope();

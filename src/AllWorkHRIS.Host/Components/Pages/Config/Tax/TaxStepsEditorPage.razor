@@ -54,7 +54,7 @@ else if (_steps.Count > 0)
                 <Template>@{ var s = (TaxStepConfigRow)context; }<span class="type-badge">@StepTypeLabel(s.StepType)</span></Template>
             </GridColumn>
             <GridColumn HeaderText="Applies To" Width="110">
-                <Template>@{ var s = (TaxStepConfigRow)context; }@s.AppliesTo</Template>
+                <Template>@{ var s = (TaxStepConfigRow)context; }@AppliesToLabel(s.AppliesTo)</Template>
             </GridColumn>
             <GridColumn HeaderText="Status" Width="130">
                 <Template>@{ var s = (TaxStepConfigRow)context; }<span class="status-badge status-@s.StatusCode.ToLower().Replace('_','-')">@s.StatusCode</span></Template>
@@ -84,8 +84,8 @@ else if (_steps.Count > 0)
                 </Template>
             </GridColumn>
         </GridColumns>
-        <GridTemplates><DetailTemplate>
-            @{ var s = (TaxStepConfigRow)context; }
+        <GridTemplates><DetailTemplate Context="stepCtx">
+            @{ var s = (TaxStepConfigRow)stepCtx; }
             @{ var rates = _ratesByStep.TryGetValue(s.StepCode, out var rr) ? rr : []; }
             <div style="padding:.75rem 1rem;background:#f9fafb;">
                 @if (rates.Count == 0)
@@ -94,27 +94,20 @@ else if (_steps.Count > 0)
                 }
                 else
                 {
-                    <table style="width:100%;font-size:.8rem;border-collapse:collapse;">
-                        <thead>
-                            <tr>
-                                <th style="text-align:left;color:#6b7280;padding:2px 8px;">Type</th>
-                                <th style="text-align:left;color:#6b7280;padding:2px 8px;">Effective From</th>
-                                <th style="text-align:left;color:#6b7280;padding:2px 8px;">Effective To</th>
-                                <th style="text-align:left;color:#6b7280;padding:2px 8px;">Summary</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @foreach (var rate in rates)
-                            {
-                                <tr>
-                                    <td style="padding:2px 8px;"><span class="rate-type-tag">@rate.RowType</span></td>
-                                    <td style="padding:2px 8px;font-family:monospace;">@rate.EffectiveFrom.ToString("yyyy-MM-dd")</td>
-                                    <td style="padding:2px 8px;font-family:monospace;">@(rate.EffectiveTo?.ToString("yyyy-MM-dd") ?? "open")</td>
-                                    <td style="padding:2px 8px;">@rate.Summary</td>
-                                </tr>
-                            }
-                        </tbody>
-                    </table>
+                    <SfGrid TValue="TaxRateRowSummary" DataSource="@rates.ToList()" CssClass="e-gridhover">
+                        <GridColumns>
+                            <GridColumn HeaderText="Type" Width="110">
+                                <Template>@{ var rate = (TaxRateRowSummary)context; }<span class="rate-type-tag">@rate.RowType</span></Template>
+                            </GridColumn>
+                            <GridColumn HeaderText="Effective From" Width="130">
+                                <Template>@{ var rate = (TaxRateRowSummary)context; }<span class="mono">@rate.EffectiveFrom.ToString("yyyy-MM-dd")</span></Template>
+                            </GridColumn>
+                            <GridColumn HeaderText="Effective To" Width="130">
+                                <Template>@{ var rate = (TaxRateRowSummary)context; }<span class="mono">@(rate.EffectiveTo?.ToString("yyyy-MM-dd") ?? "open")</span></Template>
+                            </GridColumn>
+                            <GridColumn HeaderText="Summary" Field="Summary" />
+                        </GridColumns>
+                    </SfGrid>
                 }
             </div>
         </DetailTemplate></GridTemplates>
@@ -221,6 +214,14 @@ else if (_steps.Count > 0)
     {
         _auditLog = (await TaxConfig.GetAuditLogAsync("payroll_calculation_steps", stepId.ToString())).ToList();
     }
+
+    private static string AppliesToLabel(string? a) => a switch
+    {
+        "EMPLOYEE" => "EE",
+        "EMPLOYER" => "ER",
+        "BOTH"     => "EE & ER",
+        _          => a ?? "—"
+    };
 
     private static string StepTypeLabel(string t) => t switch
     {

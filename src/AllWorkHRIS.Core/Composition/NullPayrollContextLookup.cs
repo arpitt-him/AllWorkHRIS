@@ -7,4 +7,7 @@ public sealed class NullPayrollContextLookup : IPayrollContextLookup
 
     public Task<IReadOnlyList<(Guid Id, string Name)>> GetActiveContextsByLegalEntityAsync(Guid legalEntityId)
         => Task.FromResult<IReadOnlyList<(Guid Id, string Name)>>([]);
+
+    public Task<decimal> GetOtThresholdForEmploymentAsync(Guid employmentId)
+        => Task.FromResult(40m);
 }

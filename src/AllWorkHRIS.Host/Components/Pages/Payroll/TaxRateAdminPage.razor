@@ -13,11 +13,11 @@
 @inject AuthenticationStateProvider AuthState
 @inject ITemporalContext             TemporalContext
 
-<PageTitle>Rate Tables — Tax</PageTitle>
+<PageTitle>Tax Rate Tables</PageTitle>
 
 <div class="page-header">
     <div>
-        <h2 class="page-title">Rate Tables</h2>
+        <h2 class="page-title">Tax Rate Tables</h2>
         <p class="page-subtitle">@(_readOnly ? "Read-only view (PayrollAdmin)." : "Manage effective-date rate data per calculation step.")</p>
     </div>
     <button class="btn-secondary" @onclick="LoadAsync">Refresh</button>
@@ -128,7 +128,7 @@ else
                                 {
                                     <div class="close-panel">
                                         <span>Effective To: </span>
-                                        <SfDatePicker CssClass="form-control" Width="160px" @bind-Value="pc.EffectiveTo" />
+                                        <SfDatePicker TValue="DateTime" @bind-Value="pc.EffectiveTo" Width="180px" />
                                         <button class="btn-action btn-action--danger" @onclick="() => ConfirmCloseAsync(sc)">Confirm Close</button>
                                         <button class="btn-action" @onclick="() => CancelClose(sc)">Cancel</button>
                                         @if (pc.Error is not null) { <span class="inline-err">@pc.Error</span> }
@@ -153,9 +153,9 @@ else
                                             <h4 class="insert-heading">New Flat Rate Row</h4>
                                             <div class="ins-grid">
                                                 <label>Effective From <span class="req">*</span></label>
-                                                <SfDatePicker CssClass="form-control" @bind-Value="fi.EffectiveFrom" />
-                                                <label>Rate (decimal, e.g. 0.0765) <span class="req">*</span></label>
-                                                <SfNumericTextBox TValue="decimal" @bind-Value="fi.Rate" Min="0" Step="0.000001m" />
+                                                <SfDatePicker TValue="DateTime" @bind-Value="fi.EffectiveFrom" Width="180px" />
+                                                <label>Rate (%) <span class="req">*</span></label>
+                                                <SfNumericTextBox TValue="decimal" @bind-Value="fi.Rate" Min="0" Step="0.0001m" />
                                                 <label>Wage Base (optional)</label>
                                                 <SfNumericTextBox TValue="decimal?" @bind-Value="fi.WageBase" Min="0" Step="0.01m" ShowClearButton="true" />
                                                 <label>Period Cap (optional)</label>
@@ -218,7 +218,7 @@ else
                                 {
                                     <div class="close-panel">
                                         <span>Close bracket set — Effective To: </span>
-                                        <SfDatePicker CssClass="form-control" Width="160px" @bind-Value="pc.EffectiveTo" />
+                                        <SfDatePicker TValue="DateTime" @bind-Value="pc.EffectiveTo" Width="180px" />
                                         <button class="btn-action btn-action--danger" @onclick="() => ConfirmCloseAsync(sc)">Confirm Close</button>
                                         <button class="btn-action" @onclick="() => CancelClose(sc)">Cancel</button>
                                         @if (pc.Error is not null) { <span class="inline-err">@pc.Error</span> }
@@ -243,10 +243,10 @@ else
                                             <h4 class="insert-heading">New Bracket Set</h4>
                                             <div style="margin-bottom:.75rem;">
                                                 <label class="form-label">Effective From <span class="req">*</span></label>
-                                                <SfDatePicker CssClass="form-control" Width="200px" @bind-Value="bi.EffectiveFrom" />
+                                                <SfDatePicker TValue="DateTime" @bind-Value="bi.EffectiveFrom" Width="180px" />
                                             </div>
                                             <table class="data-table" style="margin-bottom:.5rem;">
-                                                <thead><tr><th>Filing Status</th><th>Lower</th><th>Upper (blank=∞)</th><th>Rate (decimal)</th><th></th></tr></thead>
+                                                <thead><tr><th>Filing Status</th><th>Lower</th><th>Upper (blank=∞)</th><th>Rate (%)</th><th></th></tr></thead>
                                                 <tbody>
                                                     @for (int i = 0; i < bi.Rows.Count; i++)
                                                     {
@@ -256,7 +256,7 @@ else
                                                             <td><SfTextBox @bind-Value="br.FilingStatus" Placeholder="SINGLE…" /></td>
                                                             <td><SfNumericTextBox TValue="decimal" @bind-Value="br.LowerLimit" Step="0.01m" /></td>
                                                             <td><SfTextBox @bind-Value="br.UpperLimitStr" Placeholder="blank=∞" /></td>
-                                                            <td><SfNumericTextBox TValue="decimal" @bind-Value="br.Rate" Step="0.000001m" /></td>
+                                                            <td><SfNumericTextBox TValue="decimal" @bind-Value="br.Rate" Step="0.0001m" /></td>
                                                             <td><button class="btn-close" @onclick="() => bi.Rows.RemoveAt(idx)">✕</button></td>
                                                         </tr>
                                                     }
@@ -310,7 +310,7 @@ else
                                 {
                                     <div class="close-panel">
                                         <span>Effective To: </span>
-                                        <SfDatePicker CssClass="form-control" Width="160px" @bind-Value="pc.EffectiveTo" />
+                                        <SfDatePicker TValue="DateTime" @bind-Value="pc.EffectiveTo" Width="180px" />
                                         <button class="btn-action btn-action--danger" @onclick="() => ConfirmCloseAsync(sc)">Confirm Close</button>
                                         <button class="btn-action" @onclick="() => CancelClose(sc)">Cancel</button>
                                         @if (pc.Error is not null) { <span class="inline-err">@pc.Error</span> }
@@ -335,7 +335,7 @@ else
                                             <h4 class="insert-heading">New Allowance Row</h4>
                                             <div class="ins-grid">
                                                 <label>Effective From <span class="req">*</span></label>
-                                                <SfDatePicker CssClass="form-control" @bind-Value="ai.EffectiveFrom" />
+                                                <SfDatePicker TValue="DateTime" @bind-Value="ai.EffectiveFrom" Width="180px" />
                                                 <label>Filing Status (optional)</label>
                                                 <SfTextBox @bind-Value="ai.FilingStatus" Placeholder="e.g. SINGLE, MFJ" />
                                                 <label>Annual Amount <span class="req">*</span></label>
@@ -397,7 +397,7 @@ else
                                 {
                                     <div class="close-panel">
                                         <span>Close tier set — Effective To: </span>
-                                        <SfDatePicker CssClass="form-control" Width="160px" @bind-Value="pc.EffectiveTo" />
+                                        <SfDatePicker TValue="DateTime" @bind-Value="pc.EffectiveTo" Width="180px" />
                                         <button class="btn-action btn-action--danger" @onclick="() => ConfirmCloseAsync(sc)">Confirm Close</button>
                                         <button class="btn-action" @onclick="() => CancelClose(sc)">Cancel</button>
                                         @if (pc.Error is not null) { <span class="inline-err">@pc.Error</span> }
@@ -422,10 +422,10 @@ else
                                             <h4 class="insert-heading">New Tier Set</h4>
                                             <div style="margin-bottom:.75rem;">
                                                 <label class="form-label">Effective From <span class="req">*</span></label>
-                                                <SfDatePicker CssClass="form-control" Width="200px" @bind-Value="ti.EffectiveFrom" />
+                                                <SfDatePicker TValue="DateTime" @bind-Value="ti.EffectiveFrom" Width="180px" />
                                             </div>
                                             <table class="data-table" style="margin-bottom:.5rem;">
-                                                <thead><tr><th>Lower</th><th>Upper (blank=∞)</th><th>Rate (decimal)</th><th>Period Cap</th><th>Annual Cap</th><th></th></tr></thead>
+                                                <thead><tr><th>Lower</th><th>Upper (blank=∞)</th><th>Rate (%)</th><th>Period Cap</th><th>Annual Cap</th><th></th></tr></thead>
                                                 <tbody>
                                                     @for (int i = 0; i < ti.Rows.Count; i++)
                                                     {
@@ -434,7 +434,7 @@ else
                                                         <tr>
                                                             <td><SfNumericTextBox TValue="decimal" @bind-Value="tr2.LowerLimit" Step="0.01m" /></td>
                                                             <td><SfTextBox @bind-Value="tr2.UpperLimitStr" Placeholder="blank=∞" /></td>
-                                                            <td><SfNumericTextBox TValue="decimal" @bind-Value="tr2.Rate" Step="0.000001m" /></td>
+                                                            <td><SfNumericTextBox TValue="decimal" @bind-Value="tr2.Rate" Step="0.0001m" /></td>
                                                             <td><SfNumericTextBox TValue="decimal?" @bind-Value="tr2.PeriodCap" Min="0" Step="0.01m" /></td>
                                                             <td><SfNumericTextBox TValue="decimal?" @bind-Value="tr2.AnnualCap" Min="0" Step="0.01m" /></td>
                                                             <td><button class="btn-close" @onclick="() => ti.Rows.RemoveAt(idx)">✕</button></td>
@@ -491,7 +491,7 @@ else
                                 {
                                     <div class="close-panel">
                                         <span>Effective To: </span>
-                                        <SfDatePicker CssClass="form-control" Width="160px" @bind-Value="pc.EffectiveTo" />
+                                        <SfDatePicker TValue="DateTime" @bind-Value="pc.EffectiveTo" Width="180px" />
                                         <button class="btn-action btn-action--danger" @onclick="() => ConfirmCloseAsync(sc)">Confirm Close</button>
                                         <button class="btn-action" @onclick="() => CancelClose(sc)">Cancel</button>
                                         @if (pc.Error is not null) { <span class="inline-err">@pc.Error</span> }
@@ -516,11 +516,11 @@ else
                                             <h4 class="insert-heading">New Credit Row</h4>
                                             <div class="ins-grid">
                                                 <label>Effective From <span class="req">*</span></label>
-                                                <SfDatePicker CssClass="form-control" @bind-Value="ci.EffectiveFrom" />
+                                                <SfDatePicker TValue="DateTime" @bind-Value="ci.EffectiveFrom" Width="180px" />
                                                 <label>Annual Amount <span class="req">*</span></label>
                                                 <SfNumericTextBox TValue="decimal" @bind-Value="ci.AnnualAmount" Min="0" Step="0.01m" />
-                                                <label>Credit Rate (decimal) <span class="req">*</span></label>
-                                                <SfNumericTextBox TValue="decimal" @bind-Value="ci.CreditRate" Min="0" Step="0.000001m" />
+                                                <label>Credit Rate (%) <span class="req">*</span></label>
+                                                <SfNumericTextBox TValue="decimal" @bind-Value="ci.CreditRate" Min="0" Step="0.0001m" />
                                                 <label>Refundable</label>
                                                 <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;">
                                                     <input type="checkbox" @bind="ci.IsRefundable" /> Yes
@@ -780,7 +780,7 @@ else
             var auth  = await AuthState.GetAuthenticationStateAsync();
             var actor = auth.User.GetDisplayName();
             await TaxConfig.InsertFlatRateAsync(sc, DateOnly.FromDateTime(fi.EffectiveFrom),
-                fi.Rate, fi.WageBase, fi.PeriodCap, fi.AnnualCap, actor);
+                fi.Rate / 100m, fi.WageBase, fi.PeriodCap, fi.AnnualCap, actor);
             _flatIns.Remove(sc);
             await ReloadDetailAsync(sc);
         }
@@ -805,7 +805,7 @@ else
                 string.IsNullOrWhiteSpace(r.FilingStatus) ? null : r.FilingStatus.Trim().ToUpperInvariant(),
                 r.LowerLimit,
                 string.IsNullOrWhiteSpace(r.UpperLimitStr) ? null : decimal.Parse(r.UpperLimitStr),
-                r.Rate)).ToList();
+                r.Rate / 100m)).ToList();
             var auth  = await AuthState.GetAuthenticationStateAsync();
             var actor = auth.User.GetDisplayName();
             await TaxConfig.InsertBracketSetAsync(sc, DateOnly.FromDateTime(bi.EffectiveFrom), rows, actor);
@@ -856,7 +856,7 @@ else
             var rows = ti.Rows.Select(r => new TieredBracketInput(
                 r.LowerLimit,
                 string.IsNullOrWhiteSpace(r.UpperLimitStr) ? null : decimal.Parse(r.UpperLimitStr),
-                r.Rate, r.PeriodCap, r.AnnualCap)).ToList();
+                r.Rate / 100m, r.PeriodCap, r.AnnualCap)).ToList();
             var auth  = await AuthState.GetAuthenticationStateAsync();
             var actor = auth.User.GetDisplayName();
             await TaxConfig.InsertTieredBracketSetAsync(sc, DateOnly.FromDateTime(ti.EffectiveFrom), rows, actor);
@@ -883,7 +883,7 @@ else
             var auth  = await AuthState.GetAuthenticationStateAsync();
             var actor = auth.User.GetDisplayName();
             await TaxConfig.InsertCreditAsync(sc, DateOnly.FromDateTime(ci.EffectiveFrom),
-                ci.AnnualAmount, ci.CreditRate, ci.IsRefundable, actor);
+                ci.AnnualAmount, ci.CreditRate / 100m, ci.IsRefundable, actor);
             _creditIns.Remove(sc);
             await ReloadDetailAsync(sc);
         }

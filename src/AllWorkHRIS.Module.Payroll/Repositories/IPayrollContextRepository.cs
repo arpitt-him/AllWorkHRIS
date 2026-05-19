@@ -44,4 +44,10 @@ public interface IPayrollContextRepository
     /// has no stored defaults (system defaults apply: 40.00 hrs, Monday).
     /// </summary>
     Task<(decimal? OtWeeklyThresholdHours, int? WorkweekStartDay)> GetLegalEntityDefaultsAsync(Guid legalEntityId);
+
+    /// <summary>
+    /// Updates the editable operational settings on an existing payroll context:
+    /// OT weekly threshold and workweek start day.
+    /// </summary>
+    Task UpdateContextSettingsAsync(Guid payrollContextId, decimal otWeeklyThresholdHours, int workweekStartDay, Guid updatedBy);
 }

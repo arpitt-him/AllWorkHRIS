@@ -546,9 +546,12 @@ public sealed class PayRegisterQueryService
             """
             SELECT DISTINCT r.employment_id
             FROM   employee_payroll_result r
-            JOIN   employment e ON e.employment_id = r.employment_id
+            JOIN   employment e ON e.employment_id        = r.employment_id
+            JOIN   assignment a ON a.employment_id        = e.employment_id
+                               AND a.assignment_type_id   = (SELECT id FROM lkp_assignment_type   WHERE code = 'PRIMARY')
+                               AND a.assignment_status_id = (SELECT id FROM lkp_assignment_status WHERE code = 'ACTIVE')
             WHERE  r.payroll_run_id = @RunId
-              AND  e.job_id = @JobId
+              AND  a.job_id = @JobId
             """,
             new { RunId = runId, JobId = jobId });
         return ids.ToList();

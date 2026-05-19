@@ -1,19 +1,1050 @@
 @page "/payroll/accumulators"
 @layout PayrollShell
 @rendermode InteractiveServer
-@attribute [Authorize(Roles = "PayrollOperator,PayrollAdmin")]
 @using Microsoft.AspNetCore.Authorization
+@using AllWorkHRIS.Core.Temporal
+@using AllWorkHRIS.Host.SharedUI
+@using AllWorkHRIS.Module.Payroll.Queries
+@using Syncfusion.Blazor.Grids
+@using Syncfusion.Blazor.Inputs
+@using Syncfusion.Blazor.Spinner
+@attribute [Authorize(Roles = "PayrollOperator,PayrollAdmin,HrisAdmin")]
+
+@inject AccumulatorQueryService  QueryService
+@inject IHrisSessionState        SessionState
+@inject ITemporalContext         TemporalContext
+
+@implements IDisposable
 
 <PageTitle>Accumulators — AllWork HRIS</PageTitle>
 
-<div class="page-container">
-    <div class="page-header">
+<div class="accum-page">
+    <div class="accum-page-header">
         <h2 class="page-title">Accumulators</h2>
+        <div class="accum-view-toggle">
+            <button class="@ViewBtnClass("family")"   @onclick='() => SetViewAsync("family")'>By Family</button>
+            <button class="@ViewBtnClass("employee")" @onclick='() => SetViewAsync("employee")'>By Employee</button>
+        </div>
     </div>
-    <div class="panel-card">
-        <p style="color:#6B7280;font-size:var(--font-size-sm);">
-            Accumulator balances by employee, period, and legal entity will be displayed here.
-            This view is planned for a future release.
-        </p>
-    </div>
+
+    @if (!SessionState.IsLocked)
+    {
+        <div class="panel-card">
+            <p class="text-muted">Select a legal entity to view accumulators.</p>
+        </div>
+    }
+    else if (_view == "family")
+    {
+        <div class="accum-layout">
+
+            @* ── Left: family selector ─────────────────────────────────────── *@
+            <div class="accum-family-panel">
+                @if (_loadingFamilies)
+                {
+                    <div class="accum-spinner"><SfSpinner Visible="true" Size="28" /></div>
+                }
+                else if (_families.Count == 0)
+                {
+                    <p class="text-muted text-sm" style="padding:var(--space-4)">
+                        No accumulator data found for this entity.
+                    </p>
+                }
+                else
+                {
+                    @foreach (var fam in _families)
+                    {
+                        <div class="family-item @FamilyItemClass(fam)" @onclick="() => SelectFamilyAsync(fam)">
+                            <span class="family-name">@fam.Label</span>
+                            @if (fam.IsTaxRelated)
+                            {
+                                <span class="badge badge-tax">TAX</span>
+                            }
+                        </div>
+                    }
+                }
+            </div>
+
+            @* ── Right: detail panel ───────────────────────────────────────── *@
+            <div class="accum-detail-panel">
+                @if (_selectedFamily is null)
+                {
+                    <div class="panel-card">
+                        <p class="text-muted text-center">Select an accumulator family to view balances.</p>
+                    </div>
+                }
+                else
+                {
+                    @* Family header *@
+                    <div class="accum-family-header">
+                        <div class="family-header-title">
+                            <h3>@_selectedFamily.Label</h3>
+                            @if (_familyMeta?.RollupType == "DERIVED")
+                            {
+                                <span class="badge badge-derived">DERIVED</span>
+                            }
+                            else if (_familyMeta?.RollupType == "HYBRID")
+                            {
+                                <span class="badge badge-derived">HYBRID</span>
+                            }
+                            @if (_selectedYear > 0)
+                            {
+                                var yearLabel = _availableYears.FirstOrDefault(t => t.Year == _selectedYear)?.Label
+                                               ?? _selectedYear.ToString();
+                                <span class="meta-pill">@yearLabel</span>
+                            }
+                        </div>
+                        @if (_familyMeta?.CapAmount.HasValue == true)
+                        {
+                            <div class="family-header-cap">
+                                <span class="cap-label">Cap</span>
+                                <span class="cap-value">@Fmt(_familyMeta.CapAmount!.Value)</span>
+                            </div>
+                        }
+                    </div>
+
+                    @if (_availableYears.Count == 0)
+                    {
+                        <div class="panel-card">
+                            <p class="text-muted">No balance records found for this family.</p>
+                        </div>
+                    }
+                    else
+                    {
+                        @* Period year tabs *@
+                        <div class="accum-year-tabs">
+                            @foreach (var tab in _availableYears)
+                            {
+                                <button class="year-tab @YearTabClass(tab)" @onclick="() => SelectYearAsync(tab)">
+                                    @tab.Label
+                                </button>
+                            }
+                        </div>
+
+                        @* Retroactivity banner *@
+                        @if (_hasRetroactive)
+                        {
+                            <div class="accum-banner accum-banner-amber">
+                                This balance includes retroactive adjustments. See highlighted rows.
+                            </div>
+                        }
+
+                        @* Balance grid *@
+                        @if (_loadingBalances)
+                        {
+                            <div class="panel-card"><SfSpinner Visible="true" Size="28" /></div>
+                        }
+                        else if (_employeeBalances.Count == 0)
+                        {
+                            <div class="panel-card">
+                                <p class="text-muted">No employee balances found for @_selectedYear.</p>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="panel-card no-pad">
+                                <SfGrid TValue="AccumulatorEmployeeBalanceRow"
+                                        DataSource="@_employeeBalances"
+                                        AllowPaging="true"
+                                        AllowSorting="true"
+                                        CssClass="e-gridhover">
+                                    <GridPageSettings PageSize="25" />
+                                    <GridEvents TValue="AccumulatorEmployeeBalanceRow"
+                                                DetailsExpanded="OnBalanceRowExpandingAsync" />
+                                    <GridColumns>
+                                        <GridColumn Field="@nameof(AccumulatorEmployeeBalanceRow.EmployeeNumber)"
+                                                    HeaderText="Emp #" Width="110" />
+                                        <GridColumn Field="@nameof(AccumulatorEmployeeBalanceRow.EmployeeName)"
+                                                    HeaderText="Employee" />
+                                        <GridColumn HeaderText="YTD Balance" TextAlign="TextAlign.Right" Width="130">
+                                            <Template>
+                                                @{ var r = (AccumulatorEmployeeBalanceRow)context; }
+                                                @Fmt(r.YtdBalance)
+                                            </Template>
+                                        </GridColumn>
+                                        <GridColumn HeaderText="Cap" TextAlign="TextAlign.Right" Width="110">
+                                            <Template>
+                                                @{ var r = (AccumulatorEmployeeBalanceRow)context; }
+                                                @if (r.CapAmount.HasValue)
+                                                { <span>@Fmt(r.CapAmount.Value)</span> }
+                                                else
+                                                { <span class="text-muted">—</span> }
+                                            </Template>
+                                        </GridColumn>
+                                        <GridColumn HeaderText="Cap Remaining" TextAlign="TextAlign.Right" Width="160">
+                                            <Template>
+                                                @{ var r = (AccumulatorEmployeeBalanceRow)context; }
+                                                @if (!r.CapAmount.HasValue)
+                                                {
+                                                    <span class="text-muted">—</span>
+                                                }
+                                                else
+                                                {
+                                                    decimal rem = r.CapAmount.Value - r.YtdBalance;
+                                                    if (rem < 0)
+                                                    {
+                                                        <span class="cap-reached">@Fmt(rem) <span class="badge badge-danger">REVIEW REQUIRED</span></span>
+                                                    }
+                                                    else if (rem == 0)
+                                                    {
+                                                        <span class="cap-reached">@Fmt(rem) <span class="badge badge-danger">CAP REACHED</span></span>
+                                                    }
+                                                    else if (r.CapAmount.Value > 0 && rem / r.CapAmount.Value <= 0.10m)
+                                                    {
+                                                        <span class="cap-warning">@Fmt(rem)</span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span>@Fmt(rem)</span>
+                                                    }
+                                                }
+                                            </Template>
+                                        </GridColumn>
+                                        <GridColumn HeaderText="Last Updated" Width="120">
+                                            <Template>
+                                                @{ var r = (AccumulatorEmployeeBalanceRow)context; }
+                                                @r.LastUpdated.ToString("MMM d, yyyy")
+                                            </Template>
+                                        </GridColumn>
+                                    </GridColumns>
+                                    <GridTemplates>
+                                        <DetailTemplate Context="detailCtx">
+                                            @{ var row = (AccumulatorEmployeeBalanceRow)detailCtx; }
+                                            @if (_impactCache.TryGetValue(row.EmploymentId, out var cachedImpacts))
+                                            {
+                                                @RenderImpactGrid(cachedImpacts)
+                                            }
+                                            else
+                                            {
+                                                <div class="detail-loading">
+                                                    <SfSpinner Visible="true" Size="20" />
+                                                    <span>Loading impact trail…</span>
+                                                </div>
+                                            }
+                                        </DetailTemplate>
+                                    </GridTemplates>
+                                </SfGrid>
+                            </div>
+                        }
+
+                        @* Reset history *@
+                        @if (_resetHistory.Count > 0)
+                        {
+                            <div class="panel-card">
+                                <div class="section-subheader">Reset History</div>
+                                <table class="config-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Period</th>
+                                            <th class="text-right">Entity Closing Balance</th>
+                                            <th>Last Updated</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var h in _resetHistory)
+                                        {
+                                            <tr>
+                                                <td>@h.PeriodYear</td>
+                                                <td class="text-right">@Fmt(h.ClosingBalance)</td>
+                                                <td>@h.LastUpdatedDate.ToString("MMM d, yyyy")</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                    }
+                }
+            </div>
+        </div>
+    }
+    else
+    {
+        @* ── By Employee view ──────────────────────────────────────────────── *@
+        <div class="panel-card">
+            <div class="accum-emp-search-row">
+                <SfTextBox @bind-Value="_searchQuery"
+                           Input="OnSearchInput"
+                           Placeholder="Search by name or employee number…"
+                           Width="360px" />
+                @if (_selectedEmployee is not null)
+                {
+                    <div class="selected-emp-chip">
+                        <span>@_selectedEmployee.EmployeeNumber — @_selectedEmployee.EmployeeName</span>
+                        <button class="chip-clear" @onclick="ClearEmployee">×</button>
+                    </div>
+                }
+            </div>
+
+            @if (_searchResults.Count > 0 && _selectedEmployee is null)
+            {
+                <div class="search-results-list">
+                    @foreach (var emp in _searchResults)
+                    {
+                        <div class="search-result-item" @onclick="() => SelectEmployeeAsync(emp)">
+                            <span class="emp-num">@emp.EmployeeNumber</span>
+                            <span class="emp-name">@emp.EmployeeName</span>
+                        </div>
+                    }
+                </div>
+            }
+
+            @if (_selectedEmployee is not null)
+            {
+                <div class="accum-year-tabs" style="margin-top:var(--space-4)">
+                    @foreach (var y in _employeeYearOptions)
+                    {
+                        <button class="year-tab @(_employeeYear == y ? "year-tab--active" : "")"
+                                @onclick="() => SelectEmployeeYearAsync(y)">
+                            @y
+                        </button>
+                    }
+                </div>
+
+                @if (_loadingEmployeeSummary)
+                {
+                    <div style="padding:var(--space-4)"><SfSpinner Visible="true" Size="28" /></div>
+                }
+                else if (_employeeSummary.Count == 0)
+                {
+                    <p class="text-muted" style="padding:var(--space-4)">
+                        No accumulator data found for this employee in @_employeeYear.
+                    </p>
+                }
+                else
+                {
+                    <SfGrid TValue="AccumulatorEmployeeSummaryRow"
+                            DataSource="@_employeeSummary"
+                            AllowSorting="true"
+                            CssClass="e-gridhover">
+                        <GridEvents TValue="AccumulatorEmployeeSummaryRow"
+                                    RecordClick="OnEmployeeFamilyClickAsync" />
+                        <GridColumns>
+                            <GridColumn Field="@nameof(AccumulatorEmployeeSummaryRow.FamilyLabel)"
+                                        HeaderText="Family" />
+                            <GridColumn Field="@nameof(AccumulatorEmployeeSummaryRow.ResetType)"
+                                        HeaderText="Period Type" Width="160" />
+                            <GridColumn HeaderText="Current Period" Width="120">
+                                <Template>
+                                    @{ var r = (AccumulatorEmployeeSummaryRow)context; }
+                                    <span>@r.CurrentYear</span>
+                                </Template>
+                            </GridColumn>
+                            <GridColumn HeaderText="YTD Balance" TextAlign="TextAlign.Right" Width="130">
+                                <Template>
+                                    @{ var r = (AccumulatorEmployeeSummaryRow)context; }
+                                    @Fmt(r.YtdBalance)
+                                </Template>
+                            </GridColumn>
+                            <GridColumn HeaderText="Cap Remaining" TextAlign="TextAlign.Right" Width="150">
+                                <Template>
+                                    @{ var r = (AccumulatorEmployeeSummaryRow)context; }
+                                    @if (r.CapAmount.HasValue)
+                                    {
+                                        decimal rem = r.CapAmount.Value - r.YtdBalance;
+                                        if (rem < 0)
+                                        {
+                                            <span class="cap-reached">@Fmt(rem) <span class="badge badge-danger">REVIEW REQUIRED</span></span>
+                                        }
+                                        else if (rem == 0)
+                                        {
+                                            <span class="cap-reached">@Fmt(rem) <span class="badge badge-danger">CAP REACHED</span></span>
+                                        }
+                                        else if (r.CapAmount.Value > 0 && rem / r.CapAmount.Value <= 0.10m)
+                                        {
+                                            <span class="cap-warning">@Fmt(rem)</span>
+                                        }
+                                        else
+                                        {
+                                            <span>@Fmt(rem)</span>
+                                        }
+                                    }
+                                    else
+                                    {
+                                        <span class="text-muted">—</span>
+                                    }
+                                </Template>
+                            </GridColumn>
+                        </GridColumns>
+                    </SfGrid>
+                }
+            }
+        </div>
+
+        @* Employee family drill-in *@
+        @if (_drillFamily is not null)
+        {
+            <div class="panel-card">
+                <div class="section-subheader">
+                    <span>Impact Trail — @_drillFamily.FamilyLabel (@_employeeYear)</span>
+                    <button class="btn-icon-sm" @onclick="() => { _drillFamily = null; _drillImpacts = []; }">✕</button>
+                </div>
+                @if (_loadingDrillImpacts)
+                {
+                    <SfSpinner Visible="true" Size="24" />
+                }
+                else
+                {
+                    @RenderImpactGrid(_drillImpacts)
+                }
+            </div>
+        }
+    }
 </div>
+
+@code {
+    // ── State ─────────────────────────────────────────────────────────────────
+
+    private string _view = "family";
+
+    // By Family
+    private bool   _loadingFamilies = true;
+    private bool   _loadingBalances = false;
+    private bool   _hasRetroactive  = false;
+    private IReadOnlyList<AccumulatorFamilyListItem>     _families         = [];
+    private IReadOnlyList<AccumulatorYearTab>            _availableYears   = [];
+    private IReadOnlyList<AccumulatorEmployeeBalanceRow> _employeeBalances = [];
+    private IReadOnlyList<AccumulatorResetHistoryRow>    _resetHistory     = [];
+    private AccumulatorFamilyListItem?                   _selectedFamily;
+    private AccumulatorFamilyMeta?                       _familyMeta;
+    private int                                          _selectedYear;
+    private readonly Dictionary<Guid, IReadOnlyList<AccumulatorImpactRow>> _impactCache = [];
+
+    // By Employee
+    private string                                         _searchQuery           = "";
+    private IReadOnlyList<AccumulatorEmployeeSearchResult> _searchResults         = [];
+    private AccumulatorEmployeeSearchResult?               _selectedEmployee;
+    private bool                                           _loadingEmployeeSummary = false;
+    private IReadOnlyList<AccumulatorEmployeeSummaryRow>   _employeeSummary       = [];
+    private List<int>                                      _employeeYearOptions   = [];
+    private int                                            _employeeYear;
+    private AccumulatorEmployeeSummaryRow?                 _drillFamily;
+    private IReadOnlyList<AccumulatorImpactRow>            _drillImpacts          = [];
+    private bool                                           _loadingDrillImpacts   = false;
+
+    // ── Lifecycle ─────────────────────────────────────────────────────────────
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!SessionState.IsLocked) return;
+        SessionState.OnChanged += OnEntityChanged;
+        await LoadFamiliesAsync();
+    }
+
+    public void Dispose() => SessionState.OnChanged -= OnEntityChanged;
+
+    private async void OnEntityChanged()
+    {
+        ResetFamilyState();
+        await InvokeAsync(LoadFamiliesAsync);
+    }
+
+    private void ResetFamilyState()
+    {
+        _families         = [];
+        _selectedFamily   = null;
+        _familyMeta       = null;
+        _availableYears   = [];
+        _employeeBalances = [];
+        _resetHistory     = [];
+        _hasRetroactive   = false;
+        _impactCache.Clear();
+    }
+
+    // ── Data loading ──────────────────────────────────────────────────────────
+
+    private async Task LoadFamiliesAsync()
+    {
+        if (!SessionState.IsLocked) return;
+        _loadingFamilies = true;
+        StateHasChanged();
+        _families        = await QueryService.GetFamiliesWithBalancesAsync(EntityId);
+        _loadingFamilies = false;
+        StateHasChanged();
+    }
+
+    private async Task SelectFamilyAsync(AccumulatorFamilyListItem family)
+    {
+        if (_selectedFamily?.FamilyId == family.FamilyId) return;
+        _selectedFamily   = family;
+        _familyMeta       = null;
+        _availableYears   = [];
+        _employeeBalances = [];
+        _resetHistory     = [];
+        _hasRetroactive   = false;
+        _impactCache.Clear();
+        StateHasChanged();
+
+        _familyMeta     = await QueryService.GetFamilyMetaAsync(family.FamilyId, EntityId);
+        _availableYears = await QueryService.GetAvailableYearsAsync(
+            family.FamilyId, EntityId,
+            _familyMeta?.ResetType    ?? "CALENDAR_YEAR",
+            _familyMeta?.PlanYearStartMonth);
+
+        if (_availableYears.Count > 0)
+        {
+            int opYear     = TemporalContext.GetOperativeDate().Year;
+            var defaultTab = _availableYears.FirstOrDefault(t => t.Year == opYear) ?? _availableYears[0];
+            await SelectYearAsync(defaultTab);
+        }
+        else
+        {
+            StateHasChanged();
+        }
+    }
+
+    private async Task SelectYearAsync(AccumulatorYearTab tab)
+    {
+        _selectedYear    = tab.Year;
+        _loadingBalances = true;
+        _hasRetroactive  = false;
+        _impactCache.Clear();
+        StateHasChanged();
+
+        _employeeBalances = await QueryService.GetEmployeeBalancesAsync(
+            _selectedFamily!.FamilyId, EntityId, tab.Year);
+        _resetHistory     = await QueryService.GetResetHistoryAsync(
+            _selectedFamily!.FamilyId, EntityId);
+
+        _loadingBalances = false;
+        StateHasChanged();
+    }
+
+    private async Task OnBalanceRowExpandingAsync(DetailsExpandedEventArgs<AccumulatorEmployeeBalanceRow> args)
+    {
+        if (args.Data is null) return;
+        var row = args.Data;
+        if (_impactCache.ContainsKey(row.EmploymentId)) return;
+
+        var impacts = await QueryService.GetImpactTrailAsync(
+            row.AccumulatorDefinitionId, row.EmploymentId, _selectedYear);
+        _impactCache[row.EmploymentId] = impacts;
+
+        if (!_hasRetroactive && impacts.Any(i => i.IsRetroactive || i.IsReversal || i.IsCorrection))
+            _hasRetroactive = true;
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    // ── By Employee ───────────────────────────────────────────────────────────
+
+    private async Task OnSearchInput(InputEventArgs args)
+    {
+        _searchQuery   = args.Value;
+        _searchResults = [];
+        if (_searchQuery.Length < 2 || !SessionState.IsLocked) return;
+        _searchResults = await QueryService.SearchEmployeesAsync(
+            EntityId, _searchQuery);
+        StateHasChanged();
+    }
+
+    private async Task SelectEmployeeAsync(AccumulatorEmployeeSearchResult emp)
+    {
+        _selectedEmployee = emp;
+        _searchResults    = [];
+        _searchQuery      = "";
+        _drillFamily      = null;
+        _drillImpacts     = [];
+
+        int current          = TemporalContext.GetOperativeDate().Year;
+        _employeeYearOptions = Enumerable.Range(current - 4, 5).OrderByDescending(y => y).ToList();
+        _employeeYear        = current;
+
+        await LoadEmployeeSummaryAsync();
+    }
+
+    private async Task SelectEmployeeYearAsync(int year)
+    {
+        _employeeYear = year;
+        _drillFamily  = null;
+        _drillImpacts = [];
+        await LoadEmployeeSummaryAsync();
+    }
+
+    private async Task LoadEmployeeSummaryAsync()
+    {
+        if (_selectedEmployee is null) return;
+        _loadingEmployeeSummary = true;
+        StateHasChanged();
+        _employeeSummary        = await QueryService.GetEmployeeSummaryAsync(
+            _selectedEmployee.EmploymentId, _employeeYear);
+        _loadingEmployeeSummary = false;
+        StateHasChanged();
+    }
+
+    private async Task OnEmployeeFamilyClickAsync(RecordClickEventArgs<AccumulatorEmployeeSummaryRow> args)
+    {
+        if (args.RowData is null || _selectedEmployee is null) return;
+        var row = args.RowData;
+
+        // Toggle off if same family clicked again
+        if (_drillFamily?.FamilyId == row.FamilyId)
+        {
+            _drillFamily = null;
+            _drillImpacts = [];
+            return;
+        }
+
+        _drillFamily         = row;
+        _loadingDrillImpacts = true;
+        _drillImpacts        = [];
+        StateHasChanged();
+
+        _drillImpacts        = await QueryService.GetEmployeeFamilyImpactAsync(
+            _selectedEmployee.EmploymentId, row.FamilyId, _employeeYear);
+        _loadingDrillImpacts = false;
+        StateHasChanged();
+    }
+
+    private void ClearEmployee()
+    {
+        _selectedEmployee = null;
+        _employeeSummary  = [];
+        _drillFamily      = null;
+        _drillImpacts     = [];
+        _searchQuery      = "";
+    }
+
+    // ── View ──────────────────────────────────────────────────────────────────
+
+    private async Task SetViewAsync(string view)
+    {
+        if (_view == view) return;
+        _view = view;
+        if (view == "family" && _families.Count == 0 && SessionState.IsLocked)
+            await LoadFamiliesAsync();
+        else
+            StateHasChanged();
+    }
+
+    // ── Impact grid render fragment ───────────────────────────────────────────
+
+    private RenderFragment RenderImpactGrid(IReadOnlyList<AccumulatorImpactRow> impacts) => __builder =>
+    {
+        if (impacts.Count == 0)
+        {
+            __builder.OpenElement(0, "p");
+            __builder.AddAttribute(1, "class", "text-muted text-sm");
+            __builder.AddAttribute(2, "style", "padding:var(--space-3)");
+            __builder.AddContent(3, "No impact lines found for this period.");
+            __builder.CloseElement();
+            return;
+        }
+
+        bool hasRetro = impacts.Any(i => i.IsRetroactive || i.IsReversal || i.IsCorrection);
+        if (hasRetro)
+        {
+            __builder.OpenElement(5, "div");
+            __builder.AddAttribute(6, "class", "accum-banner accum-banner-amber accum-banner-sm");
+            __builder.AddContent(7, "This balance includes retroactive adjustments. See highlighted rows.");
+            __builder.CloseElement();
+        }
+
+        __builder.OpenElement(10, "div");
+        __builder.AddAttribute(11, "class", "impact-table-wrap");
+
+        // Manually build the inner SfGrid to avoid Blazor generic component compilation issues
+        // Use a plain HTML table for the inner impact trail
+        __builder.OpenElement(20, "table");
+        __builder.AddAttribute(21, "class", "config-table impact-inner-table");
+
+        __builder.OpenElement(22, "thead");
+        __builder.OpenElement(23, "tr");
+        foreach (var h in new[] { "Run", "Pay Date", "Type", "Amount", "Running Balance", "Notes" })
+        {
+            __builder.OpenElement(24, "th");
+            if (h is "Amount" or "Running Balance") __builder.AddAttribute(25, "class", "text-right");
+            __builder.AddContent(26, h);
+            __builder.CloseElement();
+        }
+        __builder.CloseElement(); // tr
+        __builder.CloseElement(); // thead
+
+        __builder.OpenElement(30, "tbody");
+        foreach (var imp in impacts)
+        {
+            string rowCss = imp.IsReversal || imp.IsCorrection ? "impact-row-retro" : "";
+            __builder.OpenElement(31, "tr");
+            __builder.AddAttribute(32, "class", rowCss);
+
+            // Run label
+            __builder.OpenElement(33, "td");
+            __builder.AddContent(34, imp.RunLabel);
+            __builder.CloseElement();
+
+            // Pay date
+            __builder.OpenElement(35, "td");
+            __builder.AddContent(36, imp.RunDate.ToString("MMM d, yyyy"));
+            __builder.CloseElement();
+
+            // Type badge
+            __builder.OpenElement(37, "td");
+            string badgeCss = imp.ImpactType switch
+            {
+                "REVERSAL"   => "badge badge-danger",
+                "CORRECTION" => "badge badge-warning",
+                _            => "badge badge-neutral"
+            };
+            __builder.OpenElement(38, "span");
+            __builder.AddAttribute(39, "class", badgeCss);
+            __builder.AddContent(40, imp.ImpactType);
+            __builder.CloseElement();
+            __builder.CloseElement();
+
+            // Amount
+            __builder.OpenElement(41, "td");
+            __builder.AddAttribute(42, "class", imp.DeltaAmount < 0 ? "text-right amount-negative" : "text-right");
+            __builder.AddContent(43, Fmt(imp.DeltaAmount));
+            __builder.CloseElement();
+
+            // Running balance
+            __builder.OpenElement(44, "td");
+            __builder.AddAttribute(45, "class", "text-right");
+            __builder.AddContent(46, Fmt(imp.RunningBalance));
+            __builder.CloseElement();
+
+            // Notes / retro flag
+            __builder.OpenElement(47, "td");
+            if (imp.IsRetroactive)
+            {
+                __builder.OpenElement(48, "span");
+                __builder.AddAttribute(49, "class", "badge badge-info");
+                __builder.AddContent(50, "RETRO");
+                __builder.CloseElement();
+                if (!string.IsNullOrEmpty(imp.Notes))
+                    __builder.AddContent(51, " " + imp.Notes);
+            }
+            else if (!string.IsNullOrEmpty(imp.Notes))
+            {
+                __builder.AddContent(52, imp.Notes);
+            }
+            __builder.CloseElement();
+
+            __builder.CloseElement(); // tr
+        }
+        __builder.CloseElement(); // tbody
+        __builder.CloseElement(); // table
+        __builder.CloseElement(); // div.impact-table-wrap
+    };
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private string ViewBtnClass(string v)  =>
+        _view == v ? "view-toggle-btn view-toggle-btn--active" : "view-toggle-btn";
+
+    private string FamilyItemClass(AccumulatorFamilyListItem f) =>
+        _selectedFamily?.FamilyId == f.FamilyId ? "family-item family-item--active" : "family-item";
+
+    private string YearTabClass(AccumulatorYearTab t) =>
+        _selectedYear == t.Year ? "year-tab year-tab--active" : "year-tab";
+
+    private Guid EntityId => SessionState.SelectedLegalEntityId!.Value;
+
+    private static string Fmt(decimal v) =>
+        v < 0 ? $"({Math.Abs(v):N2})" : v.ToString("N2");
+}
+
+<style>
+    /* ── Page wrapper (fixed to viewport, no browser scroll) ────── */
+    .accum-page {
+        display: flex;
+        flex-direction: column;
+        height: calc(100vh - var(--topbar-height) - 2 * var(--space-6));
+        overflow: hidden;
+        padding: var(--space-6);
+    }
+
+    .accum-page-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-shrink: 0;
+        margin-bottom: var(--space-4);
+    }
+
+    /* ── Two-pane layout ─────────────────────────────────────────── */
+    .accum-layout {
+        display: flex;
+        gap: var(--space-4);
+        flex: 1;
+        min-height: 0;
+        overflow: hidden;
+    }
+
+    /* ── Family panel ────────────────────────────────────────────── */
+    .accum-family-panel {
+        width: 220px;
+        flex-shrink: 0;
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-md);
+        overflow-y: auto;
+    }
+
+    .family-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: var(--space-3) var(--space-4);
+        cursor: pointer;
+        border-bottom: 1px solid var(--border-color);
+        font-size: var(--font-size-sm);
+        transition: background 0.12s;
+        gap: var(--space-2);
+    }
+
+    .family-item:last-child     { border-bottom: none; }
+    .family-item:hover          { background: var(--hover-bg); }
+    .family-item--active        { background: #e0f2f1; font-weight: var(--font-weight-medium); }
+    .family-name                { flex: 1; }
+
+    /* ── Detail panel ────────────────────────────────────────────── */
+    .accum-detail-panel {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-4);
+        overflow-y: auto;
+    }
+
+    .accum-family-header {
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-md);
+        padding: var(--space-4) var(--space-5);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-4);
+    }
+
+    .family-header-title {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        flex-wrap: wrap;
+    }
+
+    .family-header-title h3 {
+        margin: 0;
+        font-size: var(--font-size-lg);
+        font-weight: var(--font-weight-semibold);
+        color: var(--text-primary);
+    }
+
+    .family-header-cap {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        white-space: nowrap;
+    }
+
+    .cap-label {
+        font-size: var(--font-size-sm);
+        color: var(--text-secondary);
+        font-weight: var(--font-weight-medium);
+    }
+
+    .cap-value {
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-semibold);
+        color: var(--text-primary);
+    }
+
+    .badge-derived { background: #ede9fe; color: #5b21b6; font-size: 10px; padding: 1px 6px; border-radius: 10px; font-weight: 600; }
+
+    /* ── Year tabs ───────────────────────────────────────────────── */
+    .accum-year-tabs {
+        display: flex;
+        gap: var(--space-2);
+        flex-wrap: wrap;
+    }
+
+    .year-tab {
+        padding: var(--space-1) var(--space-4);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-sm);
+        background: var(--card-bg);
+        font-size: var(--font-size-sm);
+        cursor: pointer;
+        color: var(--text-secondary);
+        transition: background 0.12s, color 0.12s;
+    }
+
+    .year-tab:hover     { background: var(--hover-bg); color: var(--text-primary); }
+    .year-tab--active   { background: var(--module-payroll, #0f766e); color: #fff; border-color: var(--module-payroll, #0f766e); }
+
+    /* ── Banners ─────────────────────────────────────────────────── */
+    .accum-banner {
+        padding: var(--space-3) var(--space-4);
+        border-radius: var(--radius-sm);
+        font-size: var(--font-size-sm);
+    }
+
+    .accum-banner-amber { background: #fffbeb; border: 1px solid #f59e0b; color: #92400e; }
+    .accum-banner-sm    { margin-bottom: var(--space-3); }
+
+    /* ── Cap indicators ──────────────────────────────────────────── */
+    .cap-reached { color: #dc2626; font-weight: var(--font-weight-medium); }
+    .cap-warning { color: #d97706; font-weight: var(--font-weight-medium); }
+
+    /* ── Impact trail ────────────────────────────────────────────── */
+    .detail-loading {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        padding: var(--space-4);
+        font-size: var(--font-size-sm);
+        color: var(--text-secondary);
+    }
+
+    .impact-table-wrap { padding: var(--space-2) var(--space-3); }
+
+    .impact-inner-table { width: 100%; }
+
+    .impact-row-retro { background: #fff7ed; }
+
+    /* ── View toggle ─────────────────────────────────────────────── */
+    .accum-view-toggle { display: flex; }
+
+    .view-toggle-btn {
+        padding: var(--space-1) var(--space-4);
+        border: 1px solid var(--border-color);
+        background: var(--card-bg);
+        font-size: var(--font-size-sm);
+        cursor: pointer;
+        color: var(--text-secondary);
+        transition: background 0.12s;
+    }
+
+    .view-toggle-btn:first-child  { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
+    .view-toggle-btn:last-child   { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; border-left: none; }
+    .view-toggle-btn--active      { background: var(--module-payroll, #0f766e); color: #fff; border-color: var(--module-payroll, #0f766e); }
+
+    /* ── Employee search ─────────────────────────────────────────── */
+    .accum-emp-search-row {
+        display: flex;
+        align-items: center;
+        gap: var(--space-4);
+        flex-wrap: wrap;
+        margin-bottom: var(--space-4);
+    }
+
+    .search-results-list {
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-sm);
+        max-height: 240px;
+        overflow-y: auto;
+        margin-bottom: var(--space-4);
+    }
+
+    .search-result-item {
+        display: flex;
+        gap: var(--space-3);
+        padding: var(--space-2) var(--space-4);
+        cursor: pointer;
+        font-size: var(--font-size-sm);
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .search-result-item:last-child { border-bottom: none; }
+    .search-result-item:hover      { background: var(--hover-bg); }
+    .emp-num                       { font-weight: var(--font-weight-medium); width: 110px; flex-shrink: 0; }
+
+    .selected-emp-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-2);
+        padding: var(--space-1) var(--space-3);
+        background: #e0f2f1;
+        border: 1px solid var(--module-payroll, #0f766e);
+        border-radius: var(--radius-md);
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-medium);
+    }
+
+    .chip-clear {
+        background: none;
+        border: none;
+        cursor: pointer;
+        font-size: var(--font-size-base);
+        color: var(--text-secondary);
+        padding: 0;
+        line-height: 1;
+    }
+
+    .chip-clear:hover { color: #dc2626; }
+
+    /* ── Misc ────────────────────────────────────────────────────── */
+    .accum-spinner  { display: flex; justify-content: center; padding: var(--space-6); }
+
+    .section-subheader {
+        font-size: var(--font-size-sm);
+        font-weight: var(--font-weight-semibold);
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        margin-bottom: var(--space-3);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }
+
+    .btn-icon-sm {
+        background: none;
+        border: none;
+        cursor: pointer;
+        color: var(--text-secondary);
+        font-size: var(--font-size-sm);
+        padding: 2px 4px;
+        border-radius: var(--radius-sm);
+    }
+
+    .btn-icon-sm:hover { color: var(--text-primary); background: var(--hover-bg); }
+
+    .badge-tax     { background: #dbeafe; color: #1e40af; font-size: 10px; padding: 1px 5px; border-radius: 10px; font-weight: 600; }
+    .badge-neutral { background: #f3f4f6; color: #374151; font-size: 10px; padding: 1px 6px; border-radius: 10px; font-weight: 500; }
+    .badge-info    { background: #e0f2fe; color: #0369a1; font-size: 10px; padding: 1px 6px; border-radius: 10px; font-weight: 500; }
+    .badge-warning { background: #fef3c7; color: #92400e; font-size: 10px; padding: 1px 6px; border-radius: 10px; font-weight: 600; }
+
+    .no-pad { padding: 0 !important; }
+
+    .config-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: var(--font-size-sm);
+    }
+
+    .config-table th,
+    .config-table td {
+        padding: var(--space-2) var(--space-3);
+        border-bottom: 1px solid var(--border-color);
+        text-align: left;
+    }
+
+    .config-table th {
+        font-weight: var(--font-weight-medium);
+        color: var(--text-secondary);
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }
+
+    .config-table tr:last-child td { border-bottom: none; }
+
+    .meta-pill {
+        display: inline-block;
+        padding: 2px 10px;
+        background: var(--bg-subtle, #f9fafb);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-md);
+        font-size: 12px;
+        color: var(--text-secondary);
+    }
+
+    .amount-negative { color: #dc2626; }
+    .text-right      { text-align: right; }
+    .text-center     { text-align: center; }
+    .text-muted      { color: var(--text-secondary); }
+    .text-sm         { font-size: var(--font-size-sm); }
+</style>

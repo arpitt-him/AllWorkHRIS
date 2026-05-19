@@ -24,62 +24,22 @@
         <p style="margin-bottom:.5rem;">One election per row. Header row required. 8 or 9 columns in this order:</p>
         <pre class="code-block" style="font-size:.8rem;overflow-x:auto;">employee_number, deduction_code, employee_amount, contribution_pct, coverage_tier, employer_contribution_amount, annual_coverage_amount, effective_start_date, effective_end_date</pre>
 
-        <table class="data-table" style="margin-top:.875rem;font-size:.82rem;">
-            <thead>
-                <tr>
-                    <th style="width:22%">Column</th>
-                    <th style="width:30%">Required for mode</th>
-                    <th>Notes</th>
-                </tr>
-            </thead>
-            <tbody>
-                <tr>
-                    <td><code>employee_number</code></td>
-                    <td>All</td>
-                    <td>Must match an active employment record.</td>
-                </tr>
-                <tr style="background:#f9fafb;">
-                    <td><code>deduction_code</code></td>
-                    <td>All</td>
-                    <td>Must be an active deduction code.</td>
-                </tr>
-                <tr>
-                    <td><code>employee_amount</code></td>
-                    <td>FIXED_PER_PERIOD, FIXED_ANNUAL, FIXED_MONTHLY</td>
-                    <td>Dollar amount ≥ 0. Leave blank for PCT / COVERAGE_BASED modes.</td>
-                </tr>
-                <tr style="background:#f9fafb;">
-                    <td><code>contribution_pct</code></td>
-                    <td>PCT_PRE_TAX, PCT_POST_TAX</td>
-                    <td>Percentage value — e.g. <strong>6</strong> means 6% of gross. Leave blank for other modes.</td>
-                </tr>
-                <tr>
-                    <td><code>coverage_tier</code></td>
-                    <td>COVERAGE_BASED</td>
-                    <td><code>EE_ONLY</code>, <code>EE_SPOUSE</code>, <code>EE_CHILD</code>, or <code>FAMILY</code>. Leave blank for other modes.</td>
-                </tr>
-                <tr style="background:#f9fafb;">
-                    <td><code>employer_contribution_amount</code></td>
-                    <td>Optional</td>
-                    <td>Fixed employer dollar contribution per period. Omit or leave blank if none.</td>
-                </tr>
-                <tr>
-                    <td><code>annual_coverage_amount</code></td>
-                    <td>Optional</td>
-                    <td>Annual face value for life/disability plans. Omit or leave blank if not applicable.</td>
-                </tr>
-                <tr style="background:#f9fafb;">
-                    <td><code>effective_start_date</code></td>
-                    <td>All</td>
-                    <td>Required. Format: YYYY-MM-DD.</td>
-                </tr>
-                <tr>
-                    <td><code>effective_end_date</code></td>
-                    <td>Optional</td>
-                    <td>Format: YYYY-MM-DD. Leave blank for open-ended elections.</td>
-                </tr>
-            </tbody>
-        </table>
+        <div class="csv-ref" style="margin-top:.875rem;">
+            <div class="csv-ref-header">
+                <span style="width:22%">Column</span>
+                <span style="width:30%">Required for mode</span>
+                <span>Notes</span>
+            </div>
+            <div class="csv-ref-row"><span><code>employee_number</code></span><span>All</span><span>Must match an active employment record.</span></div>
+            <div class="csv-ref-row csv-ref-row--alt"><span><code>deduction_code</code></span><span>All</span><span>Must be an active deduction code.</span></div>
+            <div class="csv-ref-row"><span><code>employee_amount</code></span><span>FIXED_PER_PERIOD, FIXED_ANNUAL, FIXED_MONTHLY</span><span>Dollar amount ≥ 0. Leave blank for PCT / COVERAGE_BASED modes.</span></div>
+            <div class="csv-ref-row csv-ref-row--alt"><span><code>contribution_pct</code></span><span>PCT_PRE_TAX, PCT_POST_TAX</span><span>Percentage value — e.g. <strong>6</strong> means 6% of gross. Leave blank for other modes.</span></div>
+            <div class="csv-ref-row"><span><code>coverage_tier</code></span><span>COVERAGE_BASED</span><span><code>EE_ONLY</code>, <code>EE_SPOUSE</code>, <code>EE_CHILD</code>, or <code>FAMILY</code>. Leave blank for other modes.</span></div>
+            <div class="csv-ref-row csv-ref-row--alt"><span><code>employer_contribution_amount</code></span><span>Optional</span><span>Fixed employer dollar contribution per period. Omit or leave blank if none.</span></div>
+            <div class="csv-ref-row"><span><code>annual_coverage_amount</code></span><span>Optional</span><span>Annual face value for life/disability plans. Omit or leave blank if not applicable.</span></div>
+            <div class="csv-ref-row csv-ref-row--alt"><span><code>effective_start_date</code></span><span>All</span><span>Required. Format: YYYY-MM-DD.</span></div>
+            <div class="csv-ref-row"><span><code>effective_end_date</code></span><span>Optional</span><span>Format: YYYY-MM-DD. Leave blank for open-ended elections.</span></div>
+        </div>
     </div>
 
     @* ── Step 1: Upload ──────────────────────────────────────────────── *@
@@ -181,6 +141,38 @@
     .stat-card--neutral { border-top: 3px solid #6b7280; }
     .stat-card--valid   { border-top: 3px solid #16a34a; }
     .stat-card--invalid { border-top: 3px solid #dc2626; }
+
+    .csv-ref {
+        border: 1px solid #e5e7eb;
+        border-radius: 6px;
+        overflow: hidden;
+        font-size: .8125rem;
+    }
+
+    .csv-ref-header {
+        display: flex;
+        gap: .5rem;
+        padding: .4rem .75rem;
+        background: #f3f4f6;
+        font-weight: 600;
+        border-bottom: 1px solid #e5e7eb;
+        color: #374151;
+    }
+
+    .csv-ref-row {
+        display: flex;
+        gap: .5rem;
+        padding: .4rem .75rem;
+        border-bottom: 1px solid #f3f4f6;
+    }
+
+    .csv-ref-row:last-child { border-bottom: none; }
+    .csv-ref-row--alt { background: #f9fafb; }
+
+    .csv-ref-row span:first-child  { width: 22%; flex-shrink: 0; }
+    .csv-ref-row span:nth-child(2) { width: 30%; flex-shrink: 0; }
+    .csv-ref-header span:first-child  { width: 22%; flex-shrink: 0; }
+    .csv-ref-header span:nth-child(2) { width: 30%; flex-shrink: 0; }
 </style>
 
 @code {

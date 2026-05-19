@@ -12,11 +12,11 @@
     @if (TemporalOverride.IsEnabled)
     {
         <div class="shell-topbar-center">
-            <span class="dev-env-pill">DEV</span>
+            <span class="dev-env-pill">@EnvLabel</span>
             @if (TdoActive)
             {
                 <span class="dev-tdo-date">
-                    &#9200;&nbsp;Operative Date: <strong>@TemporalOverride.OverrideDate!.Value.ToString("yyyy-MM-dd")</strong>
+                    &#9200;&nbsp;Test Date: <strong>@TemporalOverride.OverrideDate!.Value.ToString("yyyy-MM-dd")</strong>
                 </span>
             }
         </div>
@@ -36,6 +36,15 @@
 
     private string AppDisplayName =>
         Environment.GetEnvironmentVariable("APP_DISPLAY_NAME") ?? "AllWorkHRIS";
+
+    private static string EnvLabel =>
+        (Environment.GetEnvironmentVariable("APP_ENVIRONMENT") ?? "Development").ToUpperInvariant() switch
+        {
+            "DEVELOPMENT" => "DEV",
+            "TEST"        => "TST",
+            "STAGING"     => "STG",
+            var other     => other[..Math.Min(3, other.Length)]
+        };
 
     private bool TdoActive =>
         TemporalOverride.IsOverrideActive &&

@@ -137,6 +137,8 @@
             return "/payroll/tax-profiles";
         if (roles.Contains("ComplianceReviewer"))
             return "/config/tax/review";
+        if (roles.Contains("SystemAdmin"))
+            return "/hris/employees";
         return "/";
     }
 }

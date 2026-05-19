@@ -5,6 +5,9 @@
 @using AllWorkHRIS.Host.Hris.Commands
 @using AllWorkHRIS.Host.Hris.Domain
 @using AllWorkHRIS.Host.Hris.Services
+@using Syncfusion.Blazor.Calendars
+@using Syncfusion.Blazor.DropDowns
+@using Syncfusion.Blazor.Inputs
 @inject IEmploymentService    EmploymentService
 @inject IOrgStructureService  OrgStructureService
 @inject IJobService           JobService
@@ -68,7 +71,7 @@
                     </div>
                     <div class="form-field">
                         <label>Date of Birth <span class="required">*</span></label>
-                        <input type="date" @bind="_dateOfBirth" />
+                        <SfDatePicker TValue="DateTime?" @bind-Value="_dateOfBirth" />
                     </div>
                     <div class="form-field">
                         <label>National Identifier (SSN) <span class="required">*</span></label>
@@ -138,37 +141,34 @@
                     </div>
                     <div class="form-field">
                         <label>Employment Type <span class="required">*</span></label>
-                        <select @bind="_cmd.EmploymentTypeId">
-                            <option value="0">— Select —</option>
-                            @foreach (var entry in _employmentTypes)
-                            {
-                                <option value="@entry.Id">@entry.Label</option>
-                            }
-                        </select>
+                        <SfDropDownList TValue="int" TItem="LookupEntry"
+                                        DataSource="@_employmentTypes"
+                                        @bind-Value="_cmd.EmploymentTypeId"
+                                        Placeholder="— Select —">
+                            <DropDownListFieldSettings Value="Id" Text="Label" />
+                        </SfDropDownList>
                     </div>
                     <div class="form-field">
                         <label>Start Date <span class="required">*</span></label>
-                        <input type="date" @bind="_employmentStartDate" />
+                        <SfDatePicker TValue="DateTime?" @bind-Value="_employmentStartDate" />
                     </div>
                     <div class="form-field">
                         <label>FLSA Status <span class="required">*</span></label>
-                        <select @bind="_cmd.FlsaStatusId">
-                            <option value="0">— Select —</option>
-                            @foreach (var entry in _flsaStatuses)
-                            {
-                                <option value="@entry.Id">@entry.Label</option>
-                            }
-                        </select>
+                        <SfDropDownList TValue="int" TItem="LookupEntry"
+                                        DataSource="@_flsaStatuses"
+                                        @bind-Value="_cmd.FlsaStatusId"
+                                        Placeholder="— Select —">
+                            <DropDownListFieldSettings Value="Id" Text="Label" />
+                        </SfDropDownList>
                     </div>
                     <div class="form-field">
                         <label>Full / Part Time <span class="required">*</span></label>
-                        <select @bind="_cmd.FullPartTimeStatusId">
-                            <option value="0">— Select —</option>
-                            @foreach (var entry in _fullPartTimeStatuses)
-                            {
-                                <option value="@entry.Id">@entry.Label</option>
-                            }
-                        </select>
+                        <SfDropDownList TValue="int" TItem="LookupEntry"
+                                        DataSource="@_fullPartTimeStatuses"
+                                        @bind-Value="_cmd.FullPartTimeStatusId"
+                                        Placeholder="— Select —">
+                            <DropDownListFieldSettings Value="Id" Text="Label" />
+                        </SfDropDownList>
                     </div>
                 </div>
             }
@@ -179,33 +179,30 @@
                 <div class="form-grid">
                     <div class="form-field">
                         <label>Job <span class="required">*</span></label>
-                        <select @bind="_jobId">
-                            <option value="">— Select —</option>
-                            @foreach (var job in _jobs)
-                            {
-                                <option value="@job.JobId">@job.JobTitle (@job.JobCode)</option>
-                            }
-                        </select>
+                        <SfDropDownList TValue="string" TItem="DropItem"
+                                        DataSource="@_jobOptions"
+                                        @bind-Value="_jobId"
+                                        Placeholder="— Select —">
+                            <DropDownListFieldSettings Value="Value" Text="Label" />
+                        </SfDropDownList>
                     </div>
                     <div class="form-field">
                         <label>Department <span class="required">*</span></label>
-                        <select @bind="_departmentId">
-                            <option value="">— Select —</option>
-                            @foreach (var dept in _departments)
-                            {
-                                <option value="@dept.OrgUnitId">@dept.OrgUnitName</option>
-                            }
-                        </select>
+                        <SfDropDownList TValue="string" TItem="DropItem"
+                                        DataSource="@_deptOptions"
+                                        @bind-Value="_departmentId"
+                                        Placeholder="— Select —">
+                            <DropDownListFieldSettings Value="Value" Text="Label" />
+                        </SfDropDownList>
                     </div>
                     <div class="form-field">
                         <label>Location <span class="required">*</span></label>
-                        <select @bind="_locationId">
-                            <option value="">— Select —</option>
-                            @foreach (var loc in _locations)
-                            {
-                                <option value="@loc.OrgUnitId">@loc.OrgUnitName</option>
-                            }
-                        </select>
+                        <SfDropDownList TValue="string" TItem="DropItem"
+                                        DataSource="@_locOptions"
+                                        @bind-Value="_locationId"
+                                        Placeholder="— Select —">
+                            <DropDownListFieldSettings Value="Value" Text="Label" />
+                        </SfDropDownList>
                     </div>
                     <div class="form-field">
                         <label>Manager (optional)</label>
@@ -219,55 +216,70 @@
                 <h4 class="step-title">Step 5 — Compensation</h4>
                 <div class="form-grid">
                     <div class="form-field">
-                        <label>Rate Type <span class="required">*</span></label>
-                        <select @bind="_cmd.RateTypeId">
-                            <option value="0">— Select —</option>
-                            @foreach (var entry in _rateTypes)
-                            {
-                                <option value="@entry.Id">@entry.Label</option>
-                            }
-                        </select>
+                        <label>Pay Type <span class="required">*</span></label>
+                        <SfDropDownList TValue="int" TItem="LookupEntry"
+                                        DataSource="@_payTypes"
+                                        Value="@_cmd.PayTypeId"
+                                        Placeholder="— Select —">
+                            <DropDownListFieldSettings Value="Id" Text="Label" />
+                            <DropDownListEvents TValue="int" TItem="LookupEntry"
+                                               ValueChange="OnPayTypeChangedSf" />
+                        </SfDropDownList>
                     </div>
+                    <div class="form-field">
+                        <label>Rate Type</label>
+                        <SfDropDownList TValue="int" TItem="LookupEntry"
+                                        DataSource="@_rateTypes"
+                                        @bind-Value="_cmd.RateTypeId"
+                                        Placeholder="— Select —">
+                            <DropDownListFieldSettings Value="Id" Text="Label" />
+                        </SfDropDownList>
+                    </div>
+                    @if (_isSalaryNonExempt)
+                    {
+                        <div class="form-field-full info-banner">
+                            Pay Type is Salary but FLSA status is Non-Exempt. Rate Type has been set to Hourly — the annual salary entered below will be divided by 2080 to derive the hourly base rate stored by the engine. This employee must submit timesheets.
+                        </div>
+                    }
                     <div class="form-field">
                         <label>Base Rate <span class="required">*</span></label>
                         <div class="input-with-hint">
-                            <input type="number" @bind="_cmd.BaseRate" placeholder="0.00" min="0" step="0.01" />
-                            @if (_cmd.RateTypeId != 0)
+                            <SfNumericTextBox TValue="decimal" @bind-Value="_cmd.BaseRate"
+                                             Min="0" Step="0.01m" Format="n2" Width="120px" />
+                            @if (_cmd.PayTypeId != 0)
                             {
-                                <span class="field-hint">@BaseRateHint(_cmd.RateTypeId)</span>
+                                <span class="field-hint">@BaseRateHint()</span>
                             }
                         </div>
                     </div>
                     <div class="form-field">
                         <label>Pay Frequency <span class="required">*</span></label>
-                        <select @bind="_cmd.PayFrequencyId">
-                            <option value="0">— Select —</option>
-                            @foreach (var entry in _payFrequencies)
-                            {
-                                <option value="@entry.Id">@entry.Label</option>
-                            }
-                        </select>
+                        <SfDropDownList TValue="int" TItem="LookupEntry"
+                                        DataSource="@_payFrequencies"
+                                        @bind-Value="_cmd.PayFrequencyId"
+                                        Placeholder="— Select —">
+                            <DropDownListFieldSettings Value="Id" Text="Label" />
+                        </SfDropDownList>
                     </div>
                     <div class="form-field">
                         <label>Change Reason <span class="required">*</span></label>
-                        <select @bind="_cmd.ChangeReasonCode">
-                            <option value="">— Select —</option>
-                            <option value="NEW_HIRE">New Hire</option>
-                            <option value="REHIRE">Rehire</option>
-                            <option value="PROMOTION">Promotion</option>
-                        </select>
+                        <SfDropDownList TValue="string" TItem="DropItem"
+                                        DataSource="@_changeReasonOptions"
+                                        @bind-Value="_cmd.ChangeReasonCode"
+                                        Placeholder="— Select —">
+                            <DropDownListFieldSettings Value="Value" Text="Label" />
+                        </SfDropDownList>
                     </div>
-                    @if (_payrollContexts.Count > 0)
+                    @if (_contextOptions.Count > 1)
                     {
                         <div class="form-field">
                             <label>Payroll Context (optional)</label>
-                            <select @bind="_payrollContextIdStr">
-                                <option value="">— Enroll later —</option>
-                                @foreach (var (id, name) in _payrollContexts)
-                                {
-                                    <option value="@id">@name</option>
-                                }
-                            </select>
+                            <SfDropDownList TValue="string" TItem="DropItem"
+                                            DataSource="@_contextOptions"
+                                            @bind-Value="_payrollContextIdStr"
+                                            Placeholder="— Enroll later —">
+                                <DropDownListFieldSettings Value="Value" Text="Label" />
+                            </SfDropDownList>
                         </div>
                     }
                 </div>
@@ -317,23 +329,24 @@
                     </div>
                     <div class="review-group">
                         <h5>Assignment</h5>
-                        <div class="review-row"><span>Job</span><span>@(_jobs.FirstOrDefault(j => j.JobId.ToString() == _jobId)?.JobTitle ?? "—")</span></div>
-                        <div class="review-row"><span>Department</span><span>@(_departments.FirstOrDefault(d => d.OrgUnitId.ToString() == _departmentId)?.OrgUnitName ?? "—")</span></div>
-                        <div class="review-row"><span>Location</span><span>@(_locations.FirstOrDefault(l => l.OrgUnitId.ToString() == _locationId)?.OrgUnitName ?? "—")</span></div>
+                        <div class="review-row"><span>Job</span><span>@(_jobOptions.FirstOrDefault(o => o.Value == _jobId)?.Label ?? "—")</span></div>
+                        <div class="review-row"><span>Department</span><span>@(_deptOptions.FirstOrDefault(o => o.Value == _departmentId)?.Label ?? "—")</span></div>
+                        <div class="review-row"><span>Location</span><span>@(_locOptions.FirstOrDefault(o => o.Value == _locationId)?.Label ?? "—")</span></div>
                     </div>
                     <div class="review-group">
                         <h5>Compensation</h5>
+                        <div class="review-row"><span>Pay Type</span><span>@LookupLabel(_payTypes, _cmd.PayTypeId)</span></div>
                         <div class="review-row"><span>Rate Type</span><span>@LookupLabel(_rateTypes, _cmd.RateTypeId)</span></div>
                         <div class="review-row"><span>Base Rate</span><span>@(_cmd.BaseRate % 1 == 0 ? _cmd.BaseRate.ToString("C0") : _cmd.BaseRate.ToString("C"))</span></div>
                         <div class="review-row"><span>Pay Frequency</span><span>@LookupLabel(_payFrequencies, _cmd.PayFrequencyId)</span></div>
-                        @if (_payrollContexts.Count > 0)
+                        @if (_contextOptions.Count > 1)
                         {
                             <div class="review-row">
                                 <span>Payroll Context</span>
                                 <span>
-                                    @if (Guid.TryParse(_payrollContextIdStr, out var reviewPcId))
+                                    @if (Guid.TryParse(_payrollContextIdStr, out _))
                                     {
-                                        @(_payrollContexts.FirstOrDefault(c => c.Id == reviewPcId).Name)
+                                        @(_contextOptions.FirstOrDefault(c => c.Value == _payrollContextIdStr)?.Label ?? "—")
                                     }
                                     else
                                     {
@@ -377,6 +390,8 @@
     [Parameter] public EventCallback OnCancel       { get; set; }
     [Parameter] public Guid          LegalEntityId  { get; set; }
 
+    private record DropItem(string Value, string Label);
+
     private int  _currentStep = 1;
     private int  _totalSteps  = 6;
     private bool _submitting  = false;
@@ -398,10 +413,24 @@
     private List<(Guid Id, string Name)> _payrollContexts = [];
     private string _payrollContextIdStr = "";
 
+    // Dropdown option lists for Guid-keyed sources
+    private List<DropItem> _jobOptions     = [];
+    private List<DropItem> _deptOptions    = [];
+    private List<DropItem> _locOptions     = [];
+    private List<DropItem> _contextOptions = [];
+
+    private static readonly List<DropItem> _changeReasonOptions =
+    [
+        new DropItem("NEW_HIRE",   "New Hire"),
+        new DropItem("REHIRE",     "Rehire"),
+        new DropItem("PROMOTION",  "Promotion"),
+    ];
+
     // Reference data — lookup dropdowns loaded from cache
     private IReadOnlyList<LookupEntry> _employmentTypes      = [];
     private IReadOnlyList<LookupEntry> _flsaStatuses         = [];
     private IReadOnlyList<LookupEntry> _fullPartTimeStatuses  = [];
+    private IReadOnlyList<LookupEntry> _payTypes             = [];
     private IReadOnlyList<LookupEntry> _rateTypes            = [];
     private IReadOnlyList<LookupEntry> _payFrequencies       = [];
 
@@ -412,6 +441,7 @@
         _employmentTypes      = LookupCache.GetAll(LookupTables.EmploymentType);
         _flsaStatuses         = LookupCache.GetAll(LookupTables.FlsaStatus);
         _fullPartTimeStatuses = LookupCache.GetAll(LookupTables.FullPartTimeStatus);
+        _payTypes             = LookupCache.GetAll(LookupTables.PayType);
         _rateTypes            = LookupCache.GetAll(LookupTables.CompensationRateType);
         _payFrequencies       = LookupCache.GetAll(LookupTables.PayFrequency);
 
@@ -430,6 +460,14 @@
         _departments     = (await deptTask).ToList();
         _locations       = (await locTask).ToList();
         _payrollContexts = (await contextsTask).ToList();
+
+        _jobOptions  = _jobs.Select(j => new DropItem(j.JobId.ToString(), $"{j.JobTitle} ({j.JobCode})")).ToList();
+        _deptOptions = _departments.Select(d => new DropItem(d.OrgUnitId.ToString(), d.OrgUnitName)).ToList();
+        _locOptions  = _locations.Select(l => new DropItem(l.OrgUnitId.ToString(), l.OrgUnitName)).ToList();
+        _contextOptions = new List<DropItem> { new DropItem("", "— Enroll later —") }
+            .Concat(_payrollContexts.Select(c => new DropItem(c.Id.ToString(), c.Name)))
+            .ToList();
+
         _payrollContextIdStr = _payrollContexts.Count == 1 ? _payrollContexts[0].Id.ToString() : "";
     }
 
@@ -478,7 +516,7 @@
                 if (string.IsNullOrWhiteSpace(_locationId))   { _errorMessage = "Location is required."; return false; }
                 break;
             case 5:
-                if (_cmd.RateTypeId == 0)                             { _errorMessage = "Rate type is required."; return false; }
+                if (_cmd.PayTypeId == 0)                              { _errorMessage = "Pay type is required."; return false; }
                 if (_cmd.BaseRate <= 0)                               { _errorMessage = "Base rate must be greater than zero."; return false; }
                 if (_cmd.PayFrequencyId == 0)                         { _errorMessage = "Pay frequency is required."; return false; }
                 if (string.IsNullOrWhiteSpace(_cmd.ChangeReasonCode)) { _errorMessage = "Change reason is required."; return false; }
@@ -526,6 +564,7 @@
                 DepartmentId         = Guid.Parse(_departmentId),
                 LocationId           = Guid.Parse(_locationId),
                 ManagerEmploymentId  = Guid.TryParse(_cmd.ManagerEmploymentIdStr, out var mgr) ? mgr : null,
+                PayTypeId            = _cmd.PayTypeId,
                 RateTypeId           = _cmd.RateTypeId,
                 BaseRate             = _cmd.BaseRate,
                 PayFrequencyId       = _cmd.PayFrequencyId,
@@ -550,22 +589,53 @@
     private static string LookupLabel(IReadOnlyList<LookupEntry> list, int id)
         => list.FirstOrDefault(e => e.Id == id)?.Label ?? string.Empty;
 
-    private string BaseRateHint(int rateTypeId)
+    private bool _isSalaryNonExempt =>
+        _cmd.PayTypeId != 0 &&
+        LookupCache.GetCode(LookupTables.PayType, _cmd.PayTypeId) == "SALARY" &&
+        _cmd.FlsaStatusId != 0 &&
+        LookupCache.GetCode(LookupTables.FlsaStatus, _cmd.FlsaStatusId) == "NON_EXEMPT";
+
+    private void OnPayTypeChangedSf(ChangeEventArgs<int, LookupEntry> args)
     {
-        var code     = LookupCache.GetCode(LookupTables.CompensationRateType, rateTypeId);
-        var flsaCode = _cmd.FlsaStatusId != 0
+        var payTypeId = args.Value;
+        _cmd.PayTypeId = payTypeId;
+        if (payTypeId == 0) return;
+
+        var payTypeCode = LookupCache.GetCode(LookupTables.PayType, payTypeId);
+        var flsaCode    = _cmd.FlsaStatusId != 0
             ? LookupCache.GetCode(LookupTables.FlsaStatus, _cmd.FlsaStatusId)
             : null;
 
-        if (code == "SALARY" && flsaCode == "NON_EXEMPT")
+        var targetRateCode = (payTypeCode == "SALARY" && flsaCode == "NON_EXEMPT") ? "HOURLY"
+                           : payTypeCode == "SALARY"                               ? "SALARY"
+                           :                                                          "HOURLY";
+
+        _cmd.RateTypeId = LookupCache.GetId(LookupTables.CompensationRateType, targetRateCode);
+    }
+
+    private string BaseRateHint()
+    {
+        if (_cmd.PayTypeId == 0) return string.Empty;
+
+        var payTypeCode = LookupCache.GetCode(LookupTables.PayType, _cmd.PayTypeId);
+        var flsaCode    = _cmd.FlsaStatusId != 0
+            ? LookupCache.GetCode(LookupTables.FlsaStatus, _cmd.FlsaStatusId)
+            : null;
+
+        if (payTypeCode == "SALARY" && flsaCode == "NON_EXEMPT")
             return "Enter the annual salary. The hourly equivalent (annual ÷ 2080) will be derived and stored for FLSA compliance.";
 
-        return code switch
+        return payTypeCode switch
         {
-            "HOURLY"   => "Enter the hourly rate (e.g. 25.00). Payroll multiplies this by hours worked each period.",
-            "SALARY"   => "Enter the annual salary (e.g. 75000). Payroll divides this by the number of pay periods.",
-            "CONTRACT" => "Enter the contract rate agreed for this engagement.",
-            _          => string.Empty
+            "SALARY"     => "Enter the annual salary (e.g. 75000). Payroll divides this by the number of pay periods.",
+            "HOURLY"     => "Enter the hourly rate (e.g. 25.00). Payroll multiplies this by hours worked each period.",
+            "DAILY"      => "Enter the daily rate. Payroll multiplies by days worked each period.",
+            "PIECE_RATE" => "Enter the rate per piece or unit produced.",
+            "COMMISSION" => "Enter the commission base rate or draw amount.",
+            "TIPPED"     => "Enter the base hourly rate before tips.",
+            "STIPEND"    => "Enter the fixed stipend amount paid each period.",
+            "PER_DIEM"   => "Enter the daily per diem allowance rate.",
+            _            => string.Empty
         };
     }
 
@@ -603,6 +673,7 @@
         public int      EmploymentTypeId       { get; set; }
         public int      FlsaStatusId           { get; set; }
         public int      FullPartTimeStatusId   { get; set; }
+        public int      PayTypeId              { get; set; }
         public int      RateTypeId             { get; set; }
         public decimal  BaseRate               { get; set; }
         public int      PayFrequencyId         { get; set; }
@@ -749,7 +820,7 @@
         color: #374151;
     }
 
-    .form-field input, .form-field select {
+    .form-field input {
         padding: var(--space-2) var(--space-3);
         border: 1px solid #D1D5DB;
         border-radius: var(--radius-md);
@@ -758,7 +829,7 @@
         background: white;
     }
 
-    .form-field input:focus, .form-field select:focus {
+    .form-field input:focus {
         outline: none;
         border-color: var(--aw-teal);
         box-shadow: 0 0 0 2px rgba(47,156,158,0.15);
@@ -771,8 +842,6 @@
         align-items: center;
         gap: var(--space-3);
     }
-
-    .input-with-hint input { flex-shrink: 0; width: 120px; }
 
     .field-hint {
         font-size: var(--font-size-sm);
@@ -847,4 +916,14 @@
     }
 
     .btn-secondary:hover { background: #F9FAFB; }
+
+    .info-banner {
+        background: #EFF6FF;
+        color: #1E40AF;
+        border: 1px solid #BFDBFE;
+        border-radius: var(--radius-md);
+        padding: var(--space-3) var(--space-4);
+        font-size: var(--font-size-sm);
+        line-height: 1.5;
+    }
 </style>

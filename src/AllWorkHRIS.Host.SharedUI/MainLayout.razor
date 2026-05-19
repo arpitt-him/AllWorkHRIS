@@ -9,52 +9,21 @@
 <div class="shell-container">
     <nav class="shell-sidebar">
         <div class="shell-brand">
+            <img src="/images/allworkhr-icon.png" alt="AllWork HRIS" class="shell-brand-logo" />
             <span class="shell-brand-name">@AppDisplayName</span>
         </div>
 
-        @if (_isSystemAdmin)
+        @if (SessionState.IsLocked)
         {
             <div class="shell-nav-main">
-                <a class="nav-switch-client" href="/">⬅ Back to Clients</a>
-                @foreach (var seg in _adminSections)
+                @if (_isSystemAdmin)
                 {
-                    <div class="nav-group">
-                        <div class="nav-item nav-parent">
-                            <span class="nav-label">@seg.Label</span>
-                        </div>
-                        @foreach (var item in seg.Items.Where(i => ItemVisible(i)))
-                        {
-                            <NavLink class="nav-item nav-child" href="@item.Href" Match="NavLinkMatch.Prefix">
-                                <span class="nav-label">@item.Label</span>
-                            </NavLink>
-                        }
-                    </div>
+                    <button class="nav-switch-client" @onclick="BackToAdmin">⬅ Back to Admin</button>
                 }
-            </div>
-        }
-        else if (_isOpsAdmin)
-        {
-            <div class="shell-nav-main">
-                @foreach (var seg in _opsSections)
+                else
                 {
-                    <div class="nav-group">
-                        <div class="nav-item nav-parent">
-                            <span class="nav-label">@seg.Label</span>
-                        </div>
-                        @foreach (var item in seg.Items.Where(i => ItemVisible(i)))
-                        {
-                            <NavLink class="nav-item nav-child" href="@item.Href" Match="NavLinkMatch.Prefix">
-                                <span class="nav-label">@item.Label</span>
-                            </NavLink>
-                        }
-                    </div>
+                    <button class="nav-switch-client" @onclick="SwitchClient">⬅ Switch Client</button>
                 }
-            </div>
-        }
-        else if (SessionState.IsLocked)
-        {
-            <div class="shell-nav-main">
-                <button class="nav-switch-client" @onclick="SwitchClient">⬅ Switch Client</button>
                 @if (SessionState.SelectedLegalEntityName is not null)
                 {
                     <div class="nav-entity-label">@SessionState.SelectedLegalEntityName</div>
@@ -73,7 +42,52 @@
                         </div>
                         @foreach (var item in seg.Items.Where(i => ItemVisible(i)))
                         {
-                            <NavLink class="nav-item nav-child" href="@item.Href" Match="NavLinkMatch.Prefix">
+                            <NavLink class="nav-item nav-child" href="@item.Href"
+                                     Match="@(item.Href == "/" ? NavLinkMatch.All : NavLinkMatch.Prefix)">
+                                <span class="nav-label">@item.Label</span>
+                            </NavLink>
+                        }
+                    </div>
+                }
+            </div>
+        }
+        else if (_isSystemAdmin)
+        {
+            <div class="shell-nav-main">
+                @if (!_onClientPicker)
+                {
+                    <a class="nav-switch-client" href="/">⬅ Back to Clients</a>
+                }
+                @foreach (var seg in _adminSections)
+                {
+                    <div class="nav-group">
+                        <div class="nav-item nav-parent">
+                            <span class="nav-label">@seg.Label</span>
+                        </div>
+                        @foreach (var item in seg.Items.Where(i => ItemVisible(i)))
+                        {
+                            <NavLink class="nav-item nav-child" href="@item.Href"
+                                     Match="@(item.Href == "/" ? NavLinkMatch.All : NavLinkMatch.Prefix)">
+                                <span class="nav-label">@item.Label</span>
+                            </NavLink>
+                        }
+                    </div>
+                }
+            </div>
+        }
+        else if (_isOpsAdmin)
+        {
+            <div class="shell-nav-main">
+                @foreach (var seg in _opsSections)
+                {
+                    <div class="nav-group">
+                        <div class="nav-item nav-parent">
+                            <span class="nav-label">@seg.Label</span>
+                        </div>
+                        @foreach (var item in seg.Items.Where(i => ItemVisible(i)))
+                        {
+                            <NavLink class="nav-item nav-child" href="@item.Href"
+                                     Match="@(item.Href == "/" ? NavLinkMatch.All : NavLinkMatch.Prefix)">
                                 <span class="nav-label">@item.Label</span>
                             </NavLink>
                         }
@@ -120,6 +134,7 @@
     private List<NavSection> _opsSections    = [];
 
     private IDisposable? _locationHandler;
+    private bool _onClientPicker = true;
 
     private static readonly string[] ExemptRoutes =
         ["/", "/admin", "/ops", "/about", "/error"];
@@ -154,6 +169,7 @@
             .ToList();
 
         SessionState.OnChanged += StateHasChanged;
+        UpdateClientPickerState(Nav.Uri);
     }
 
     protected override void OnAfterRender(bool firstRender)
@@ -166,33 +182,64 @@
     private ValueTask OnLocationChanging(LocationChangingContext ctx)
     {
         GuardEntityContext(ctx.TargetLocation);
+        UpdateClientPickerState(ctx.TargetLocation);
+        InvokeAsync(StateHasChanged);
         return ValueTask.CompletedTask;
     }
 
     private void GuardEntityContext(string uri)
     {
-        if (_isSystemAdmin || _isOpsAdmin) return;
-        if (SessionState.IsLocked)         return;
+        if (_isOpsAdmin) return;
 
         var path = new Uri(uri, UriKind.RelativeOrAbsolute).IsAbsoluteUri
             ? new Uri(uri).AbsolutePath
             : uri.Split('?')[0];
 
+        // SystemAdmin navigating to an admin-area route drops the entity lock automatically
+        if (_isSystemAdmin && SessionState.IsLocked && IsAdminRoute(path))
+        {
+            SessionState.Unlock();
+            return;
+        }
+
+        if (SessionState.IsLocked) return;
+
         if (ExemptRoutes.Any(r => path.Equals(r, StringComparison.OrdinalIgnoreCase))) return;
+        if (_isSystemAdmin && IsAdminRoute(path)) return;
 
         Nav.NavigateTo($"/?returnUrl={Uri.EscapeDataString(uri)}");
+    }
+
+    private static bool IsAdminRoute(string path) =>
+        path.StartsWith("/admin",       StringComparison.OrdinalIgnoreCase) ||
+        path.StartsWith("/config",      StringComparison.OrdinalIgnoreCase) ||
+        path.StartsWith("/payroll/tax", StringComparison.OrdinalIgnoreCase);
+
+    private void UpdateClientPickerState(string uri)
+    {
+        var path = new Uri(uri, UriKind.RelativeOrAbsolute).IsAbsoluteUri
+            ? new Uri(uri).AbsolutePath
+            : uri.Split('?')[0];
+        _onClientPicker = path.Equals("/", StringComparison.OrdinalIgnoreCase);
     }
 
     private bool ItemVisible(NavSectionItem item)
     {
         if (item.RequiredRole is null) return true;
-        return _userRoles.Contains(item.RequiredRole);
+        var required = item.RequiredRole.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        return required.Any(r => _userRoles.Contains(r));
     }
 
     private void SwitchClient()
     {
         SessionState.Unlock();
         Nav.NavigateTo("/");
+    }
+
+    private void BackToAdmin()
+    {
+        SessionState.Unlock();
+        Nav.NavigateTo("/admin");
     }
 
     public void Dispose()

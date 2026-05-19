@@ -4,6 +4,7 @@
 @attribute [Authorize(Roles = "TaxAdmin,ComplianceReviewer,PayrollAdmin,SystemAdmin")]
 @using Microsoft.AspNetCore.Authorization
 @using AllWorkHRIS.Host.Config.Tax
+@using Syncfusion.Blazor.Grids
 @inject ITaxConfigRepository TaxConfig
 
 <PageTitle>Rate Reference — Tax Configuration</PageTitle>
@@ -24,49 +25,46 @@ else
         <div class="ref-jurisdiction" style="margin-bottom:1.5rem;">
             <h3 class="ref-jur-heading">@jur.Key</h3>
             <div class="grid-container">
-                <table class="data-table">
-                    <thead>
-                        <tr>
-                            <th>Seq</th>
-                            <th>Step Code</th>
-                            <th>Name</th>
-                            <th>Type</th>
-                            <th>Applies To</th>
-                            <th>Current Rates</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var step in jur.Value)
-                        {
-                            var rates = _ratesByStep.TryGetValue(step.StepCode, out var r) ? r : [];
-                            var current = rates.Where(x => x.EffectiveTo == null || x.EffectiveTo >= _today).ToList();
-                            <tr>
-                                <td class="mono">@step.SequenceNumber</td>
-                                <td class="mono">@step.StepCode</td>
-                                <td>@step.StepName</td>
-                                <td><span class="type-badge type-@step.StepType.ToLower().Replace('_','-')">@StepTypeLabel(step.StepType)</span></td>
-                                <td>@step.AppliesTo</td>
-                                <td>
-                                    @if (current.Count == 0)
+                <SfGrid TValue="TaxStepConfigRow" DataSource="@jur.Value" AllowSorting="true" CssClass="e-gridhover">
+                    <GridColumns>
+                        <GridColumn HeaderText="Seq" Field="SequenceNumber" Width="60" />
+                        <GridColumn HeaderText="Step Code" Field="StepCode" Width="110" />
+                        <GridColumn HeaderText="Name" Field="StepName" />
+                        <GridColumn HeaderText="Type" Width="130">
+                            <Template>
+                                @{ var step = (TaxStepConfigRow)context; }
+                                <span class="type-badge type-@step.StepType.ToLower().Replace('_','-')">@StepTypeLabel(step.StepType)</span>
+                            </Template>
+                        </GridColumn>
+                        <GridColumn HeaderText="Applies To" Width="90">
+                            <Template>@{ var step = (TaxStepConfigRow)context; }@AppliesToLabel(step.AppliesTo)</Template>
+                        </GridColumn>
+                        <GridColumn HeaderText="Current Rates">
+                            <Template>
+                                @{
+                                    var step = (TaxStepConfigRow)context;
+                                    var rates = _ratesByStep.TryGetValue(step.StepCode, out var r) ? r : [];
+                                    var current = rates.Where(x => x.EffectiveTo == null || x.EffectiveTo >= _today).ToList();
+                                }
+                                @if (current.Count == 0)
+                                {
+                                    <span style="color:#6b7280;font-size:.8rem;">—</span>
+                                }
+                                else
+                                {
+                                    @foreach (var rate in current)
                                     {
-                                        <span style="color:#6b7280;font-size:.8rem;">—</span>
+                                        <div style="font-size:.8rem;">
+                                            <span class="rate-type-tag">@rate.RowType</span>
+                                            @rate.Summary
+                                            <span style="color:#9ca3af;margin-left:.25rem;">from @rate.EffectiveFrom.ToString("yyyy-MM-dd")</span>
+                                        </div>
                                     }
-                                    else
-                                    {
-                                        @foreach (var rate in current)
-                                        {
-                                            <div style="font-size:.8rem;">
-                                                <span class="rate-type-tag">@rate.RowType</span>
-                                                @rate.Summary
-                                                <span style="color:#9ca3af;margin-left:.25rem;">from @rate.EffectiveFrom.ToString("yyyy-MM-dd")</span>
-                                            </div>
-                                        }
-                                    }
-                                </td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
+                                }
+                            </Template>
+                        </GridColumn>
+                    </GridColumns>
+                </SfGrid>
             </div>
         </div>
     }
@@ -92,6 +90,14 @@ else
 
         _loading = false;
     }
+
+    private static string AppliesToLabel(string? a) => a switch
+    {
+        "EMPLOYEE" => "EE",
+        "EMPLOYER" => "ER",
+        "BOTH"     => "EE & ER",
+        _          => a ?? "—"
+    };
 
     private static string StepTypeLabel(string t) => t switch
     {

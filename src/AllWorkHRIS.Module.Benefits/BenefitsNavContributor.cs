@@ -20,9 +20,9 @@ public sealed class BenefitsNavContributor : INavContributor
             AccentColor: "var(--module-benefits, #047857)",
             Items:
             [
-                new("Benefit Plans",    "/benefits/codes",    RequiredRole: "BenefitsAdmin"),
+                new("Benefit Plans",    "/benefits/codes",    RequiredRole: "HrisAdmin,BenefitsAdmin"),
                 new("Elections",        "/benefits/elections"),
-                new("Import Elections", "/benefits/import",   RequiredRole: "BenefitsAdmin"),
+                new("Import Elections", "/benefits/import",   RequiredRole: "HrisAdmin,BenefitsAdmin"),
             ]);
     }
 }

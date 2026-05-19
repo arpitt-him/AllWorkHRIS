@@ -165,7 +165,7 @@ public sealed record CompensationRecord
             CompensationId       = Guid.NewGuid(),
             EmploymentId         = employmentId,
             RateTypeId           = effectiveRateTypeId,
-            PayTypeId            = ResolvePayTypeId(rateTypeCode, lookupCache),
+            PayTypeId            = command.PayTypeId ?? ResolvePayTypeId(rateTypeCode, lookupCache),
             BaseRate             = effectiveBaseRate,
             RateCurrency         = "USD",
             AnnualEquivalent     = annualEquivalent,

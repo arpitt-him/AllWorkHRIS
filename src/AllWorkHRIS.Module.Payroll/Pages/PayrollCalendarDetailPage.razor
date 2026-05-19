@@ -86,32 +86,89 @@
 
         @* Context metadata *@
         <div class="panel-card" style="margin-bottom:1.5rem;">
-            <div class="detail-grid">
-                <div class="detail-field">
-                    <span class="detail-label">Code</span>
-                    <span class="detail-value" style="font-family:monospace">@_context.PayrollContextCode</span>
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:var(--space-3)">
+                <div class="detail-grid" style="flex:1">
+                    <div class="detail-field">
+                        <span class="detail-label">Code</span>
+                        <span class="detail-value" style="font-family:monospace">@_context.PayrollContextCode</span>
+                    </div>
+                    <div class="detail-field">
+                        <span class="detail-label">Pay Frequency</span>
+                        <span class="detail-value">@FrequencyLabel(_context.PayFrequencyId)</span>
+                    </div>
+                    <div class="detail-field">
+                        <span class="detail-label">Effective From</span>
+                        <span class="detail-value">@_context.EffectiveStartDate.ToString("yyyy-MM-dd")</span>
+                    </div>
+                    <div class="detail-field">
+                        <span class="detail-label">Effective To</span>
+                        <span class="detail-value">@(_context.EffectiveEndDate?.ToString("yyyy-MM-dd") ?? "—")</span>
+                    </div>
+                    <div class="detail-field">
+                        <span class="detail-label">Periods on Record</span>
+                        <span class="detail-value">@_allPeriods.Count</span>
+                    </div>
+                    <div class="detail-field">
+                        <span class="detail-label">Open Periods</span>
+                        <span class="detail-value">@_allPeriods.Count(p => p.CalendarStatus == "OPEN")</span>
+                    </div>
+                    <div class="detail-field">
+                        <span class="detail-label">OT Threshold</span>
+                        <span class="detail-value">@_context.OtWeeklyThresholdHours.ToString("0.##") hrs / week</span>
+                    </div>
+                    <div class="detail-field">
+                        <span class="detail-label">Workweek Start</span>
+                        <span class="detail-value">@WorkweekDayLabel(_context.WorkweekStartDay)</span>
+                    </div>
                 </div>
-                <div class="detail-field">
-                    <span class="detail-label">Pay Frequency</span>
-                    <span class="detail-value">@FrequencyLabel(_context.PayFrequencyId)</span>
-                </div>
-                <div class="detail-field">
-                    <span class="detail-label">Effective From</span>
-                    <span class="detail-value">@_context.EffectiveStartDate.ToString("yyyy-MM-dd")</span>
-                </div>
-                <div class="detail-field">
-                    <span class="detail-label">Effective To</span>
-                    <span class="detail-value">@(_context.EffectiveEndDate?.ToString("yyyy-MM-dd") ?? "—")</span>
-                </div>
-                <div class="detail-field">
-                    <span class="detail-label">Periods on Record</span>
-                    <span class="detail-value">@_allPeriods.Count</span>
-                </div>
-                <div class="detail-field">
-                    <span class="detail-label">Open Periods</span>
-                    <span class="detail-value">@_allPeriods.Count(p => p.CalendarStatus == "OPEN")</span>
-                </div>
+                @if (!_showEditSettings && !_showDeleteConfirm && !_showGenerateForm && !_showClearConfirm)
+                {
+                    <button class="btn-secondary" style="margin-left:var(--space-4);white-space:nowrap"
+                            @onclick="BeginEditSettings">
+                        Edit Settings
+                    </button>
+                }
             </div>
+
+            @* ── Inline settings edit form ─────────────────────────── *@
+            @if (_showEditSettings)
+            {
+                <div style="border-top:1px solid #e5e7eb;padding-top:var(--space-4);margin-top:var(--space-2)">
+                    <h4 style="margin:0 0 var(--space-3);font-size:var(--font-size-base);font-weight:var(--font-weight-medium)">
+                        Edit Operational Settings
+                    </h4>
+                    <div class="form-grid form-grid-3" style="margin-bottom:var(--space-4)">
+                        <div class="form-field">
+                            <label class="form-label">OT Weekly Threshold (hrs)</label>
+                            <SfNumericTextBox TValue="decimal" @bind-Value="_editOtThreshold"
+                                             Min="0.01m" Max="40m" Step="0.5m" Format="0.##" />
+                            <span style="font-size:var(--font-size-sm);color:#6B7280">
+                                FLSA standard is 40.00. Override only if this pay group has a lower company-configured threshold.
+                            </span>
+                        </div>
+                        <div class="form-field">
+                            <label class="form-label">Workweek Start Day</label>
+                            <SfDropDownList TValue="int" TItem="DayOption" DataSource="@_dayOptions"
+                                           @bind-Value="_editWorkweekStartDay" Width="100%">
+                                <DropDownListFieldSettings Value="Value" Text="Label" />
+                            </SfDropDownList>
+                            <span style="font-size:var(--font-size-sm);color:#6B7280">
+                                FLSA workweek anchor — every non-exempt employee in this group uses this day.
+                            </span>
+                        </div>
+                    </div>
+                    @if (_settingsError is not null)
+                    {
+                        <div class="alert-error" style="margin-bottom:var(--space-3)">@_settingsError</div>
+                    }
+                    <div class="form-actions">
+                        <button class="btn-primary" @onclick="SaveSettingsAsync" disabled="@_submitting">
+                            @(_submitting ? "Saving…" : "Save Settings")
+                        </button>
+                        <button class="btn-secondary" @onclick="CancelEditSettings">Cancel</button>
+                    </div>
+                </div>
+            }
         </div>
 
         @* Year selector + Generate button *@
@@ -320,8 +377,7 @@
                             @if (_editRunDatePeriodId == p.PeriodId)
                             {
                                 <div style="display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap">
-                                    <input type="date" class="form-control" style="width:auto;padding:2px 6px"
-                                           @bind="_editRunDateValue" @bind:format="yyyy-MM-dd" />
+                                    <SfDatePicker TValue="DateOnly?" @bind-Value="_editRunDateValue" />
                                     <button class="btn-primary"
                                             style="padding:2px 10px;font-size:var(--font-size-sm)"
                                             @onclick="() => SaveRunDateAsync(p.PeriodId)"
@@ -364,6 +420,18 @@
 
     private record FilterOption(string Value, string Label);
     private record YearOption(int Value, string Label);
+    private record DayOption(int Value, string Label);
+
+    private static readonly List<DayOption> _dayOptions =
+    [
+        new(0, "Sunday"),
+        new(1, "Monday"),
+        new(2, "Tuesday"),
+        new(3, "Wednesday"),
+        new(4, "Thursday"),
+        new(5, "Friday"),
+        new(6, "Saturday"),
+    ];
 
     private List<YearOption> _yearOptions = [];
 
@@ -394,6 +462,12 @@
     private bool    _clearHadError;
     private string? _deleteError;
     private Guid    _currentUserId;
+
+    // Inline settings editing
+    private bool     _showEditSettings;
+    private decimal  _editOtThreshold;
+    private int      _editWorkweekStartDay;
+    private string?  _settingsError;
 
     // Inline run-date editing
     private Guid?    _editRunDatePeriodId;
@@ -760,6 +834,57 @@
         new LookupEntry { Id = 5, Code = "QUARTERLY",    Label = "Quarterly"    },
         new LookupEntry { Id = 6, Code = "ANNUAL",       Label = "Annual"       },
     ];
+
+    private void BeginEditSettings()
+    {
+        if (_context is null) return;
+        _editOtThreshold      = _context.OtWeeklyThresholdHours;
+        _editWorkweekStartDay = _context.WorkweekStartDay;
+        _settingsError        = null;
+        _showEditSettings     = true;
+    }
+
+    private void CancelEditSettings()
+    {
+        _showEditSettings = false;
+        _settingsError    = null;
+    }
+
+    private async Task SaveSettingsAsync()
+    {
+        if (_context is null) return;
+        if (_editOtThreshold <= 0 || _editOtThreshold > 40)
+        {
+            _settingsError = "OT threshold must be between 0.01 and 40.00 hours.";
+            return;
+        }
+
+        _submitting    = true;
+        _settingsError = null;
+        try
+        {
+            await ContextRepo.UpdateContextSettingsAsync(
+                ContextId, _editOtThreshold, _editWorkweekStartDay, _currentUserId);
+
+            // Reload the context so the metadata panel reflects the saved values
+            _context          = await ContextRepo.GetByIdAsync(ContextId);
+            _showEditSettings = false;
+        }
+        catch (Exception ex) { _settingsError = ex.Message; }
+        finally { _submitting = false; }
+    }
+
+    private static string WorkweekDayLabel(int day) => day switch
+    {
+        0 => "Sunday",
+        1 => "Monday",
+        2 => "Tuesday",
+        3 => "Wednesday",
+        4 => "Thursday",
+        5 => "Friday",
+        6 => "Saturday",
+        _ => day.ToString()
+    };
 
     private void BeginEditRunDate(PayrollPeriod p)
     {

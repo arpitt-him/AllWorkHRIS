@@ -28,9 +28,13 @@
                 <span class="admin-link-title">Legal Entities</span>
                 <span class="admin-link-sub">Manage registered entities</span>
             </a>
+            <a href="/payroll/tax/rates" class="admin-link-card">
+                <span class="admin-link-title">Tax Rate Tables</span>
+                <span class="admin-link-sub">Manage effective-dated rate data</span>
+            </a>
             <a href="/config/tax/reference" class="admin-link-card">
-                <span class="admin-link-title">Tax Rates &amp; Brackets</span>
-                <span class="admin-link-sub">View effective-dated rate schedule</span>
+                <span class="admin-link-title">Rate Reference</span>
+                <span class="admin-link-sub">Active rates per jurisdiction — read only</span>
             </a>
             <a href="/config/tax/steps" class="admin-link-card">
                 <span class="admin-link-title">Calculation Steps</span>
@@ -113,7 +117,7 @@
 
     .admin-link-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        grid-template-columns: repeat(5, 1fr);
         gap: var(--space-3);
     }
 

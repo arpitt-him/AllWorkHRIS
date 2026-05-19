@@ -89,15 +89,15 @@
                     </div>
                     @if (_filteredEmployees.Count > 0)
                     {
-                        <select class="form-select" size="6" style="margin-top:.25rem;"
-                                @onchange="OnEmpSelected">
+                        <div class="emp-pick-list" style="margin-top:.25rem;">
                             @foreach (var emp in _filteredEmployees)
                             {
-                                <option value="@emp.EmploymentId">
-                                    @emp.LegalLastName, @emp.LegalFirstName — @emp.EmployeeNumber
-                                </option>
+                                var e = emp;
+                                <div class="emp-pick-item" @onclick="() => SelectEmployeeItem(e)">
+                                    @e.LegalLastName, @e.LegalFirstName — @e.EmployeeNumber
+                                </div>
                             }
-                        </select>
+                        </div>
                     }
                     @if (_selectedEmployee is not null)
                     {
@@ -314,48 +314,44 @@
                     <div style="background:#f9fafb;padding:.6rem 1rem;border-bottom:1px solid #e5e7eb;">
                         <strong style="font-size:.9rem;">Election Summary</strong>
                     </div>
-                    <table style="width:100%;border-collapse:collapse;font-size:.9rem;">
-                        <tr>
-                            <td style="padding:.55rem 1rem;color:#6b7280;width:38%;border-bottom:1px solid #f3f4f6;">Employee</td>
-                            <td style="padding:.55rem 1rem;border-bottom:1px solid #f3f4f6;">
+                    <div style="width:100%;font-size:.9rem;">
+                        <div style="display:flex;padding:.55rem 1rem;border-bottom:1px solid #f3f4f6;">
+                            <span style="color:#6b7280;width:38%;flex-shrink:0;">Employee</span>
+                            <span>
                                 <strong>@_selectedEmployee.LegalLastName, @_selectedEmployee.LegalFirstName</strong>
                                 <samp style="font-size:.82rem;margin-left:.4rem;">@_selectedEmployee.EmployeeNumber</samp>
-                            </td>
-                        </tr>
-                        <tr style="background:#f9fafb;">
-                            <td style="padding:.55rem 1rem;color:#6b7280;border-bottom:1px solid #f3f4f6;">Benefit</td>
-                            <td style="padding:.55rem 1rem;border-bottom:1px solid #f3f4f6;">
+                            </span>
+                        </div>
+                        <div style="display:flex;padding:.55rem 1rem;border-bottom:1px solid #f3f4f6;background:#f9fafb;">
+                            <span style="color:#6b7280;width:38%;flex-shrink:0;">Benefit</span>
+                            <span>
                                 <samp style="font-weight:600;">@_selectedDeduction.Code</samp>
                                 <span style="color:#6b7280;margin-left:.4rem;">@_selectedDeduction.Description</span>
-                            </td>
-                        </tr>
-                        <tr>
-                            <td style="padding:.55rem 1rem;color:#6b7280;border-bottom:1px solid #f3f4f6;">Tax Treatment</td>
-                            <td style="padding:.55rem 1rem;border-bottom:1px solid #f3f4f6;">
+                            </span>
+                        </div>
+                        <div style="display:flex;padding:.55rem 1rem;border-bottom:1px solid #f3f4f6;">
+                            <span style="color:#6b7280;width:38%;flex-shrink:0;">Tax Treatment</span>
+                            <span>
                                 <span class="badge @TreatmentClass(_selectedDeduction.TaxTreatment)">
                                     @_selectedDeduction.TaxTreatment
                                 </span>
-                            </td>
-                        </tr>
-                        <tr style="background:#f9fafb;">
-                            <td style="padding:.55rem 1rem;color:#6b7280;border-bottom:1px solid #f3f4f6;">Contribution</td>
-                            <td style="padding:.55rem 1rem;border-bottom:1px solid #f3f4f6;">
-                                <strong>@FormatReviewContribution()</strong>
-                            </td>
-                        </tr>
+                            </span>
+                        </div>
+                        <div style="display:flex;padding:.55rem 1rem;border-bottom:1px solid #f3f4f6;background:#f9fafb;">
+                            <span style="color:#6b7280;width:38%;flex-shrink:0;">Contribution</span>
+                            <span><strong>@FormatReviewContribution()</strong></span>
+                        </div>
                         @if (_addEmployerAmount.HasValue && _addEmployerAmount.Value > 0
                              && _selectedDeduction.CalculationMode is not (CalculationMode.PctPreTax or CalculationMode.PctPostTax or CalculationMode.CoverageBased))
                         {
-                            <tr>
-                                <td style="padding:.55rem 1rem;color:#6b7280;border-bottom:1px solid #f3f4f6;">Employer Contrib.</td>
-                                <td style="padding:.55rem 1rem;border-bottom:1px solid #f3f4f6;">
-                                    $@_addEmployerAmount.Value.ToString("N2") per period
-                                </td>
-                            </tr>
+                            <div style="display:flex;padding:.55rem 1rem;border-bottom:1px solid #f3f4f6;">
+                                <span style="color:#6b7280;width:38%;flex-shrink:0;">Employer Contrib.</span>
+                                <span>$@_addEmployerAmount.Value.ToString("N2") per period</span>
+                            </div>
                         }
-                        <tr style="@(_addEmployerAmount.HasValue ? "background:#f9fafb;" : "")">
-                            <td style="padding:.55rem 1rem;color:#6b7280;">Effective Period</td>
-                            <td style="padding:.55rem 1rem;">
+                        <div style="display:flex;padding:.55rem 1rem;@(_addEmployerAmount.HasValue ? "background:#f9fafb;" : "")">
+                            <span style="color:#6b7280;width:38%;flex-shrink:0;">Effective Period</span>
+                            <span>
                                 @_addStart!.Value.ToString("MMM d, yyyy")
                                 @if (_addEnd.HasValue)
                                 {
@@ -369,9 +365,9 @@
                                       style="margin-left:.5rem;font-size:.72rem;">
                                     @(_addStart.Value <= DateOnly.FromDateTime(DateTime.Today) ? "ACTIVE" : "PENDING")
                                 </span>
-                            </td>
-                        </tr>
-                    </table>
+                            </span>
+                        </div>
+                    </div>
                 </div>
             }
 
@@ -499,10 +495,10 @@
         </div>
     }
 
-    <div class="filter-bar">
-        <SfTextBox @bind-Value="_filterCode" Placeholder="Filter by code…" />
+    <div class="filter-row">
+        <SfTextBox @bind-Value="_filterCode" Placeholder="Filter by code…" Width="220px" />
         <SfDropDownList TValue="string" TItem="FilterOption" DataSource="@_electionStatusOptions"
-                        @bind-Value="_filterStatus">
+                        @bind-Value="_filterStatus" Width="180px">
             <DropDownListFieldSettings Value="Value" Text="Label" />
         </SfDropDownList>
         <button class="btn btn-secondary btn-sm" @onclick="ApplyFiltersAsync">Filter</button>
@@ -820,6 +816,13 @@
             : [];
     }
 
+    private void SelectEmployeeItem(EmploymentListItem emp)
+    {
+        _selectedEmployee  = emp;
+        _filteredEmployees = [];
+        _empSearch = $"{emp.LegalLastName}, {emp.LegalFirstName} ({emp.EmployeeNumber})";
+    }
+
     private void OnEmpSelected(ChangeEventArgs e)
     {
         if (Guid.TryParse(e.Value?.ToString(), out var id))
@@ -1054,3 +1057,22 @@
         _            => "badge-gray"
     };
 }
+
+<style>
+    .emp-pick-list {
+        border: 1px solid #d1d5db;
+        border-radius: var(--radius-sm, 4px);
+        overflow-y: auto;
+        max-height: 162px;
+        background: white;
+    }
+    .emp-pick-item {
+        padding: .4rem .6rem;
+        font-size: var(--font-size-sm);
+        cursor: pointer;
+        border-bottom: 1px solid #f3f4f6;
+        color: var(--aw-navy);
+    }
+    .emp-pick-item:hover { background: #f0f9ff; }
+    .emp-pick-item:last-child { border-bottom: none; }
+</style>

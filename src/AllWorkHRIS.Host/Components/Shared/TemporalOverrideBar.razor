@@ -1,4 +1,5 @@
 @using AllWorkHRIS.Core.Temporal
+@using Syncfusion.Blazor.Calendars
 @inject ITemporalOverrideService TemporalOverride
 
 @if (TemporalOverride.IsEnabled)
@@ -17,7 +18,7 @@
         </div>
 
         <div class="temporal-panel__warning">
-            <strong>Warning:</strong> Activating a date override changes the operative date used across the
+            <strong>Warning:</strong> Activating a date override changes the test date used across the
             <em>entire application for all active sessions</em>. This affects effective-date queries, leave
             processing, document expiration checks, and payroll calculations. Use only for testing in
             non-production environments. Each change requires explicit confirmation before taking effect.
@@ -33,7 +34,7 @@
                     }
                     else
                     {
-                        <span>Set operative date to <strong>@_inputDate.ToString("yyyy-MM-dd")</strong> for all users and sessions?</span>
+                        <span>Set test date to <strong>@_inputDate.ToString("yyyy-MM-dd")</strong> for all users and sessions?</span>
                     }
                 </span>
                 <button class="temporal-panel__btn temporal-panel__btn--confirm" @onclick="ConfirmChange">Confirm</button>
@@ -44,7 +45,7 @@
         {
             <div class="temporal-panel__controls">
                 <label class="temporal-panel__label">Override date:</label>
-                <input type="date" class="temporal-panel__input" @bind="_inputDate" />
+                <SfDatePicker TValue="DateOnly" @bind-Value="_inputDate" CssClass="temporal-panel__input" Width="180px" />
                 <button class="temporal-panel__btn temporal-panel__btn--set" @onclick="RequestSet">Set Override</button>
                 @if (TemporalOverride.IsOverrideActive)
                 {
