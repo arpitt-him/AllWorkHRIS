@@ -77,7 +77,7 @@
                 </div>
                 <div class="form-field">
                     <label class="form-label">Effective Start Date <span style="color:var(--color-danger)">*</span></label>
-                    <SfDatePicker TValue="DateOnly" @bind-Value="_enrollStartDate" Placeholder="MM/DD/YYYY" />
+                    <TdoDatePicker TValue="DateOnly" @bind-Value="_enrollStartDate" Placeholder="MM/DD/YYYY" />
                 </div>
             </div>
 
@@ -216,6 +216,9 @@
                 <GridColumn HeaderText="Employee" Width="200">
                     <Template>@{ var p = (PayrollProfile)context; }<a href="/hris/employees/@p.EmploymentId" class="table-link">@GetName(p.EmploymentId)</a></Template>
                 </GridColumn>
+                <GridColumn HeaderText="Employee #" Width="130">
+                    <Template>@{ var p = (PayrollProfile)context; }@GetEmployeeNumber(p.EmploymentId)</Template>
+                </GridColumn>
                 <GridColumn HeaderText="Payroll Context" Width="200">
                     <Template>@{ var p = (PayrollProfile)context; }@GetContextName(p.PayrollContextId)</Template>
                 </GridColumn>
@@ -255,6 +258,7 @@
     private List<PayrollContext>      _contexts          = [];
     private List<PayrollProfile>      _profiles          = [];
     private Dictionary<Guid, string>  _names             = new();
+    private Dictionary<Guid, string>  _employeeNumbers   = new();
     private Guid                      _selectedContextId;
     private string                    _profileStatusFilter = "";
     private bool                      _loading           = true;
@@ -516,7 +520,11 @@
         _profiles = (await ProfileRepo.GetByContextAsync(_selectedContextId)).ToList();
 
         if (_profiles.Count > 0)
-            _names = await PersonService.GetNamesByEmploymentIdsAsync(_profiles.Select(p => p.EmploymentId));
+        {
+            var ids = _profiles.Select(p => p.EmploymentId).ToList();
+            _names           = await PersonService.GetNamesByEmploymentIdsAsync(ids);
+            _employeeNumbers = await EmploymentService.GetEmployeeNumbersByEmploymentIdsAsync(ids);
+        }
 
         _loading = false;
     }
@@ -529,6 +537,9 @@
 
     private string GetName(Guid employmentId)
         => _names.TryGetValue(employmentId, out var n) ? n : employmentId.ToString()[..8];
+
+    private string GetEmployeeNumber(Guid employmentId)
+        => _employeeNumbers.TryGetValue(employmentId, out var num) ? num : "";
 
     private string GetContextName(Guid contextId)
         => _contexts.FirstOrDefault(c => c.PayrollContextId == contextId)?.PayrollContextName ?? contextId.ToString()[..8];

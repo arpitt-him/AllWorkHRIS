@@ -125,12 +125,14 @@ public sealed class PayrollRunRepository : IPayrollRunRepository
                 last_update_timestamp = CURRENT_TIMESTAMP
             WHERE run_id = @RunId
             """;
+        // Npgsql rejects DateTimeOffset with non-zero offset on timestamptz parameters;
+        // normalise to UTC here so callers can't reintroduce that failure.
         using var conn = _connectionFactory.CreateConnection();
         await conn.ExecuteAsync(sql, new
         {
             RunId     = runId,
-            Start     = startTimestamp,
-            End       = endTimestamp,
+            Start     = startTimestamp.ToUniversalTime(),
+            End       = endTimestamp?.ToUniversalTime(),
             UpdatedBy = updatedBy
         }, commandTimeout: 30);
     }

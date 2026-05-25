@@ -3,13 +3,15 @@
 @using Syncfusion.Blazor.Calendars
 
 <div class="date-range-filter">
-    <SfDatePicker @bind-Value="FromDate"
-                  Placeholder="From"
-                  CssClass="filter-date-input" />
+    <TdoDatePicker TValue="DateTime?" @bind-Value="FromDate"
+                   Placeholder="From"
+                   CssClass="filter-date-input"
+                   DefaultToTdo="false" />
     <span class="filter-separator">–</span>
-    <SfDatePicker @bind-Value="ToDate"
-                  Placeholder="To"
-                  CssClass="filter-date-input" />
+    <TdoDatePicker TValue="DateTime?" @bind-Value="ToDate"
+                   Placeholder="To"
+                   CssClass="filter-date-input"
+                   DefaultToTdo="false" />
     <button class="filter-apply-btn" @onclick="ApplyFilter">Apply</button>
     <button class="filter-clear-btn" @onclick="ClearFilter">Clear</button>
 </div>

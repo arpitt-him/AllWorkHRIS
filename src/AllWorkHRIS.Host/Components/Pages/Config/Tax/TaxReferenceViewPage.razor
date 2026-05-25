@@ -3,9 +3,11 @@
 @rendermode InteractiveServer
 @attribute [Authorize(Roles = "TaxAdmin,ComplianceReviewer,PayrollAdmin,SystemAdmin")]
 @using Microsoft.AspNetCore.Authorization
+@using AllWorkHRIS.Core.Temporal
 @using AllWorkHRIS.Host.Config.Tax
 @using Syncfusion.Blazor.Grids
 @inject ITaxConfigRepository TaxConfig
+@inject ITemporalContext     TemporalContext
 
 <PageTitle>Rate Reference — Tax Configuration</PageTitle>
 
@@ -71,14 +73,16 @@ else
 }
 
 @code {
-    private bool   _loading = true;
-    private DateOnly _today = DateOnly.FromDateTime(DateTime.Today);
+    private bool     _loading = true;
+    private DateOnly _today;
 
     private Dictionary<string, List<TaxStepConfigRow>>          _stepsByJurisdiction = [];
     private Dictionary<string, IReadOnlyList<TaxRateRowSummary>> _ratesByStep        = [];
 
     protected override async Task OnInitializedAsync()
     {
+        _today = DateOnly.FromDateTime(TemporalContext.GetOperativeDate());
+
         var steps = await TaxConfig.GetAllActiveStepsAsync();
 
         _stepsByJurisdiction = steps

@@ -1,0 +1,104 @@
+@*
+    TdoDatePicker — TDO-aware wrapper around Syncfusion's SfDatePicker.
+
+    Behaviour difference vs SfDatePicker:
+      * On first render, if Value is unset (null for nullable; default for non-
+        nullable) AND DefaultToTdo is true, Value is initialised to
+        ITemporalContext.GetOperativeDate() so the field shows the TDO date
+        rather than real today.
+      * Syncfusion's "Today" button is suppressed (would otherwise navigate to
+        real today, ignoring TDO).
+
+    For filter pickers (where null means "no filter") or fields with non-TDO
+    semantic defaults (e.g. date-of-birth), pass DefaultToTdo="false" to retain
+    the underlying SfDatePicker behaviour while still suppressing the Today
+    button.
+
+    Supported TValue types: DateOnly, DateOnly?, DateTime, DateTime?.
+*@
+
+@typeparam TValue
+@using Syncfusion.Blazor.Calendars
+@inject ITemporalContext TemporalContext
+
+<SfDatePicker TValue="TValue"
+              Value="@Value"
+              ValueChanged="@OnValueChanged"
+              ValueExpression="@ValueExpression"
+              Width="@Width"
+              Placeholder="@Placeholder"
+              CssClass="@CssClass"
+              Format="@Format"
+              Min="@(Min ?? new DateTime(1900, 1, 1))"
+              Max="@(Max ?? new DateTime(2099, 12, 31))"
+              ShowClearButton="@ShowClearButton"
+              ShowTodayButton="false"
+              Enabled="@Enabled">
+    @ChildContent
+</SfDatePicker>
+
+@code {
+    [Parameter] public TValue?                 Value           { get; set; }
+    [Parameter] public EventCallback<TValue?>  ValueChanged    { get; set; }
+    [Parameter] public System.Linq.Expressions.Expression<Func<TValue?>>? ValueExpression { get; set; }
+    [Parameter] public string?                 Width           { get; set; }
+    [Parameter] public string?                 Placeholder     { get; set; } = "MM/DD/YYYY";
+    [Parameter] public string?                 CssClass        { get; set; }
+    [Parameter] public string?                 Format          { get; set; }
+    [Parameter] public DateTime?               Min             { get; set; }
+    [Parameter] public DateTime?               Max             { get; set; }
+    [Parameter] public bool                    ShowClearButton { get; set; }
+    [Parameter] public bool                    Enabled         { get; set; } = true;
+
+    /// <summary>
+    /// When true (default) and the bound Value is unset on first render, the
+    /// component pre-populates Value with ITemporalContext.GetOperativeDate().
+    /// Set false for filter pickers and other fields whose null/empty semantic
+    /// is meaningful (e.g. open-ended effective-to dates, date-of-birth).
+    /// </summary>
+    [Parameter] public bool DefaultToTdo { get; set; } = true;
+
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    private bool _initialDefaultApplied;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        if (!DefaultToTdo) return;
+        if (_initialDefaultApplied) return;
+        if (!IsUnset(Value)) return;
+        if (!ValueChanged.HasDelegate) return;  // No two-way binding — can't push the default back
+
+        var tdo = TemporalContext.GetOperativeDate();
+        var initial = (TValue?)ConvertOperativeDate(tdo);
+        if (initial is null) return;
+
+        _initialDefaultApplied = true;
+        await ValueChanged.InvokeAsync(initial);
+    }
+
+    private async Task OnValueChanged(TValue? newValue)
+    {
+        Value = newValue;
+        if (ValueChanged.HasDelegate)
+            await ValueChanged.InvokeAsync(newValue);
+    }
+
+    private static bool IsUnset(TValue? value)
+    {
+        if (value is null) return true;
+        var underlying = Nullable.GetUnderlyingType(typeof(TValue)) ?? typeof(TValue);
+        if (underlying == typeof(DateTime)) return ((DateTime)(object)value) == default;
+        if (underlying == typeof(DateOnly)) return ((DateOnly)(object)value) == default;
+        return false;
+    }
+
+    private static object? ConvertOperativeDate(DateTime tdo)
+    {
+        var underlying = Nullable.GetUnderlyingType(typeof(TValue)) ?? typeof(TValue);
+        if (underlying == typeof(DateTime)) return tdo;
+        if (underlying == typeof(DateOnly)) return DateOnly.FromDateTime(tdo);
+        return null;
+    }
+}

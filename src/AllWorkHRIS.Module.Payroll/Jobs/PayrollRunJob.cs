@@ -1,6 +1,7 @@
 using System.Threading.Channels;
 using Autofac;
 using AllWorkHRIS.Core.Events;
+using AllWorkHRIS.Core.Temporal;
 using AllWorkHRIS.Module.Payroll.Domain.Results;
 using AllWorkHRIS.Module.Payroll.Domain.ResultSet;
 using AllWorkHRIS.Module.Payroll.Domain.Run;
@@ -67,6 +68,20 @@ public sealed class PayrollRunJob : BackgroundService
         var compSnapshot  = scope.Resolve<IPayrollCompensationSnapshotRepository>();
         var engine        = scope.Resolve<ICalculationEngine>();
         var accumulator   = scope.Resolve<IAccumulatorService>();
+        var temporal      = scope.Resolve<ITemporalContext>();
+
+        // Audit-style timestamp: TDO operative date for the date portion (so it
+        // matches the simulated environment) + real UTC time-of-day so the duration
+        // of an actual run is visible. Stored with offset = UTC because Npgsql
+        // requires offset 0 for PostgreSQL `timestamptz` parameters.
+        DateTimeOffset TdoNow()
+        {
+            var op     = temporal.GetOperativeDate();
+            var utcNow = DateTime.UtcNow;
+            return new DateTimeOffset(op.Year, op.Month, op.Day,
+                                      utcNow.Hour, utcNow.Minute, utcNow.Second,
+                                      TimeSpan.Zero);
+        }
 
         var run = await runRepo.GetByIdAsync(runId);
         if (run is null)
@@ -85,14 +100,14 @@ public sealed class PayrollRunJob : BackgroundService
         }
 
         // Transition to CALCULATING
-        var startTime = DateTimeOffset.UtcNow;
+        var startTime = TdoNow();
         await runRepo.UpdateStatusAsync(runId, (int)PayrollRunStatus.Calculating, run.InitiatedBy);
         await runRepo.SetRunTimestampsAsync(runId, startTime, null, run.InitiatedBy);
 
         try
         {
             // Create result set for this calculation pass
-            var now = DateTimeOffset.UtcNow;
+            var now = TdoNow();
             var resultSet = new PayrollRunResultSet
             {
                 PayrollRunResultSetId        = Guid.NewGuid(),
@@ -133,7 +148,7 @@ public sealed class PayrollRunJob : BackgroundService
             var blocked = await profileRepo.GetActiveBlockedEmploymentIdsByContextAsync(run.PayrollContextId);
             if (blocked.Count > 0)
             {
-                var exceptionTime = DateTimeOffset.UtcNow;
+                var exceptionTime = TdoNow();
                 foreach (var blockedId in blocked)
                 {
                     await runRepo.InsertRunExceptionAsync(new PayrollRunException
@@ -170,7 +185,7 @@ public sealed class PayrollRunJob : BackgroundService
                 ct.ThrowIfCancellationRequested();
 
                 var resultId   = Guid.NewGuid();
-                var resultTime = DateTimeOffset.UtcNow;
+                var resultTime = TdoNow();
 
                 // Create the employee result header row before writing result lines
                 var employeeResult = new EmployeePayrollResult
@@ -247,7 +262,7 @@ public sealed class PayrollRunJob : BackgroundService
                             EmploymentId     = employmentId,
                             ExceptionCode    = "NET_PAY_FLOOR_APPLIED",
                             ExceptionMessage = $"Net pay floored to $0.00; {output.NetPayFloorExcess:F4} in deductions could not be collected due to insufficient earnings.",
-                            CreatedTimestamp = DateTimeOffset.UtcNow
+                            CreatedTimestamp = TdoNow()
                         });
                     }
 
@@ -295,7 +310,7 @@ public sealed class PayrollRunJob : BackgroundService
                 : (int)PayrollRunStatus.Calculated;
 
             await runRepo.UpdateStatusAsync(runId, finalStatus, run.InitiatedBy);
-            await runRepo.SetRunTimestampsAsync(runId, startTime, DateTimeOffset.UtcNow, run.InitiatedBy);
+            await runRepo.SetRunTimestampsAsync(runId, startTime, TdoNow(), run.InitiatedBy);
             await resultSetRepo.UpdateStatusAsync(resultSet.PayrollRunResultSetId, (int)ResultSetStatus.Calculated);
 
             var blockedMsg = blocked.Count > 0 ? $", {blocked.Count} blocked (onboarding)" : "";

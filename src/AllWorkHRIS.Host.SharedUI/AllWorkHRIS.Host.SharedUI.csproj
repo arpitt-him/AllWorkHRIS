@@ -15,4 +15,8 @@
     <ProjectReference Include="..\AllWorkHRIS.Core\AllWorkHRIS.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="Syncfusion.Blazor" Version="33.1.44" />
+  </ItemGroup>
+
 </Project>

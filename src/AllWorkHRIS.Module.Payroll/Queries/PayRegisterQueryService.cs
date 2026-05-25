@@ -778,7 +778,7 @@ public sealed class PayRegisterQueryService
             ORDER  BY deduction_code
             """, new { Id = employeePayrollResultId });
         result.AddRange(deductions.Select(r =>
-            new PayRegisterLineItem("Deduction", (string)r.code, (string)r.description, (decimal)r.amount)));
+            new PayRegisterLineItem("Employee Contribution", (string)r.code, (string)r.description, (decimal)r.amount)));
 
         var taxes = await conn.QueryAsync<dynamic>(
             """

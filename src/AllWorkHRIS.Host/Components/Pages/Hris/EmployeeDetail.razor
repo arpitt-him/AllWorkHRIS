@@ -135,7 +135,7 @@ else
                             </div>
                             <div class="form-field">
                                 <label class="form-label">Effective Date <span class="req">*</span></label>
-                                <SfDatePicker TValue="DateTime" @bind-Value="_compEffectiveDt" />
+                                <TdoDatePicker TValue="DateTime" @bind-Value="_compEffectiveDt" />
                             </div>
                             <div class="form-field form-field-full">
                                 <label class="form-label">Change Reason <span class="req">*</span></label>
@@ -188,7 +188,7 @@ else
                                 </div>
                                 <div class="form-field">
                                     <label class="form-label">Effective Date <span class="req">*</span></label>
-                                    <SfDatePicker TValue="DateTime" @bind-Value="_txfrEffectiveDt" />
+                                    <TdoDatePicker TValue="DateTime" @bind-Value="_txfrEffectiveDt" />
                                 </div>
                                 <div class="form-field">
                                     <label class="form-label">Reason Code <span class="req">*</span></label>
@@ -229,7 +229,7 @@ else
                                 </div>
                                 <div class="form-field">
                                     <label class="form-label">Effective Date <span class="req">*</span></label>
-                                    <SfDatePicker TValue="DateTime" @bind-Value="_mgrEffectiveDt" />
+                                    <TdoDatePicker TValue="DateTime" @bind-Value="_mgrEffectiveDt" />
                                 </div>
                                 <div class="form-field form-field-full">
                                     <label class="form-label">Notes (optional)</label>
@@ -371,7 +371,7 @@ else
                                     </div>
                                     <div>
                                         <label class="form-label">Date of birth <span class="req">*</span></label>
-                                        <SfDatePicker TValue="DateTime" @bind-Value="_profDob" />
+                                        <TdoDatePicker TValue="DateTime" @bind-Value="_profDob" DefaultToTdo="false" />
                                     </div>
                                 </div>
                                 <div class="form-row form-row--2col">
@@ -468,7 +468,7 @@ else
                                 <p class="form-section-label" style="margin-top:var(--space-3)">Date of birth</p>
                                 <div class="form-row">
                                     <label class="form-label">Date of birth</label>
-                                    <SfDatePicker TValue="DateTime" @bind-Value="_crDob" />
+                                    <TdoDatePicker TValue="DateTime" @bind-Value="_crDob" DefaultToTdo="false" />
                                 </div>
                                 <p class="form-section-label" style="margin-top:var(--space-3)">National identifier</p>
                                 <div class="form-row form-row--2col">
@@ -974,11 +974,11 @@ else
                                             </div>
                                             <div class="form-field">
                                                 <label class="form-label">Start Date</label>
-                                                <SfDatePicker TValue="DateTime" @bind-Value="_newLeaveStartDt" />
+                                                <TdoDatePicker TValue="DateTime" @bind-Value="_newLeaveStartDt" />
                                             </div>
                                             <div class="form-field">
                                                 <label class="form-label">End Date</label>
-                                                <SfDatePicker TValue="DateTime" @bind-Value="_newLeaveEndDt" />
+                                                <TdoDatePicker TValue="DateTime" @bind-Value="_newLeaveEndDt" />
                                             </div>
                                             <div class="form-field form-field-full">
                                                 <label class="form-label">Notes (optional)</label>
@@ -1092,11 +1092,11 @@ else
                                             </div>
                                             <div class="form-field">
                                                 <label class="form-label">Effective Date</label>
-                                                <SfDatePicker TValue="DateTime" @bind-Value="_uploadEffectiveDt" />
+                                                <TdoDatePicker TValue="DateTime" @bind-Value="_uploadEffectiveDt" />
                                             </div>
                                             <div class="form-field">
                                                 <label class="form-label">Expiration Date (optional)</label>
-                                                <SfDatePicker TValue="DateTime?" @bind-Value="_uploadExpirationDt" ShowClearButton="true" />
+                                                <TdoDatePicker TValue="DateTime?" @bind-Value="_uploadExpirationDt" ShowClearButton="true" DefaultToTdo="false" />
                                             </div>
                                             <div class="form-field form-field-full">
                                                 <label class="form-label">File</label>
@@ -1302,7 +1302,7 @@ else
                                 {
                                     <div class="inline-form" style="margin-top:var(--space-3)">
                                         <label class="form-label">Completion Date</label>
-                                        <SfDatePicker TValue="DateTime" @bind-Value="_completionDt" Width="160px" />
+                                        <TdoDatePicker TValue="DateTime" @bind-Value="_completionDt" Width="160px" />
                                         <button class="btn-primary btn-sm"
                                                 @onclick="() => ConfirmCompleteAsync(_completingTaskId.Value)">Confirm</button>
                                         <button class="btn-secondary btn-sm"
@@ -2103,7 +2103,7 @@ else
         _txfrNewDeptId     = _employment?.PrimaryDepartmentId   ?? Guid.Empty;
         _txfrNewLocationId = _employment?.PrimaryWorkLocationId ?? Guid.Empty;
         _txfrNewJobId      = "";
-        _txfrEffectiveDt   = DateTime.Today;
+        _txfrEffectiveDt   = TemporalContext.GetOperativeDate();
         _txfrReasonCode    = "";
         _txfrNotes         = null;
         _txfrError         = null;
@@ -2164,7 +2164,7 @@ else
     private async Task BeginChangeManager()
     {
         _mgrNewManagerId = "";
-        _mgrEffectiveDt  = DateTime.Today;
+        _mgrEffectiveDt  = TemporalContext.GetOperativeDate();
         _mgrNotes        = null;
         _mgrError        = null;
         _actionMode      = ActionMode.ChangeManager;

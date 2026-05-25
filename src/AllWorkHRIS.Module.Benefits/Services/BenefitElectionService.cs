@@ -1,6 +1,7 @@
 using System.Data;
 using AllWorkHRIS.Core.Data;
 using AllWorkHRIS.Core.Events;
+using AllWorkHRIS.Core.Temporal;
 using AllWorkHRIS.Module.Benefits.Commands;
 using AllWorkHRIS.Module.Benefits.Domain.Elections;
 using AllWorkHRIS.Module.Benefits.Repositories;
@@ -14,6 +15,7 @@ public sealed class BenefitElectionService : IBenefitElectionService
     private readonly IDeductionRepository             _deductionRepository;
     private readonly IConnectionFactory               _connectionFactory;
     private readonly IEventPublisher                  _eventPublisher;
+    private readonly ITemporalContext                 _temporalContext;
     private readonly ILogger<BenefitElectionService>  _logger;
 
     public BenefitElectionService(
@@ -21,12 +23,14 @@ public sealed class BenefitElectionService : IBenefitElectionService
         IDeductionRepository                 deductionRepository,
         IConnectionFactory                   connectionFactory,
         IEventPublisher                      eventPublisher,
+        ITemporalContext                     temporalContext,
         ILogger<BenefitElectionService>      logger)
     {
         _electionRepository  = electionRepository;
         _deductionRepository = deductionRepository;
         _connectionFactory   = connectionFactory;
         _eventPublisher      = eventPublisher;
+        _temporalContext     = temporalContext;
         _logger              = logger;
     }
 
@@ -211,7 +215,7 @@ public sealed class BenefitElectionService : IBenefitElectionService
         var election = await _electionRepository.GetByIdAsync(command.ElectionId, ct)
             ?? throw new InvalidOperationException($"Election {command.ElectionId} not found.");
 
-        var today   = DateOnly.FromDateTime(DateTime.Today);
+        var today   = DateOnly.FromDateTime(_temporalContext.GetOperativeDate());
         var endDate = command.EffectiveEndDate
             ?? (election.EffectiveStartDate > today
                 ? election.EffectiveStartDate   // PENDING: close on the day it would have opened

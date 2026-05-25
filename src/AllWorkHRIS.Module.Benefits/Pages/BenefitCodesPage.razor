@@ -3,12 +3,17 @@
 @rendermode InteractiveServer
 @attribute [Authorize(Roles = "HrisAdmin,BenefitsAdmin")]
 @using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
 @using AllWorkHRIS.Core.Data
+@using AllWorkHRIS.Core.Security
+@using AllWorkHRIS.Core.Temporal
 @using AllWorkHRIS.Module.Benefits.Repositories
 @inject IDeductionRepository              CodeRepo
 @inject IDeductionEmployerMatchRepository MatchRepo
 @inject IDeductionRateTableRepository     RateTableRepo
 @inject IConnectionFactory                ConnectionFactory
+@inject ITemporalContext                  TemporalContext
+@inject AuthenticationStateProvider       AuthState
 @using Syncfusion.Blazor.Grids
 @using Syncfusion.Blazor.Inputs
 @using Syncfusion.Blazor.DropDowns
@@ -22,7 +27,7 @@
         <h2 class="page-title">Benefit Plans</h2>
         @if (!_showForm)
         {
-            <button class="btn btn-primary" @onclick="ShowAddForm">+ Add Plan</button>
+            <button class="btn btn-primary" @onclick="ShowAddForm" disabled="@_rateTableOpen">+ Add Plan</button>
         }
     </div>
 
@@ -58,15 +63,17 @@
                 <GridColumn HeaderText="Effective End" Width="130">
                     <Template>@{ var dc = (Deduction)context; }@(dc.EffectiveEndDate?.ToString("yyyy-MM-dd") ?? "—")</Template>
                 </GridColumn>
-                <GridColumn HeaderText="" Width="200" AllowSorting="false">
+                <GridColumn HeaderText="" Width="250" AllowSorting="false" TextAlign="TextAlign.Right">
                     <Template>
                         @{ var dc = (Deduction)context; }
-                        <button class="btn btn-sm btn-ghost" @onclick="() => StartEdit(dc)">Edit</button>
-                        <button class="btn btn-sm btn-ghost" @onclick="() => OpenMatchRules(dc)">Match Rules</button>
-                        @if (dc.CalculationMode == CalculationMode.CoverageBased)
-                        {
-                            <button class="btn btn-sm btn-ghost" @onclick="() => OpenRateTable(dc)">Rate Table</button>
-                        }
+                        <div style="display:flex;justify-content:flex-end;gap:.25rem;">
+                            <button class="btn btn-sm btn-ghost" @onclick="() => StartEdit(dc)" disabled="@_rateTableOpen">Edit</button>
+                            <button class="btn btn-sm btn-ghost" @onclick="() => OpenMatchRules(dc)" disabled="@_rateTableOpen">Match Rules</button>
+                            @if (dc.CalculationMode == CalculationMode.CoverageBased)
+                            {
+                                <button class="btn btn-sm btn-ghost" @onclick="() => OpenRateTable(dc)" disabled="@_rateTableOpen">Rate Table</button>
+                            }
+                        </div>
                     </Template>
                 </GridColumn>
             </GridColumns>
@@ -76,7 +83,7 @@
     @* ── Deduction add/edit form ─────────────────────────────────── *@
     @if (_showForm)
     {
-        <div class="form-panel">
+        <div class="form-panel" style="max-width: 720px; margin-top: var(--space-6, 1.5rem);">
             <h3 class="form-panel__title">@(_editCode is null ? "Add Benefit Plan" : "Edit Benefit Plan")</h3>
 
             <div class="form-grid">
@@ -105,11 +112,11 @@
                 </div>
                 <div class="form-group">
                     <label class="form-label">Effective Start <span class="required">*</span></label>
-                    <SfDatePicker TValue="DateOnly?" @bind-Value="_formEffectiveStart" Placeholder="MM/DD/YYYY" />
+                    <TdoDatePicker TValue="DateOnly?" @bind-Value="_formEffectiveStart" Placeholder="MM/DD/YYYY" />
                 </div>
                 <div class="form-group">
                     <label class="form-label">Effective End</label>
-                    <SfDatePicker TValue="DateOnly?" @bind-Value="_formEffectiveEnd" Placeholder="MM/DD/YYYY" />
+                    <TdoDatePicker TValue="DateOnly?" @bind-Value="_formEffectiveEnd" Placeholder="MM/DD/YYYY" DefaultToTdo="false" />
                 </div>
                 @if (_editCode is not null)
                 {
@@ -140,7 +147,7 @@
     @* ── Rate table panel ───────────────────────────────────────── *@
     @if (_rateTableDeduction is not null)
     {
-        <div class="form-panel">
+        <div class="form-panel" style="margin-top: var(--space-6, 1.5rem);">
             <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:1rem;">
                 <h3 class="form-panel__title" style="margin:0;">
                     Rate Tables — <samp>@_rateTableDeduction.Code</samp>
@@ -156,7 +163,7 @@
             {
                 @if (_rateTables.Count > 0)
                 {
-                    <SfGrid TValue="DeductionRateTable" DataSource="@_rateTables.ToList()" CssClass="e-gridhover" AllowSorting="true" style="margin-bottom:1rem;">
+                    <SfGrid TValue="DeductionRateTable" DataSource="@_rateTables" CssClass="e-gridhover" AllowSorting="true" style="margin-bottom:1rem;">
                         <GridEvents TValue="DeductionRateTable" DetailsExpanded="OnRateTableRowExpandingAsync" />
                         <GridColumns>
                             <GridColumn HeaderText="Effective From" Width="140">
@@ -202,12 +209,13 @@
                 }
                 else
                 {
+                    <div style="max-width: 720px;">
                     <h4 style="margin-bottom:.75rem;">Add Rate Table</h4>
 
                     <div class="form-grid" style="margin-bottom:1.25rem;">
                         <div class="form-group">
                             <label class="form-label">Effective From <span class="required">*</span></label>
-                            <SfDatePicker TValue="DateOnly?" @bind-Value="_rateFormFrom" Placeholder="MM/DD/YYYY" />
+                            <TdoDatePicker TValue="DateOnly?" @bind-Value="_rateFormFrom" Placeholder="MM/DD/YYYY" />
                             <small class="hint-text">
                                 Must be a future date. Rate changes on or before today could affect
                                 in-progress payroll runs.
@@ -215,7 +223,7 @@
                         </div>
                         <div class="form-group">
                             <label class="form-label">Effective To</label>
-                            <SfDatePicker TValue="DateOnly?" @bind-Value="_rateFormTo" Placeholder="MM/DD/YYYY" />
+                            <TdoDatePicker TValue="DateOnly?" @bind-Value="_rateFormTo" Placeholder="MM/DD/YYYY" DefaultToTdo="false" />
                         </div>
                         <div class="form-group form-group--full">
                             <label class="form-label">Description</label>
@@ -242,11 +250,11 @@
                                     </td>
                                     <td>
                                         <SfNumericTextBox TValue="decimal?" @bind-Value="tier.EmployeeRate"
-                                                          Min="0" Step="0.01m" Placeholder="0.00" Width="110px" />
+                                                          Min="0" Step="0.01m" Placeholder="0.00" Width="160px" />
                                     </td>
                                     <td>
                                         <SfNumericTextBox TValue="decimal?" @bind-Value="tier.EmployerRate"
-                                                          Min="0" Step="0.01m" Placeholder="0.00" Width="110px" />
+                                                          Min="0" Step="0.01m" Placeholder="0.00" Width="160px" />
                                     </td>
                                 </tr>
                             }
@@ -264,6 +272,7 @@
                         </button>
                         <button class="btn btn-ghost" @onclick="CancelRateTableForm">Cancel</button>
                     </div>
+                    </div>
                 }
             }
         </div>
@@ -272,7 +281,7 @@
     @* ── Employer match rules panel ──────────────────────────────── *@
     @if (_matchRulesDeduction is not null)
     {
-        <div class="form-panel">
+        <div class="form-panel" style="margin-top: var(--space-6, 1.5rem);">
             <div class="form-panel__header" style="display:flex;justify-content:space-between;align-items:baseline;">
                 <h3 class="form-panel__title">
                     Employer Match Rules — <samp>@_matchRulesDeduction.Code</samp>
@@ -308,8 +317,13 @@
                             <GridColumn HeaderText="Effective To" Width="130">
                                 <Template>@{ var rule = (DeductionEmployerMatch)context; }@(rule.EffectiveTo?.ToString("yyyy-MM-dd") ?? "—")</Template>
                             </GridColumn>
-                            <GridColumn HeaderText="" Width="90" AllowSorting="false">
-                                <Template>@{ var rule = (DeductionEmployerMatch)context; }<button class="btn btn-sm btn-ghost" @onclick="() => StartEditMatch(rule)">Edit</button></Template>
+                            <GridColumn HeaderText="" Width="90" AllowSorting="false" TextAlign="TextAlign.Right">
+                                <Template>
+                                    @{ var rule = (DeductionEmployerMatch)context; }
+                                    <div style="display:flex;justify-content:flex-end;">
+                                        <button class="btn btn-sm btn-ghost" @onclick="() => StartEditMatch(rule)">Edit</button>
+                                    </div>
+                                </Template>
                             </GridColumn>
                         </GridColumns>
                     </SfGrid>
@@ -325,6 +339,7 @@
                 }
                 else
                 {
+                    <div style="max-width: 720px;">
                     <h4 style="margin-bottom:.75rem;">@(_editMatch is null ? "Add Match Rule" : "Edit Match Rule")</h4>
 
                     <div class="form-grid">
@@ -355,11 +370,11 @@
                         </div>
                         <div class="form-group">
                             <label class="form-label">Effective From <span class="required">*</span></label>
-                            <SfDatePicker TValue="DateOnly?" @bind-Value="_matchFormFrom" Placeholder="MM/DD/YYYY" />
+                            <TdoDatePicker TValue="DateOnly?" @bind-Value="_matchFormFrom" Placeholder="MM/DD/YYYY" />
                         </div>
                         <div class="form-group">
                             <label class="form-label">Effective To</label>
-                            <SfDatePicker TValue="DateOnly?" @bind-Value="_matchFormTo" Placeholder="MM/DD/YYYY" />
+                            <TdoDatePicker TValue="DateOnly?" @bind-Value="_matchFormTo" Placeholder="MM/DD/YYYY" DefaultToTdo="false" />
                         </div>
                     </div>
 
@@ -373,6 +388,7 @@
                             @(_matchSaving ? "Saving…" : "Save")
                         </button>
                         <button class="btn btn-ghost" @onclick="CancelMatchForm">Cancel</button>
+                    </div>
                     </div>
                 }
             }
@@ -405,6 +421,11 @@
     private List<DeductionRateTable>                    _rateTables       = [];
     private bool                                        _rateTableLoading;
     private Dictionary<Guid, List<DeductionRateEntry>>  _tableEntries     = new();
+
+    // True whenever the Rate Tables panel is open — used to disable other
+    // row actions (+Add Plan, Edit, Match Rules, Rate Table) so the user
+    // can't trigger conflicting state transitions mid-edit.
+    private bool _rateTableOpen => _rateTableDeduction is not null;
 
     private bool            _showRateTableForm;
     private DateOnly?       _rateFormFrom;
@@ -463,7 +484,7 @@
         _formCode = _formDescription = _formTaxTreatment = string.Empty;
         _formCalculationMode = "FIXED_PER_PERIOD";
         _formStatus          = "ACTIVE";
-        _formEffectiveStart  = DateOnly.FromDateTime(DateTime.Today);
+        _formEffectiveStart  = DateOnly.FromDateTime(TemporalContext.GetOperativeDate());
         _formEffectiveEnd    = null;
         _formError = null;
         _showForm  = true;
@@ -500,7 +521,10 @@
         _saving = true; _formError = null;
         try
         {
-            var now = DateTimeOffset.UtcNow;
+            var now   = DateTimeOffset.UtcNow;
+            var auth  = await AuthState.GetAuthenticationStateAsync();
+            var actor = auth.User.GetDisplayName();
+
             if (_editCode is null)
             {
                 var newCode = new Deduction
@@ -513,7 +537,9 @@
                     Status             = "ACTIVE",
                     EffectiveStartDate = startDate,
                     EffectiveEndDate   = endDate,
+                    CreatedBy          = actor,
                     CreatedAt          = now,
+                    LastUpdatedBy      = actor,
                     UpdatedAt          = now
                 };
                 await CodeRepo.InsertAsync(newCode);
@@ -522,11 +548,13 @@
             {
                 var updated = _editCode with
                 {
-                    Description     = _formDescription.Trim(),
-                    CalculationMode = _formCalculationMode,
-                    Status          = _formStatus,
-                    EffectiveEndDate = endDate,
-                    UpdatedAt       = now
+                    Description        = _formDescription.Trim(),
+                    CalculationMode    = _formCalculationMode,
+                    Status             = _formStatus,
+                    EffectiveStartDate = startDate,
+                    EffectiveEndDate   = endDate,
+                    LastUpdatedBy      = actor,
+                    UpdatedAt          = now
                 };
                 await CodeRepo.UpdateAsync(updated);
             }
@@ -581,7 +609,7 @@
 
     private void ShowAddRateTableForm()
     {
-        _rateFormFrom        = DateOnly.FromDateTime(DateTime.Today);
+        _rateFormFrom        = DateOnly.FromDateTime(TemporalContext.GetOperativeDate());
         _rateFormTo          = null;
         _rateFormDescription = string.Empty;
         _rateFormTiers       = CoverageTierDefs
@@ -597,7 +625,7 @@
     {
         if (_rateTableDeduction is null) return;
         if (_rateFormFrom is null) { _rateFormError = "Effective From is required."; return; }
-        if (_rateFormFrom.Value <= DateOnly.FromDateTime(DateTime.Today))
+        if (_rateFormFrom.Value <= DateOnly.FromDateTime(TemporalContext.GetOperativeDate()))
         { _rateFormError = "Effective From must be a future date. Rate changes on or before today could affect in-progress payroll runs."; return; }
         if (_rateFormTo.HasValue && _rateFormTo.Value < _rateFormFrom.Value)
         { _rateFormError = "Effective To must be on or after Effective From."; return; }
@@ -680,7 +708,7 @@
         _matchFormCapPct    = null;
         _matchFormCapAnnual = null;
         _matchFormType      = "PER_PERIOD";
-        _matchFormFrom      = DateOnly.FromDateTime(DateTime.Today);
+        _matchFormFrom      = DateOnly.FromDateTime(TemporalContext.GetOperativeDate());
         _matchFormTo        = null;
         _matchFormError     = null;
         _showMatchForm      = true;

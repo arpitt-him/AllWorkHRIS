@@ -22,9 +22,6 @@ public sealed record AccumulatorEmployeeBalanceRow(
     Guid     EmploymentId,
     string   EmployeeNumber,
     string   EmployeeName,
-    Guid     AccumulatorDefinitionId,
-    string   DefinitionCode,
-    string   DefinitionName,
     decimal  YtdBalance,
     decimal? CapAmount,
     DateOnly LastUpdated
@@ -36,6 +33,7 @@ public sealed record AccumulatorImpactRow(
     string   RunLabel,
     DateOnly RunDate,
     string   ImpactType,
+    string   ComponentName,
     decimal  DeltaAmount,
     decimal  RunningBalance,
     bool     IsRetroactive,
@@ -166,7 +164,8 @@ public sealed class AccumulatorQueryService
         return $"PY {year}–{year + 1}";
     }
 
-    /// Returns one balance row per employee for employee-scoped families.
+    /// Returns one balance row per employee, rolled up across every definition in
+    /// the family (e.g. Medicare + Additional Medicare collapse into a single total).
     public async Task<IReadOnlyList<AccumulatorEmployeeBalanceRow>> GetEmployeeBalancesAsync(
         int familyId, Guid legalEntityId, int year)
     {
@@ -174,11 +173,8 @@ public sealed class AccumulatorQueryService
             SELECT e.employment_id,
                    e.employee_number,
                    p.legal_first_name || ' ' || p.legal_last_name AS employee_name,
-                   ad.accumulator_definition_id,
-                   ad.accumulator_code,
-                   ad.accumulator_name,
-                   ad.cap_amount,
-                   SUM(ab.current_value)        AS ytd_balance,
+                   SUM(ab.current_value)         AS ytd_balance,
+                   MAX(ad.cap_amount)            AS cap_amount,
                    MAX(ab.last_update_timestamp) AS last_updated
             FROM   accumulator_balance ab
             JOIN   accumulator_definition ad ON ad.accumulator_definition_id = ab.accumulator_definition_id
@@ -190,8 +186,7 @@ public sealed class AccumulatorQueryService
               AND  pp.period_year           = @Year
               AND  ab.participant_id IS NOT NULL
             GROUP BY e.employment_id, e.employee_number,
-                     p.legal_first_name, p.legal_last_name,
-                     ad.accumulator_definition_id, ad.accumulator_code, ad.accumulator_name
+                     p.legal_first_name, p.legal_last_name
             ORDER BY e.employee_number
             """;
         using var conn = _connectionFactory.CreateConnection();
@@ -202,9 +197,6 @@ public sealed class AccumulatorQueryService
             (Guid)r.employment_id,
             (string)r.employee_number,
             (string)r.employee_name,
-            (Guid)r.accumulator_definition_id,
-            (string)r.accumulator_code,
-            (string)r.accumulator_name,
             (decimal)r.ytd_balance,
             r.cap_amount as decimal?,
             ToDateOnly(r.last_updated)
@@ -221,12 +213,14 @@ public sealed class AccumulatorQueryService
                    pr.pay_date              AS run_date,
                    pr.run_description,
                    pp.period_number,
+                   ad.accumulator_name      AS component_name,
                    ai.delta_value,
                    ai.retroactive_flag,
                    ai.reversal_flag,
                    ai.correction_flag,
                    ai.notes
             FROM   accumulator_impact ai
+            JOIN   accumulator_definition ad ON ad.accumulator_definition_id = ai.accumulator_definition_id
             JOIN   payroll_run pr    ON pr.run_id    = ai.payroll_run_id
             JOIN   payroll_period pp ON pp.period_id = pr.period_id
             WHERE  ai.accumulator_definition_id = @DefinitionId
@@ -336,6 +330,7 @@ public sealed class AccumulatorQueryService
                    pr.pay_date              AS run_date,
                    pr.run_description,
                    pp.period_number,
+                   ad.accumulator_name      AS component_name,
                    ai.delta_value,
                    ai.retroactive_flag,
                    ai.reversal_flag,
@@ -389,6 +384,7 @@ public sealed class AccumulatorQueryService
                 runLabel,
                 runDate,
                 type,
+                (string)r.component_name,
                 delta,
                 running,
                 isRetro,

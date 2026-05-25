@@ -1,6 +1,7 @@
 using AllWorkHRIS.Core.Data;
 using AllWorkHRIS.Core.Events;
 using AllWorkHRIS.Core.Pipeline;
+using AllWorkHRIS.Core.Temporal;
 using AllWorkHRIS.Module.Benefits.Commands;
 using AllWorkHRIS.Module.Benefits.Domain.Codes;
 using AllWorkHRIS.Module.Benefits.Domain.Elections;
@@ -58,7 +59,8 @@ public sealed class BenefitsGateTests : IAsyncLifetime
         var nullEventPublisher = new InProcessEventBus();
         _electionService = new BenefitElectionService(
             _electionRepo, _codeRepo, _connectionFactory,
-            nullEventPublisher, NullLogger<BenefitElectionService>.Instance);
+            nullEventPublisher, new SystemTemporalContext(),
+            NullLogger<BenefitElectionService>.Instance);
 
         var rateTableRepo  = new DeductionRateTableRepository(_connectionFactory);
         var matchRepo      = new DeductionEmployerMatchRepository(_connectionFactory);
@@ -92,7 +94,7 @@ public sealed class BenefitsGateTests : IAsyncLifetime
                 new { Ids = _insertedElections.ToArray() });
         if (_insertedCodes.Count > 0)
             await conn.ExecuteAsync(
-                "DELETE FROM deduction WHERE code = ANY(@Codes)",
+                "DELETE FROM benefit_deduction WHERE code = ANY(@Codes)",
                 new { Codes = _insertedCodes.ToArray() });
     }
 
@@ -114,7 +116,9 @@ public sealed class BenefitsGateTests : IAsyncLifetime
             TaxTreatment       = taxTreatment,
             Status             = "ACTIVE",
             EffectiveStartDate = new DateOnly(2020, 1, 1),
+            CreatedBy          = "TEST",
             CreatedAt          = DateTimeOffset.UtcNow,
+            LastUpdatedBy      = "TEST",
             UpdatedAt          = DateTimeOffset.UtcNow
         });
         _insertedCodes.Add(code);

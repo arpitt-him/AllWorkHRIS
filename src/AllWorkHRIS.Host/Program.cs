@@ -63,9 +63,27 @@ EnvironmentValidator.ValidateRequired(
 
 // ---------------------------------------------------------------------------
 // 3. Discover modules via MEF
+//    Modules:Enabled is a comma-separated string controlling which modules
+//    are composed at startup. (A string is used rather than a JSON array
+//    because IConfiguration cannot distinguish a missing key from an empty
+//    array — both produce no entry in the underlying flat key-value map.)
+//      - Key missing entirely    -> load every discovered module (back-compat)
+//      - Empty string ""         -> load none (HRIS-core only)
+//      - "Payroll,Tax,Benefits"  -> load only those short names
+//    MODULES_ENABLED env var (same format) overrides the config value.
 // ---------------------------------------------------------------------------
 var modulesPath = Environment.GetEnvironmentVariable("MODULES_PATH") ?? "./modules";
-var platformModules = ModuleDiscovery.DiscoverModules(modulesPath);
+
+IReadOnlyCollection<string>? enabledModules = null;
+var rawEnabled = Environment.GetEnvironmentVariable("MODULES_ENABLED")
+              ?? builder.Configuration["Modules:Enabled"];
+if (rawEnabled is not null)
+{
+    enabledModules = rawEnabled
+        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+}
+
+var platformModules = ModuleDiscovery.DiscoverModules(modulesPath, enabledModules);
 
 // ---------------------------------------------------------------------------
 // 3b. Serilog — replace default logging before any services are registered
@@ -303,6 +321,10 @@ builder.Host.ConfigureContainer<ContainerBuilder>(autofacBuilder =>
 
     autofacBuilder.RegisterType<NullEmploymentJurisdictionLookup>()
                   .As<IEmploymentJurisdictionLookup>()
+                  .SingleInstance();
+
+    autofacBuilder.RegisterType<NullPayrollHoursSource>()
+                  .As<IPayrollHoursSource>()
                   .SingleInstance();
 
     autofacBuilder.RegisterType<AllWorkHRIS.Host.Payroll.Tax.TaxProfileRepository>()

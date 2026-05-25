@@ -34,6 +34,11 @@
     --sidebar-item-hover:  #3D5464;
     --topbar-bg:           #FFFFFF;
     --topbar-height:       56px;
+    /* Height of the PayrollShell / HrisShell tab strip rendered above @Body.
+       Pages that size an inner region to the viewport must subtract this so they
+       don't overflow .shell-content and force a page-level scrollbar. Set a hair
+       above the strip's natural height (~41px) so the subtraction never under-shoots. */
+    --payroll-tabs-height: 45px;
     --content-bg:          #F7F9FC;
 
     /* Typography */

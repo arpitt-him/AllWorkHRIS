@@ -8,9 +8,11 @@
 @using Syncfusion.Blazor.Inputs
 @using Syncfusion.Blazor.DropDowns
 @using Syncfusion.Blazor.Calendars
+@using AllWorkHRIS.Core.Temporal
 @inject AuthenticationStateProvider AuthProvider
 @inject TimeAttendanceQueryService  QueryService
 @inject ITimeEntryService           TimeEntryService
+@inject ITemporalContext            TemporalContext
 
 <PageTitle>My Timecard — AllWork HRIS</PageTitle>
 
@@ -156,7 +158,7 @@
 
                 <div class="form-group">
                     <label class="form-label">Work Date</label>
-                    <SfDatePicker TValue="DateOnly" @bind-Value="_entryWorkDate"
+                    <TdoDatePicker TValue="DateOnly" @bind-Value="_entryWorkDate"
                                   Placeholder="MM/DD/YYYY"
                                   Min="@((_selectedPeriod?.StartDate ?? DateOnly.MinValue).ToDateTime(TimeOnly.MinValue))"
                                   Max="@((_selectedPeriod?.EndDate   ?? DateOnly.MaxValue).ToDateTime(TimeOnly.MinValue))" />
@@ -238,7 +240,7 @@
 
     // ── Entry form ──────────────────────────────────────────────────────────
     private bool      _showEntryPanel;
-    private DateOnly  _entryWorkDate  = DateOnly.FromDateTime(DateTime.Today);
+    private DateOnly  _entryWorkDate;
     private string    _entryCategory  = "REGULAR";
     private decimal   _entryDuration  = 8m;
     private TimeOnly? _entryStartTime;
@@ -309,7 +311,7 @@
 
     private void OpenAddEntry()
     {
-        _entryWorkDate  = _selectedPeriod?.StartDate ?? DateOnly.FromDateTime(DateTime.Today);
+        _entryWorkDate  = _selectedPeriod?.StartDate ?? DateOnly.FromDateTime(TemporalContext.GetOperativeDate());
         _entryCategory  = "REGULAR";
         _entryDuration  = 8m;
         _entryStartTime = default;

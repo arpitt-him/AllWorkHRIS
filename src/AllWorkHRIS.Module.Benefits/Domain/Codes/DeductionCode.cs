@@ -16,7 +16,9 @@ public sealed record Deduction
     public string?        AgeAsOfRule        { get; init; }
     public DateOnly       EffectiveStartDate { get; init; }
     public DateOnly?      EffectiveEndDate   { get; init; }
+    public string         CreatedBy          { get; init; } = string.Empty;
     public DateTimeOffset CreatedAt          { get; init; }
+    public string         LastUpdatedBy      { get; init; } = string.Empty;
     public DateTimeOffset UpdatedAt          { get; init; }
 
     public bool IsActive(DateOnly asOf) =>

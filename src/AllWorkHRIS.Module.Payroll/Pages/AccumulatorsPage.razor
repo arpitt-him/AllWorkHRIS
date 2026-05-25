@@ -1,7 +1,11 @@
 @page "/payroll/accumulators"
 @layout PayrollShell
 @rendermode InteractiveServer
+@using System.Text
 @using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Hosting
+@using Microsoft.Extensions.Hosting
+@using Microsoft.JSInterop
 @using AllWorkHRIS.Core.Temporal
 @using AllWorkHRIS.Host.SharedUI
 @using AllWorkHRIS.Module.Payroll.Queries
@@ -13,6 +17,8 @@
 @inject AccumulatorQueryService  QueryService
 @inject IHrisSessionState        SessionState
 @inject ITemporalContext         TemporalContext
+@inject IJSRuntime               JS
+@inject IWebHostEnvironment      Env
 
 @implements IDisposable
 
@@ -144,10 +150,15 @@
                             <div class="panel-card no-pad">
                                 <SfGrid TValue="AccumulatorEmployeeBalanceRow"
                                         DataSource="@_employeeBalances"
-                                        AllowPaging="true"
+                                        AllowPaging="false"
                                         AllowSorting="true"
                                         CssClass="e-gridhover">
-                                    <GridPageSettings PageSize="25" />
+                                    @* Paging stays OFF on this grid: AllowPaging + DetailTemplate together
+                                       trigger Syncfusion's spurious right-edge scrollbar (KI-1, root cause
+                                       isolated 2026-05-25). Plain paginated grids elsewhere are fine. To
+                                       reclaim paging here, replace the inline DetailTemplate drill-down with
+                                       an on-click side/below panel (as the By-Employee view already does). *@
+                                    @* <GridPageSettings PageSize="25" /> *@
                                     <GridEvents TValue="AccumulatorEmployeeBalanceRow"
                                                 DetailsExpanded="OnBalanceRowExpandingAsync" />
                                     <GridColumns>
@@ -161,16 +172,7 @@
                                                 @Fmt(r.YtdBalance)
                                             </Template>
                                         </GridColumn>
-                                        <GridColumn HeaderText="Cap" TextAlign="TextAlign.Right" Width="110">
-                                            <Template>
-                                                @{ var r = (AccumulatorEmployeeBalanceRow)context; }
-                                                @if (r.CapAmount.HasValue)
-                                                { <span>@Fmt(r.CapAmount.Value)</span> }
-                                                else
-                                                { <span class="text-muted">—</span> }
-                                            </Template>
-                                        </GridColumn>
-                                        <GridColumn HeaderText="Cap Remaining" TextAlign="TextAlign.Right" Width="160">
+                                        <GridColumn HeaderText="Amount Left to Cap" TextAlign="TextAlign.Right" Width="170">
                                             <Template>
                                                 @{ var r = (AccumulatorEmployeeBalanceRow)context; }
                                                 @if (!r.CapAmount.HasValue)
@@ -223,6 +225,25 @@
                                         </DetailTemplate>
                                     </GridTemplates>
                                 </SfGrid>
+                                <div class="accum-grid-footer">
+                                    <button class="btn-link" @onclick="ExportFamilyBalancesCsvAsync">Download CSV</button>
+                                    @if (!Env.IsProduction())
+                                    {
+                                        @if (_familyBalancesCopiedRecent)
+                                        {
+                                            <span class="copy-confirmed">
+                                                <span class="e-icons e-circle-check"></span>
+                                                <span class="copy-confirmed__bubble">copied</span>
+                                            </span>
+                                        }
+                                        else
+                                        {
+                                            <button type="button" class="copy-btn" @onclick="CopyFamilyBalancesTsvAsync" title="Copy TSV">
+                                                <span class="e-icons e-copy"></span>
+                                            </button>
+                                        }
+                                    }
+                                </div>
                             </div>
                         }
 
@@ -230,7 +251,9 @@
                         @if (_resetHistory.Count > 0)
                         {
                             <div class="panel-card">
-                                <div class="section-subheader">Reset History</div>
+                                <div class="section-subheader">
+                                    <span>Reset History</span>
+                                </div>
                                 <table class="config-table">
                                     <thead>
                                         <tr>
@@ -250,6 +273,25 @@
                                         }
                                     </tbody>
                                 </table>
+                                <div class="accum-grid-footer">
+                                    <button class="btn-link" @onclick="ExportResetHistoryCsvAsync">Download CSV</button>
+                                    @if (!Env.IsProduction())
+                                    {
+                                        @if (_resetHistoryCopiedRecent)
+                                        {
+                                            <span class="copy-confirmed">
+                                                <span class="e-icons e-circle-check"></span>
+                                                <span class="copy-confirmed__bubble">copied</span>
+                                            </span>
+                                        }
+                                        else
+                                        {
+                                            <button type="button" class="copy-btn" @onclick="CopyResetHistoryTsvAsync" title="Copy TSV">
+                                                <span class="e-icons e-copy"></span>
+                                            </button>
+                                        }
+                                    }
+                                </div>
                             </div>
                         }
                     }
@@ -317,7 +359,7 @@
                             AllowSorting="true"
                             CssClass="e-gridhover">
                         <GridEvents TValue="AccumulatorEmployeeSummaryRow"
-                                    RecordClick="OnEmployeeFamilyClickAsync" />
+                                    OnRecordClick="OnEmployeeFamilyClickAsync" />
                         <GridColumns>
                             <GridColumn Field="@nameof(AccumulatorEmployeeSummaryRow.FamilyLabel)"
                                         HeaderText="Family" />
@@ -335,7 +377,7 @@
                                     @Fmt(r.YtdBalance)
                                 </Template>
                             </GridColumn>
-                            <GridColumn HeaderText="Cap Remaining" TextAlign="TextAlign.Right" Width="150">
+                            <GridColumn HeaderText="Amount Left to Cap" TextAlign="TextAlign.Right" Width="170">
                                 <Template>
                                     @{ var r = (AccumulatorEmployeeSummaryRow)context; }
                                     @if (r.CapAmount.HasValue)
@@ -366,6 +408,25 @@
                             </GridColumn>
                         </GridColumns>
                     </SfGrid>
+                    <div class="accum-grid-footer">
+                        <button class="btn-link" @onclick="ExportEmployeeSummaryCsvAsync">Download CSV</button>
+                        @if (!Env.IsProduction())
+                        {
+                            @if (_employeeSummaryCopiedRecent)
+                            {
+                                <span class="copy-confirmed">
+                                    <span class="e-icons e-circle-check"></span>
+                                    <span class="copy-confirmed__bubble">copied</span>
+                                </span>
+                            }
+                            else
+                            {
+                                <button type="button" class="copy-btn" @onclick="CopyEmployeeSummaryTsvAsync" title="Copy TSV">
+                                    <span class="e-icons e-copy"></span>
+                                </button>
+                            }
+                        }
+                    </div>
                 }
             }
         </div>
@@ -385,6 +446,28 @@
                 else
                 {
                     @RenderImpactGrid(_drillImpacts)
+                }
+                @if (!_loadingDrillImpacts && _drillImpacts.Count > 0)
+                {
+                    <div class="accum-grid-footer">
+                        <button class="btn-link" @onclick="ExportEmployeeImpactTrailCsvAsync">Download CSV</button>
+                        @if (!Env.IsProduction())
+                        {
+                            @if (_impactTrailCopiedRecent)
+                            {
+                                <span class="copy-confirmed">
+                                    <span class="e-icons e-circle-check"></span>
+                                    <span class="copy-confirmed__bubble">copied</span>
+                                </span>
+                            }
+                            else
+                            {
+                                <button type="button" class="copy-btn" @onclick="CopyEmployeeImpactTrailTsvAsync" title="Copy TSV">
+                                    <span class="e-icons e-copy"></span>
+                                </button>
+                            }
+                        }
+                    </div>
                 }
             </div>
         }
@@ -420,6 +503,12 @@
     private AccumulatorEmployeeSummaryRow?                 _drillFamily;
     private IReadOnlyList<AccumulatorImpactRow>            _drillImpacts          = [];
     private bool                                           _loadingDrillImpacts   = false;
+
+    // Dev/test Copy-TSV confirmation flags — toggle true briefly after a successful copy.
+    private bool _familyBalancesCopiedRecent;
+    private bool _resetHistoryCopiedRecent;
+    private bool _employeeSummaryCopiedRecent;
+    private bool _impactTrailCopiedRecent;
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -515,8 +604,8 @@
         var row = args.Data;
         if (_impactCache.ContainsKey(row.EmploymentId)) return;
 
-        var impacts = await QueryService.GetImpactTrailAsync(
-            row.AccumulatorDefinitionId, row.EmploymentId, _selectedYear);
+        var impacts = await QueryService.GetEmployeeFamilyImpactAsync(
+            row.EmploymentId, _selectedFamily!.FamilyId, _selectedYear);
         _impactCache[row.EmploymentId] = impacts;
 
         if (!_hasRetroactive && impacts.Any(i => i.IsRetroactive || i.IsReversal || i.IsCorrection))
@@ -649,7 +738,7 @@
 
         __builder.OpenElement(22, "thead");
         __builder.OpenElement(23, "tr");
-        foreach (var h in new[] { "Run", "Pay Date", "Type", "Amount", "Running Balance", "Notes" })
+        foreach (var h in new[] { "Run", "Pay Date", "Component", "Type", "Amount", "Running Balance", "Notes" })
         {
             __builder.OpenElement(24, "th");
             if (h is "Amount" or "Running Balance") __builder.AddAttribute(25, "class", "text-right");
@@ -674,6 +763,11 @@
             // Pay date
             __builder.OpenElement(35, "td");
             __builder.AddContent(36, imp.RunDate.ToString("MMM d, yyyy"));
+            __builder.CloseElement();
+
+            // Component (which accumulator definition within the family this impact hit)
+            __builder.OpenElement(60, "td");
+            __builder.AddContent(61, imp.ComponentName);
             __builder.CloseElement();
 
             // Type badge
@@ -741,6 +835,192 @@
 
     private static string Fmt(decimal v) =>
         v < 0 ? $"({Math.Abs(v):N2})" : v.ToString("N2");
+
+    // ── CSV exports ─────────────────────────────────────────────────────────────
+
+    private async Task ExportFamilyBalancesCsvAsync()
+    {
+        if (_selectedFamily is null) return;
+        var sb = new StringBuilder();
+        sb.AppendLine("Employee #,Employee,YTD Balance,Cap,Amount Left to Cap,Last Updated");
+        foreach (var r in _employeeBalances)
+        {
+            var capStr = r.CapAmount.HasValue ? r.CapAmount.Value.ToString("F2") : "";
+            var remStr = r.CapAmount.HasValue ? (r.CapAmount.Value - r.YtdBalance).ToString("F2") : "";
+            sb.AppendLine(string.Join(",",
+                Csv(r.EmployeeNumber),
+                Csv(r.EmployeeName),
+                r.YtdBalance.ToString("F2"),
+                capStr,
+                remStr,
+                r.LastUpdated.ToString("yyyy-MM-dd")));
+        }
+        await DownloadCsvAsync($"accumulators-family-{_selectedFamily.Code}-{_selectedYear}.csv", sb.ToString());
+    }
+
+    private async Task ExportResetHistoryCsvAsync()
+    {
+        if (_selectedFamily is null) return;
+        var sb = new StringBuilder();
+        sb.AppendLine("Period,Closing Balance,Last Updated");
+        foreach (var h in _resetHistory)
+            sb.AppendLine($"{h.PeriodYear},{h.ClosingBalance:F2},{h.LastUpdatedDate:yyyy-MM-dd}");
+        await DownloadCsvAsync($"accumulators-reset-history-{_selectedFamily.Code}.csv", sb.ToString());
+    }
+
+    private async Task ExportEmployeeSummaryCsvAsync()
+    {
+        if (_selectedEmployee is null) return;
+        var sb = new StringBuilder();
+        sb.AppendLine("Family,Period Type,Current Period,YTD Balance,Cap,Amount Left to Cap");
+        foreach (var r in _employeeSummary)
+        {
+            var capStr = r.CapAmount.HasValue ? r.CapAmount.Value.ToString("F2") : "";
+            var remStr = r.CapAmount.HasValue ? (r.CapAmount.Value - r.YtdBalance).ToString("F2") : "";
+            sb.AppendLine(string.Join(",",
+                Csv(r.FamilyLabel),
+                Csv(r.ResetType),
+                r.CurrentYear,
+                r.YtdBalance.ToString("F2"),
+                capStr,
+                remStr));
+        }
+        await DownloadCsvAsync($"accumulators-employee-{_selectedEmployee.EmployeeNumber}-{_employeeYear}.csv", sb.ToString());
+    }
+
+    private async Task ExportEmployeeImpactTrailCsvAsync()
+    {
+        if (_selectedEmployee is null || _drillFamily is null) return;
+        var sb = new StringBuilder();
+        sb.AppendLine("Run Date,Run,Component,Impact Type,Delta,Running Balance,Retroactive,Reversal,Correction,Notes");
+        foreach (var r in _drillImpacts)
+        {
+            sb.AppendLine(string.Join(",",
+                r.RunDate.ToString("yyyy-MM-dd"),
+                Csv(r.RunLabel),
+                Csv(r.ComponentName),
+                Csv(r.ImpactType),
+                r.DeltaAmount.ToString("F2"),
+                r.RunningBalance.ToString("F2"),
+                r.IsRetroactive ? "Y" : "",
+                r.IsReversal    ? "Y" : "",
+                r.IsCorrection  ? "Y" : "",
+                Csv(r.Notes ?? "")));
+        }
+        await DownloadCsvAsync(
+            $"accumulators-impact-trail-{_selectedEmployee.EmployeeNumber}-{_drillFamily.FamilyLabel.Replace(' ', '-')}-{_employeeYear}.csv",
+            sb.ToString());
+    }
+
+    // ── Dev/test Copy-TSV helpers ─────────────────────────────────────────────
+
+    private async Task CopyFamilyBalancesTsvAsync()
+    {
+        if (_selectedFamily is null) return;
+        var sb = new StringBuilder();
+        sb.AppendLine("Employee #\tEmployee\tYTD Balance\tCap\tAmount Left to Cap\tLast Updated");
+        foreach (var r in _employeeBalances)
+        {
+            var capStr = r.CapAmount.HasValue ? r.CapAmount.Value.ToString("F2") : "";
+            var remStr = r.CapAmount.HasValue ? (r.CapAmount.Value - r.YtdBalance).ToString("F2") : "";
+            sb.AppendLine(string.Join('\t',
+                Tsv(r.EmployeeNumber),
+                Tsv(r.EmployeeName),
+                r.YtdBalance.ToString("F2"),
+                capStr,
+                remStr,
+                r.LastUpdated.ToString("yyyy-MM-dd")));
+        }
+        await JS.InvokeVoidAsync("allworkClipboard.copy", sb.ToString());
+        _familyBalancesCopiedRecent = true;
+        StateHasChanged();
+        await Task.Delay(1800);
+        _familyBalancesCopiedRecent = false;
+    }
+
+    private async Task CopyResetHistoryTsvAsync()
+    {
+        if (_selectedFamily is null) return;
+        var sb = new StringBuilder();
+        sb.AppendLine("Period\tClosing Balance\tLast Updated");
+        foreach (var h in _resetHistory)
+            sb.AppendLine($"{h.PeriodYear}\t{h.ClosingBalance:F2}\t{h.LastUpdatedDate:yyyy-MM-dd}");
+        await JS.InvokeVoidAsync("allworkClipboard.copy", sb.ToString());
+        _resetHistoryCopiedRecent = true;
+        StateHasChanged();
+        await Task.Delay(1800);
+        _resetHistoryCopiedRecent = false;
+    }
+
+    private async Task CopyEmployeeSummaryTsvAsync()
+    {
+        if (_selectedEmployee is null) return;
+        var sb = new StringBuilder();
+        sb.AppendLine("Family\tPeriod Type\tCurrent Period\tYTD Balance\tCap\tAmount Left to Cap");
+        foreach (var r in _employeeSummary)
+        {
+            var capStr = r.CapAmount.HasValue ? r.CapAmount.Value.ToString("F2") : "";
+            var remStr = r.CapAmount.HasValue ? (r.CapAmount.Value - r.YtdBalance).ToString("F2") : "";
+            sb.AppendLine(string.Join('\t',
+                Tsv(r.FamilyLabel),
+                Tsv(r.ResetType),
+                r.CurrentYear.ToString(),
+                r.YtdBalance.ToString("F2"),
+                capStr,
+                remStr));
+        }
+        await JS.InvokeVoidAsync("allworkClipboard.copy", sb.ToString());
+        _employeeSummaryCopiedRecent = true;
+        StateHasChanged();
+        await Task.Delay(1800);
+        _employeeSummaryCopiedRecent = false;
+    }
+
+    private async Task CopyEmployeeImpactTrailTsvAsync()
+    {
+        if (_selectedEmployee is null || _drillFamily is null) return;
+        var sb = new StringBuilder();
+        sb.AppendLine("Run Date\tRun\tComponent\tImpact Type\tDelta\tRunning Balance\tRetroactive\tReversal\tCorrection\tNotes");
+        foreach (var r in _drillImpacts)
+        {
+            sb.AppendLine(string.Join('\t',
+                r.RunDate.ToString("yyyy-MM-dd"),
+                Tsv(r.RunLabel),
+                Tsv(r.ComponentName),
+                Tsv(r.ImpactType),
+                r.DeltaAmount.ToString("F2"),
+                r.RunningBalance.ToString("F2"),
+                r.IsRetroactive ? "Y" : "",
+                r.IsReversal    ? "Y" : "",
+                r.IsCorrection  ? "Y" : "",
+                Tsv(r.Notes ?? "")));
+        }
+        await JS.InvokeVoidAsync("allworkClipboard.copy", sb.ToString());
+        _impactTrailCopiedRecent = true;
+        StateHasChanged();
+        await Task.Delay(1800);
+        _impactTrailCopiedRecent = false;
+    }
+
+    // TSV-safe: neutralise tabs/newlines inside string fields so Excel doesn't
+    // mis-parse them as cell/row delimiters on paste.
+    private static string Tsv(string? s) =>
+        (s ?? "").Replace('\t', ' ').Replace('\r', ' ').Replace('\n', ' ');
+
+    // CSV-safe quote: wraps in double quotes if the value contains a comma,
+    // quote, or newline; escapes embedded quotes by doubling them.
+    private static string Csv(string s)
+    {
+        if (string.IsNullOrEmpty(s)) return string.Empty;
+        if (s.IndexOfAny([',', '"', '\n', '\r']) < 0) return s;
+        return "\"" + s.Replace("\"", "\"\"") + "\"";
+    }
+
+    private async Task DownloadCsvAsync(string filename, string content)
+    {
+        var base64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(content));
+        await JS.InvokeVoidAsync("allworkFiles.downloadBase64", filename, "text/csv", base64);
+    }
 }
 
 <style>
@@ -748,7 +1028,10 @@
     .accum-page {
         display: flex;
         flex-direction: column;
-        height: calc(100vh - var(--topbar-height) - 2 * var(--space-6));
+        /* Subtract the PayrollShell tab strip — this page renders below it, not
+           directly in .shell-content. Without it the page overflowed by the tab-strip
+           height and forced a page-level scrollbar (same cause as Pay Register). */
+        height: calc(100vh - var(--topbar-height) - var(--payroll-tabs-height) - 2 * var(--space-6));
         overflow: hidden;
         padding: var(--space-6);
     }
@@ -990,6 +1273,15 @@
         justify-content: space-between;
     }
 
+    /* Consistent grid footer: Download CSV bottom-left, dev copy button bottom-right. */
+    .accum-grid-footer {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: var(--space-2) 0;
+        min-height: 22px;
+    }
+
     .btn-icon-sm {
         background: none;
         border: none;
@@ -1047,4 +1339,45 @@
     .text-center     { text-align: center; }
     .text-muted      { color: var(--text-secondary); }
     .text-sm         { font-size: var(--font-size-sm); }
+
+    /* Dev/test "Copy TSV" affordance — bottom-right of the grid, away from the CSV links.
+       Duplicated from PayRegisterPage so this page renders correctly when navigated to directly. */
+    .copy-row {
+        display: flex;
+        justify-content: flex-end;
+        align-items: center;
+        margin-top: var(--space-1);
+        min-height: 22px;
+    }
+    .copy-btn {
+        background: transparent;
+        border: none;
+        cursor: pointer;
+        padding: 2px 6px;
+        color: #6b7280;
+        line-height: 1;
+        transition: color .15s ease;
+    }
+    .copy-btn .e-icons { font-size: 16px; }
+    .copy-btn:hover { color: var(--module-payroll, #0f766e); }
+    .copy-confirmed {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--module-payroll, #0f766e);
+        animation: copyFade .25s ease-out;
+    }
+    .copy-confirmed .e-icons { font-size: 16px; }
+    .copy-confirmed__bubble {
+        background: color-mix(in srgb, var(--module-payroll, #0f766e) 15%, white);
+        border: 1px solid color-mix(in srgb, var(--module-payroll, #0f766e) 45%, white);
+        padding: 1px 8px;
+        border-radius: 10px;
+        font-size: .75rem;
+        font-weight: 500;
+    }
+    @@keyframes copyFade {
+        from { opacity: 0; transform: translateY(-2px); }
+        to   { opacity: 1; transform: translateY(0); }
+    }
 </style>

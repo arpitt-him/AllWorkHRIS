@@ -46,6 +46,22 @@
                 document.body.removeChild(link);
             }
         };
+        window.allworkClipboard = {
+            copy: function (text) {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    return navigator.clipboard.writeText(text);
+                }
+                // Fallback for older browsers / non-secure contexts.
+                var ta = document.createElement('textarea');
+                ta.value = text;
+                ta.style.position = 'fixed';
+                ta.style.left = '-9999px';
+                document.body.appendChild(ta);
+                ta.select();
+                try { document.execCommand('copy'); } finally { document.body.removeChild(ta); }
+                return Promise.resolve();
+            }
+        };
     </script>
 </body>
 

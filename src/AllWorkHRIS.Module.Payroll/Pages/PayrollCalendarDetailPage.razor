@@ -253,9 +253,9 @@
                     <div class="form-grid form-grid-3" style="margin-bottom:var(--space-4)">
                         <div class="form-field">
                             <label class="form-label">First Period Start Date <span style="color:var(--color-danger)">*</span></label>
-                            <SfDatePicker TValue="DateOnly" @bind-Value="_genForm.FirstPeriodStart" Placeholder="MM/DD/YYYY">
+                            <TdoDatePicker TValue="DateOnly" @bind-Value="_genForm.FirstPeriodStart" Placeholder="MM/DD/YYYY">
                                 <DatePickerEvents TValue="DateOnly" ValueChange="@(_ => StateHasChanged())" />
-                            </SfDatePicker>
+                            </TdoDatePicker>
                             <span style="font-size:var(--font-size-sm);color:#6B7280">Establishes the anchor — all @GetPeriodsPerYear(freqCode) periods derive from this date.</span>
                         </div>
                     </div>
@@ -377,7 +377,7 @@
                             @if (_editRunDatePeriodId == p.PeriodId)
                             {
                                 <div style="display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap">
-                                    <SfDatePicker TValue="DateOnly?" @bind-Value="_editRunDateValue" />
+                                    <TdoDatePicker TValue="DateOnly?" @bind-Value="_editRunDateValue" />
                                     <button class="btn-primary"
                                             style="padding:2px 10px;font-size:var(--font-size-sm)"
                                             @onclick="() => SaveRunDateAsync(p.PeriodId)"

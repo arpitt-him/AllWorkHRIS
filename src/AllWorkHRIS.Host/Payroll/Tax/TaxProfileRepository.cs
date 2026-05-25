@@ -110,6 +110,10 @@ public sealed class TaxProfileRepository : ITaxProfileRepository
 
     public async Task<IReadOnlyList<TaxJurisdictionRow>> GetAllJurisdictionsAsync()
     {
+        // Within each country group, the federal-level jurisdiction sorts first,
+        // followed by the country's sub-jurisdictions (states/provinces) ordered
+        // alphabetically by name. A jurisdiction is federal when its code equals
+        // the country code (e.g. BB = BB) or matches "{country}-FED" (US-FED, CA-FED).
         const string sql = """
             SELECT jurisdiction_id   AS JurisdictionId,
                    jurisdiction_code AS JurisdictionCode,
@@ -117,7 +121,11 @@ public sealed class TaxProfileRepository : ITaxProfileRepository
                    country_code      AS CountryCode
             FROM   tax_jurisdiction
             WHERE  is_active = TRUE
-            ORDER  BY country_code, jurisdiction_code
+            ORDER  BY country_code,
+                      CASE WHEN jurisdiction_code = country_code
+                                OR jurisdiction_code = country_code || '-FED' THEN 0
+                           ELSE 1 END,
+                      jurisdiction_name
             """;
         using var conn = _db.CreateConnection();
         var rows = await conn.QueryAsync<TaxJurisdictionRow>(sql);
@@ -483,7 +491,7 @@ public sealed class TaxProfileRepository : ITaxProfileRepository
 
         const string lookupSql = """
             SELECT jurisdiction_id FROM tax_jurisdiction
-            WHERE  jurisdiction_code IN @Codes AND is_active = TRUE
+            WHERE  jurisdiction_code = ANY(@Codes) AND is_active = TRUE
             """;
         using var conn = _db.CreateConnection();
         var ids = (await conn.QueryAsync<int>(lookupSql, new { Codes = codes })).ToList();

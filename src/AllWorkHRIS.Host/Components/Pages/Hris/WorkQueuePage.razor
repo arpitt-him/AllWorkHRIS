@@ -48,9 +48,9 @@
                        @bind-Value="_nameFilter"
                        Width="220px" />
             <span class="filter-label">Due from</span>
-            <SfDatePicker TValue="DateOnly?" @bind-Value="_dateFrom" Width="150px" Placeholder="MM/DD/YYYY" />
+            <TdoDatePicker TValue="DateOnly?" @bind-Value="_dateFrom" Width="150px" Placeholder="MM/DD/YYYY" DefaultToTdo="false" />
             <span class="filter-label">to</span>
-            <SfDatePicker TValue="DateOnly?" @bind-Value="_dateTo" Width="150px" Placeholder="MM/DD/YYYY" />
+            <TdoDatePicker TValue="DateOnly?" @bind-Value="_dateTo" Width="150px" Placeholder="MM/DD/YYYY" DefaultToTdo="false" />
             @if (!string.IsNullOrWhiteSpace(_nameFilter) || _dateFrom.HasValue || _dateTo.HasValue)
             {
                 <button class="btn-secondary btn-sm" @onclick="ClearFilters">Clear</button>

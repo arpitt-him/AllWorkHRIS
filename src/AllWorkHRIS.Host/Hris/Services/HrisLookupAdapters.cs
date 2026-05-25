@@ -34,6 +34,9 @@ public sealed class EmploymentLookupAdapter : IEmploymentLookup
             PayFrequencyCode    = x.PayFrequencyCode
         }).ToList();
     }
+
+    public Task<Dictionary<Guid, string>> GetEmployeeNumbersByEmploymentIdsAsync(IEnumerable<Guid> employmentIds)
+        => _svc.GetEmployeeNumbersByEmploymentIdsAsync(employmentIds);
 }
 
 public sealed class PersonNameLookupAdapter : IPersonNameLookup

@@ -2,7 +2,6 @@ using Microsoft.Extensions.Logging;
 using AllWorkHRIS.Core.Pipeline;
 using AllWorkHRIS.Module.Payroll.Domain.Results;
 using AllWorkHRIS.Module.Payroll.Repositories;
-using AllWorkHRIS.Module.TimeAttendance.Repositories;
 
 namespace AllWorkHRIS.Module.Payroll.Services;
 
@@ -13,7 +12,7 @@ public sealed partial class CalculationEngine : ICalculationEngine
     private readonly IEmploymentJurisdictionLookup _jurisdictionLookup;
     private readonly IBenefitStepProvider          _benefitStepProvider;
     private readonly IAccumulatorService           _accumulatorService;
-    private readonly ITimeEntryRepository          _timeEntryRepo;
+    private readonly IPayrollHoursSource           _hoursSource;
     private readonly ILogger<CalculationEngine>    _logger;
 
     public CalculationEngine(
@@ -22,7 +21,7 @@ public sealed partial class CalculationEngine : ICalculationEngine
         IEmploymentJurisdictionLookup jurisdictionLookup,
         IBenefitStepProvider          benefitStepProvider,
         IAccumulatorService           accumulatorService,
-        ITimeEntryRepository          timeEntryRepo,
+        IPayrollHoursSource           hoursSource,
         ILogger<CalculationEngine>    logger)
     {
         _resultLineRepo      = resultLineRepo;
@@ -30,7 +29,7 @@ public sealed partial class CalculationEngine : ICalculationEngine
         _jurisdictionLookup  = jurisdictionLookup;
         _benefitStepProvider = benefitStepProvider;
         _accumulatorService  = accumulatorService;
-        _timeEntryRepo       = timeEntryRepo;
+        _hoursSource         = hoursSource;
         _logger              = logger;
     }
 
@@ -238,7 +237,7 @@ public sealed partial class CalculationEngine : ICalculationEngine
     {
         if (input.FlsaStatusCode != "NON_EXEMPT") return null;
 
-        var entries = await _timeEntryRepo.GetApprovedHoursByEmploymentAndPeriodAsync(
+        var entries = await _hoursSource.GetApprovedHoursByEmploymentAndPeriodAsync(
             input.EmploymentId, input.PayPeriodStart, input.PayPeriodEnd);
 
         var (regHours, otHours) = ComputeOtSplit(entries, input.OtWeeklyThresholdHours, input.WorkWeekStartDay);

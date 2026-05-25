@@ -41,6 +41,7 @@ public interface IEmploymentService
     Task<PagedResult<EmploymentListItem>>   GetPagedListAsync(EmployeeListQuery query);
     Task<IReadOnlyList<EmploymentListItem>> GetAllActiveListAsync(Guid? legalEntityId = null);
     Task<EmployeeStatCards>                GetStatCardsAsync(DateOnly asOf, Guid? legalEntityId = null);
+    Task<Dictionary<Guid, string>>          GetEmployeeNumbersByEmploymentIdsAsync(IEnumerable<Guid> employmentIds);
 }
 
 public sealed class EmploymentService : IEmploymentService
@@ -438,6 +439,9 @@ public sealed class EmploymentService : IEmploymentService
 
     public async Task<EmployeeStatCards> GetStatCardsAsync(DateOnly asOf, Guid? legalEntityId = null)
         => await _employmentRepository.GetStatCardsAsync(asOf, legalEntityId);
+
+    public Task<Dictionary<Guid, string>> GetEmployeeNumbersByEmploymentIdsAsync(IEnumerable<Guid> employmentIds)
+        => _employmentRepository.GetEmployeeNumbersByEmploymentIdsAsync(employmentIds);
 
     private static void ValidateHireCommand(HireEmployeeCommand command)
     {
@@ -914,6 +918,8 @@ public interface IOrgStructureService
     Task<IEnumerable<OrgUnit>>         GetChildrenAsync(Guid parentOrgUnitId);
     Task<IEnumerable<OrgUnit>>         GetAllActiveAsync(Guid? legalEntityId = null);
     Task<IEnumerable<OrgUnitEmployee>> GetOrgUnitWorkforceAsync(Guid orgUnitId);
+    Task<IReadOnlyDictionary<Guid, int>> GetEmployeeCountsByLocationAsync(Guid legalEntityId);
+    Task<IEnumerable<OrgUnitEmployee>> GetEmployeesByLocationAsync(Guid locationId);
     Task<Guid>                         CreateOrgUnitAsync(CreateOrgUnitCommand command);
     Task                               UpdateOrgUnitAsync(UpdateOrgUnitCommand command);
 }
@@ -986,6 +992,12 @@ public sealed class OrgStructureService : IOrgStructureService
     public async Task<IEnumerable<OrgUnitEmployee>> GetOrgUnitWorkforceAsync(Guid orgUnitId)
         => await _orgUnitRepository.GetWorkforceByOrgUnitAsync(orgUnitId);
 
+    public Task<IReadOnlyDictionary<Guid, int>> GetEmployeeCountsByLocationAsync(Guid legalEntityId)
+        => _orgUnitRepository.GetEmployeeCountsByLocationAsync(legalEntityId);
+
+    public Task<IEnumerable<OrgUnitEmployee>> GetEmployeesByLocationAsync(Guid locationId)
+        => _orgUnitRepository.GetEmployeesByLocationAsync(locationId);
+
     public async Task<Guid> CreateOrgUnitAsync(CreateOrgUnitCommand command)
     {
         if (string.IsNullOrWhiteSpace(command.OrgUnitCode))
@@ -1038,8 +1050,20 @@ public sealed class OrgStructureService : IOrgStructureService
         }
 
         if (isLegalEntity)
-            await _taxProfileRepository.AssignJurisdictionsAsync(
-                orgUnit.OrgUnitId, ResolveStartingJurisdictions(orgUnit.CountryCode, orgUnit.StateOfIncorporation));
+        {
+            try
+            {
+                await _taxProfileRepository.AssignJurisdictionsAsync(
+                    orgUnit.OrgUnitId, ResolveStartingJurisdictions(orgUnit.CountryCode, orgUnit.StateOfIncorporation));
+            }
+            catch (Npgsql.PostgresException ex) when (ex.SqlState == "42P01")
+            {
+                // Tax schema not present (HRIS-only mode). Skip default
+                // jurisdiction assignment — the LE itself was created
+                // successfully and jurisdictions can be assigned later
+                // when the Tax module and its schema are in place.
+            }
+        }
 
         return orgUnit.OrgUnitId;
     }

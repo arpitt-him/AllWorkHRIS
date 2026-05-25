@@ -4,6 +4,7 @@ using AllWorkHRIS.Core.Composition;
 using AllWorkHRIS.Core.Dashboard;
 using AllWorkHRIS.Core.Events;
 using AllWorkHRIS.Core.Navigation;
+using AllWorkHRIS.Core.Pipeline;
 using AllWorkHRIS.Module.TimeAttendance.Events;
 using AllWorkHRIS.Module.TimeAttendance.Queries;
 using AllWorkHRIS.Module.TimeAttendance.Repositories;
@@ -23,6 +24,13 @@ public sealed class TimeAttendanceModule : IPlatformModule
     {
         builder.RegisterType<TimeEntryRepository>()
                .As<ITimeEntryRepository>()
+               .InstancePerLifetimeScope();
+
+        // Adapter that exposes this module's time entries to the Payroll engine
+        // via the Core-side IPayrollHoursSource abstraction. Overrides the
+        // host-registered NullPayrollHoursSource via last-registration-wins.
+        builder.RegisterType<TimeEntryPayrollHoursSource>()
+               .As<IPayrollHoursSource>()
                .InstancePerLifetimeScope();
 
         builder.RegisterType<WorkScheduleRepository>()

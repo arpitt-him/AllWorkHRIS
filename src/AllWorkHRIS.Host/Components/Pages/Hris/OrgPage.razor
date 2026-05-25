@@ -118,17 +118,67 @@
                 <div class="locations-list">
                     @foreach (var loc in LocationUnits.OrderBy(l => l.OrgUnitName))
                     {
-                        <div class="location-chip">
+                        var locId = loc.OrgUnitId;
+                        var count = _locationCounts.TryGetValue(locId, out var c) ? c : 0;
+                        var isSelected = _selectedLocationId == locId;
+                        <div class="location-chip @(isSelected ? "location-chip-selected" : "")"
+                             @onclick="() => ToggleLocationAsync(locId)"
+                             title="@(isSelected ? "Click to close employee list" : "Click to show employees at this location")">
                             <span class="location-chip-name">@loc.OrgUnitName</span>
                             <span class="location-chip-code">@loc.OrgUnitCode</span>
+                            <span class="location-chip-count" title="Active employees">@count</span>
                             @if (_isHrisAdmin)
                             {
-                                <button class="btn-icon-edit" title="Edit" @onclick="() => OpenEditOrgUnitPanel(loc)"><span class="e-icons e-edit"></span></button>
+                                <button class="btn-icon-edit" title="Edit"
+                                        @onclick="() => OpenEditOrgUnitPanel(loc)"
+                                        @onclick:stopPropagation="true"><span class="e-icons e-edit"></span></button>
                             }
                         </div>
                     }
                 </div>
             </div>
+
+            @if (_selectedLocationId.HasValue)
+            {
+                var selLoc = LocationUnits.FirstOrDefault(l => l.OrgUnitId == _selectedLocationId.Value);
+                <div class="location-employees-section">
+                    <div class="location-employees-header">
+                        <h4 class="location-employees-title">
+                            Employees at @(selLoc?.OrgUnitName ?? "(unknown)")
+                            <span class="location-employees-count">(@_selectedLocationEmployees.Count)</span>
+                        </h4>
+                        <button class="btn-secondary" @onclick="() => ToggleLocationAsync(_selectedLocationId!.Value)">Close</button>
+                    </div>
+
+                    @if (_selectedLocationLoading)
+                    {
+                        <p class="loading-text">Loading…</p>
+                    }
+                    else if (_selectedLocationEmployees.Count == 0)
+                    {
+                        <p class="empty-state">No active employees are assigned to this location.</p>
+                    }
+                    else
+                    {
+                        <SfGrid DataSource="@_selectedLocationEmployees" AllowSorting="true" CssClass="e-gridhover">
+                            <GridColumns>
+                                <GridColumn HeaderText="Employee #" Field="EmployeeNumber" Width="120" />
+                                <GridColumn HeaderText="Name">
+                                    <Template>
+                                        @{ var ee = (OrgUnitEmployee)context; }
+                                        @ee.LegalLastName, @(string.IsNullOrWhiteSpace(ee.PreferredName) ? ee.LegalFirstName : ee.PreferredName)
+                                    </Template>
+                                </GridColumn>
+                                <GridColumn HeaderText="Department" Field="DepartmentName" />
+                                <GridColumn HeaderText="Job"        Field="JobTitle" />
+                                <GridColumn HeaderText="FLSA"       Field="FlsaStatus" Width="100" />
+                                <GridColumn HeaderText="Type"       Field="FullPartTime" Width="100" />
+                                <GridColumn HeaderText="Start Date" Field="EmploymentStartDate" Format="yyyy-MM-dd" Width="120" />
+                            </GridColumns>
+                        </SfGrid>
+                    }
+                </div>
+            }
         }
     }
     else
@@ -294,7 +344,7 @@
                 </div>
                 <div class="form-field">
                     <label class="form-label">Effective Start Date</label>
-                    <SfDatePicker TValue="DateTime" @bind-Value="_newEffectiveDt" />
+                    <TdoDatePicker TValue="DateTime" @bind-Value="_newEffectiveDt" />
                 </div>
             </div>
 
@@ -360,6 +410,12 @@
     private bool          _showAddPanel = false;
     private List<OrgUnit> _orgUnits      = [];
     private List<OrgUnit> _listOrgUnits  = [];
+
+    // Location-chip drilldown state
+    private IReadOnlyDictionary<Guid, int> _locationCounts        = new Dictionary<Guid, int>();
+    private Guid?                          _selectedLocationId    = null;
+    private List<OrgUnitEmployee>          _selectedLocationEmployees = [];
+    private bool                           _selectedLocationLoading   = false;
 
     private int LocationTypeId => LookupCache.GetId(LookupTables.OrgUnitType, "LOCATION");
     private IEnumerable<OrgUnit> TreeUnits     => _orgUnits.Where(u => u.OrgUnitTypeId != LocationTypeId);
@@ -457,9 +513,11 @@
 
     private async Task SelectLegalEntityAsync(Guid legalEntityId)
     {
-        _selectError      = null;
-        _selectedNodeId   = null;
-        _workforce        = [];
+        _selectError                = null;
+        _selectedNodeId             = null;
+        _workforce                  = [];
+        _selectedLocationId         = null;
+        _selectedLocationEmployees  = [];
         try
         {
             _selectedLegalEntityId = legalEntityId;
@@ -467,6 +525,9 @@
 
             var units = await OrgStructureService.GetAllActiveAsync(legalEntityId);
             _orgUnits = units.ToList();
+
+            // Per-location active-employee counts for the chip badges
+            _locationCounts = await OrgStructureService.GetEmployeeCountsByLocationAsync(legalEntityId);
 
             foreach (var unit in _orgUnits)
                 _expanded.Add(unit.OrgUnitId);
@@ -486,6 +547,31 @@
         finally
         {
             StateHasChanged();
+        }
+    }
+
+    private async Task ToggleLocationAsync(Guid locationId)
+    {
+        // Clicking the already-selected chip collapses the EE list.
+        if (_selectedLocationId == locationId)
+        {
+            _selectedLocationId        = null;
+            _selectedLocationEmployees = [];
+            return;
+        }
+
+        _selectedLocationId        = locationId;
+        _selectedLocationEmployees = [];
+        _selectedLocationLoading   = true;
+        StateHasChanged();
+        try
+        {
+            var employees = await OrgStructureService.GetEmployeesByLocationAsync(locationId);
+            _selectedLocationEmployees = employees.ToList();
+        }
+        finally
+        {
+            _selectedLocationLoading = false;
         }
     }
 
@@ -690,6 +776,18 @@
         border: 1px solid #BAE6FD;
         border-radius: var(--radius-md);
         padding: var(--space-2) var(--space-3);
+        cursor: pointer;
+        transition: background 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
+    }
+
+    .location-chip:hover {
+        background: #E0F2FE;
+    }
+
+    .location-chip-selected {
+        background: #A5F3FC;                    /* cyan-200 — blue with teal warmth */
+        border-color: #14B8A6;                  /* teal-500 — distinct teal accent */
+        box-shadow: 0 0 0 2px rgba(20, 184, 166, 0.30);
     }
 
     .location-chip-name {
@@ -702,6 +800,48 @@
         font-size: var(--font-size-xs, 0.75rem);
         color: #6B7280;
         font-family: monospace;
+    }
+
+    .location-chip-count {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 1.5rem;
+        height: 1.25rem;
+        padding: 0 0.4rem;
+        border-radius: 999px;
+        background: var(--aw-navy, #1e3a8a);
+        color: white;
+        font-size: var(--font-size-xs, 0.75rem);
+        font-weight: var(--font-weight-semibold);
+    }
+
+    .location-employees-section {
+        margin-top: var(--space-3);
+        background: white;
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-sm);
+        padding: var(--space-4) var(--space-5);
+    }
+
+    .location-employees-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: var(--space-3);
+    }
+
+    .location-employees-title {
+        font-size: var(--font-size-base);
+        font-weight: var(--font-weight-semibold);
+        color: var(--aw-navy);
+        margin: 0;
+    }
+
+    .location-employees-count {
+        color: #6B7280;
+        font-weight: var(--font-weight-medium);
+        margin-left: var(--space-1);
     }
 
     .org-tree-container, .grid-container {

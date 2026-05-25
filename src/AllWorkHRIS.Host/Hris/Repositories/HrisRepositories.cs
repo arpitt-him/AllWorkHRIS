@@ -323,6 +323,7 @@ public interface IEmploymentRepository
     Task<PagedResult<EmploymentListItem>>     GetPagedListAsync(EmployeeListQuery query);
     Task<IReadOnlyList<EmploymentListItem>>   GetAllActiveListAsync(Guid? legalEntityId = null);
     Task<EmployeeStatCards>                   GetStatCardsAsync(DateOnly asOf, Guid? legalEntityId = null);
+    Task<Dictionary<Guid, string>>            GetEmployeeNumbersByEmploymentIdsAsync(IEnumerable<Guid> employmentIds);
 }
 
 public sealed class EmploymentRepository : IEmploymentRepository
@@ -617,6 +618,21 @@ public sealed class EmploymentRepository : IEmploymentRepository
         return (await conn.QueryAsync<EmploymentListItem>(sql, new { LegalEntityId = legalEntityId })).ToList();
     }
 
+    public async Task<Dictionary<Guid, string>> GetEmployeeNumbersByEmploymentIdsAsync(IEnumerable<Guid> employmentIds)
+    {
+        var ids = employmentIds.ToArray();
+        if (ids.Length == 0) return new Dictionary<Guid, string>();
+
+        const string sql = """
+            SELECT employment_id, employee_number
+            FROM   employment
+            WHERE  employment_id = ANY(@Ids)
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        var rows = await conn.QueryAsync<(Guid EmploymentId, string EmployeeNumber)>(sql, new { Ids = ids });
+        return rows.ToDictionary(r => r.EmploymentId, r => r.EmployeeNumber);
+    }
+
     public async Task<EmployeeStatCards> GetStatCardsAsync(DateOnly asOf, Guid? legalEntityId = null)
     {
         var entityFilter = legalEntityId.HasValue ? "AND legal_entity_id = @LegalEntityId" : "";
@@ -844,6 +860,8 @@ public interface IOrgUnitRepository
     Task<IEnumerable<OrgUnit>>      GetChildrenAsync(Guid parentOrgUnitId);
     Task<IEnumerable<OrgUnit>>      GetAllActiveAsync(Guid? legalEntityId = null);
     Task<IEnumerable<OrgUnitEmployee>> GetWorkforceByOrgUnitAsync(Guid orgUnitId);
+    Task<IReadOnlyDictionary<Guid, int>> GetEmployeeCountsByLocationAsync(Guid legalEntityId);
+    Task<IEnumerable<OrgUnitEmployee>> GetEmployeesByLocationAsync(Guid locationId);
     Task<Guid>                      InsertAsync(OrgUnit orgUnit, IUnitOfWork uow);
     Task                            UpdateAsync(UpdateOrgUnitCommand command, IUnitOfWork uow);
 }
@@ -958,6 +976,66 @@ public sealed class OrgUnitRepository : IOrgUnitRepository
             """;
         using var conn = _connectionFactory.CreateConnection();
         return await conn.QueryAsync<OrgUnitEmployee>(sql, new { OrgUnitId = orgUnitId });
+    }
+
+    public async Task<IReadOnlyDictionary<Guid, int>> GetEmployeeCountsByLocationAsync(Guid legalEntityId)
+    {
+        // primary_work_location_id is a direct FK on employment to a LOCATION-typed
+        // org_unit. Locations are flat (not part of the parent/child hierarchy used
+        // by departments/divisions), so a simple GROUP BY is sufficient.
+        const string sql = """
+            SELECT e.primary_work_location_id AS location_id, COUNT(*) AS ee_count
+            FROM   employment e
+            WHERE  e.legal_entity_id = @LegalEntityId
+              AND  e.employment_status_id = (SELECT id FROM lkp_employment_status WHERE code = 'ACTIVE')
+            GROUP BY e.primary_work_location_id
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        var rows = await conn.QueryAsync<(Guid LocationId, int EeCount)>(sql, new { LegalEntityId = legalEntityId });
+        return rows.ToDictionary(r => r.LocationId, r => r.EeCount);
+    }
+
+    public async Task<IEnumerable<OrgUnitEmployee>> GetEmployeesByLocationAsync(Guid locationId)
+    {
+        // Active employments whose primary_work_location_id matches the given location.
+        // Shape mirrors GetWorkforceByOrgUnitAsync so the same OrgUnitEmployee record
+        // type and any consuming grid columns can be reused.
+        const string sql = """
+            SELECT
+                e.employment_id,
+                e.person_id,
+                e.employee_number,
+                p.legal_first_name,
+                p.legal_last_name,
+                p.preferred_name,
+                COALESCE(j.job_title, '')           AS job_title,
+                COALESCE(lfp.code,    'UNKNOWN')    AS full_part_time,
+                COALESCE(lfs.code,    'UNKNOWN')    AS flsa_status,
+                COALESCE(cr.annual_equivalent, 0)   AS annual_equivalent,
+                COALESCE(lcrt.code,   '')           AS rate_type,
+                COALESCE(lpf.code,    '')           AS pay_frequency,
+                COALESCE(dept.org_unit_name, '')    AS department_name,
+                e.employment_start_date
+            FROM employment e
+            INNER JOIN person p      ON p.person_id      = e.person_id
+            INNER JOIN assignment a  ON a.employment_id  = e.employment_id
+                AND a.assignment_type_id   = (SELECT id FROM lkp_assignment_type   WHERE code = 'PRIMARY')
+                AND a.assignment_status_id = (SELECT id FROM lkp_assignment_status WHERE code = 'ACTIVE')
+            LEFT  JOIN job j         ON j.job_id         = a.job_id
+            LEFT  JOIN org_unit dept ON dept.org_unit_id = e.primary_department_id
+            LEFT  JOIN compensation_record cr ON cr.employment_id = e.employment_id
+                AND cr.compensation_status_id = (SELECT id FROM lkp_compensation_status WHERE code = 'ACTIVE')
+                AND cr.primary_rate_flag = true
+            LEFT  JOIN lkp_full_part_time_status  lfp  ON lfp.id  = e.full_part_time_status_id
+            LEFT  JOIN lkp_flsa_status            lfs  ON lfs.id  = e.flsa_status_id
+            LEFT  JOIN lkp_compensation_rate_type lcrt ON lcrt.id = cr.rate_type_id
+            LEFT  JOIN lkp_pay_frequency          lpf  ON lpf.id  = cr.pay_frequency_id
+            WHERE e.primary_work_location_id = @LocationId
+              AND e.employment_status_id     = (SELECT id FROM lkp_employment_status WHERE code = 'ACTIVE')
+            ORDER BY p.legal_last_name, p.legal_first_name
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        return await conn.QueryAsync<OrgUnitEmployee>(sql, new { LocationId = locationId });
     }
 
     public async Task<Guid> InsertAsync(OrgUnit orgUnit, IUnitOfWork uow)

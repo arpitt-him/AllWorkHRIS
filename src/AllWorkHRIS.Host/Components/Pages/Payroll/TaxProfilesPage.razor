@@ -311,8 +311,8 @@
                                     <div class="form-grid form-grid-3" style="margin-bottom:1rem;">
                                         <div class="form-field">
                                             <label class="form-label">Effective From <span style="color:var(--color-danger)">*</span></label>
-                                            <SfDatePicker TValue="DateOnly" Value="@_effectiveDates[jCode]"
-                                                          ValueChanged="@(v => _effectiveDates[jCode] = v)" />
+                                            <TdoDatePicker TValue="DateOnly" Value="@_effectiveDates[jCode]"
+                                                           ValueChanged="@(v => _effectiveDates[jCode] = v)" />
                                         </div>
 
                                         @* W-4 legacy toggle (US-FED only) *@

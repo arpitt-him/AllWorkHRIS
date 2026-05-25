@@ -7,6 +7,7 @@
 // that those tests depend on.
 
 using Dapper;
+using AllWorkHRIS.Core.Composition;
 using AllWorkHRIS.Core.Dashboard;
 using AllWorkHRIS.Core.Data;
 using AllWorkHRIS.Core.Lookups;
@@ -20,6 +21,7 @@ using AllWorkHRIS.Host.Config.Navigation;
 using AllWorkHRIS.Host.Payroll.Tax;
 using AllWorkHRIS.Module.Benefits;
 using AllWorkHRIS.Module.Payroll;
+using AllWorkHRIS.Module.Tax.Navigation;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -228,7 +230,7 @@ public sealed class DashboardGateTests : IAsyncLifetime
     [Fact]
     public void TC_DASH_008_SystemAdminNavContributor_CorrectTargetAndRoleFilter()
     {
-        var contributor = new SystemAdminNavContributor();
+        var contributor = new SystemAdminNavContributor(Array.Empty<IPlatformModule>());
 
         Assert.Equal(NavTarget.AdminNav, contributor.Target);
 
@@ -273,8 +275,8 @@ public sealed class DashboardGateTests : IAsyncLifetime
             (new HrisNavContributor(),           ["HrisViewer"],      NavTarget.EntityNav),
             (new PayrollNavContributor(),         ["PayrollOperator"], NavTarget.EntityNav),
             (new BenefitsNavContributor(),        ["BenefitsAdmin"],   NavTarget.EntityNav),
-            (new TaxNavContributor(),             ["TaxAdmin"],        NavTarget.EntityNav),
-            (new SystemAdminNavContributor(),     ["SystemAdmin"],     NavTarget.AdminNav),
+            (new TaxNavContributor(),                                       ["TaxAdmin"],        NavTarget.EntityNav),
+            (new SystemAdminNavContributor(Array.Empty<IPlatformModule>()), ["SystemAdmin"],     NavTarget.AdminNav),
             (new OperationsAdminNavContributor(), ["OperationsAdmin"], NavTarget.OpsNav),
         };
 

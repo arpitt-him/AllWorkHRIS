@@ -1,6 +1,8 @@
+@using AllWorkHRIS.Core.Temporal
 @using AllWorkHRIS.Module.Benefits.Repositories
 @using Syncfusion.Blazor.Grids
 @inject IBenefitElectionRepository BenefitElectionRepo
+@inject ITemporalContext           TemporalContext
 
 @if (_loading)
 {
@@ -62,7 +64,7 @@ else
         _loading = true;
         try
         {
-            var asOf = DateOnly.FromDateTime(DateTime.Today);
+            var asOf = DateOnly.FromDateTime(TemporalContext.GetOperativeDate());
             _elections = (await BenefitElectionRepo.GetActiveByEmploymentIdAsync(EmploymentId, asOf)).ToList();
         }
         catch { }

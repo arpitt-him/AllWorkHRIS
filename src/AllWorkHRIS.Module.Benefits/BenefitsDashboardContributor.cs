@@ -56,9 +56,9 @@ public sealed class BenefitsDashboardContributor : IDashboardContributor
                     ou.org_unit_id            AS entity_id,
                     ou.org_unit_name          AS entity_name
                 FROM benefit_deduction_election bde
-                JOIN deduction  d  ON d.deduction_id  = bde.deduction_id
-                JOIN employment e  ON e.employment_id = bde.employment_id
-                JOIN org_unit   ou ON ou.org_unit_id  = e.legal_entity_id
+                JOIN benefit_deduction d  ON d.deduction_id  = bde.deduction_id
+                JOIN employment        e  ON e.employment_id = bde.employment_id
+                JOIN org_unit          ou ON ou.org_unit_id  = e.legal_entity_id
                 WHERE bde.status = 'ACTIVE'
                   AND bde.effective_start_date > @Today
                   {entityFilter}

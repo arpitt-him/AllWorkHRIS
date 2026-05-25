@@ -5,6 +5,7 @@ public sealed record OrgUnitOption(Guid OrgUnitId, string OrgUnitName);
 public interface IEmploymentLookup
 {
     Task<IReadOnlyList<EmploymentListItem>> GetAllActiveListAsync(Guid? legalEntityId = null);
+    Task<Dictionary<Guid, string>>          GetEmployeeNumbersByEmploymentIdsAsync(IEnumerable<Guid> employmentIds);
 }
 
 public interface IPersonNameLookup

@@ -27,7 +27,7 @@ public sealed class BenefitElectionRepository : IBenefitElectionRepository
                e.election_version_id, e.original_election_id, e.parent_election_id,
                e.correction_type, e.source_event_id
         FROM   benefit_deduction_election e
-        JOIN   deduction d ON d.deduction_id = e.deduction_id
+        JOIN   benefit_deduction d ON d.deduction_id = e.deduction_id
         """;
 
     public async Task<BenefitDeductionElection?> GetByIdAsync(Guid electionId, CancellationToken ct = default)
@@ -385,8 +385,8 @@ public sealed class BenefitElectionRepository : IBenefitElectionRepository
         var countSql = $"""
             SELECT COUNT(*)
             FROM   benefit_deduction_election e
-            JOIN   deduction  d   ON d.deduction_id   = e.deduction_id
-            JOIN   employment emp ON emp.employment_id = e.employment_id
+            JOIN   benefit_deduction d   ON d.deduction_id   = e.deduction_id
+            JOIN   employment        emp ON emp.employment_id = e.employment_id
             {whereClause}
             """;
 
@@ -402,9 +402,9 @@ public sealed class BenefitElectionRepository : IBenefitElectionRepository
                    e.effective_start_date, e.effective_end_date,
                    e.status, e.source, e.created_at
             FROM   benefit_deduction_election e
-            JOIN   deduction   d   ON d.deduction_id  = e.deduction_id
-            JOIN   employment  emp ON emp.employment_id = e.employment_id
-            JOIN   person      p   ON p.person_id = emp.person_id
+            JOIN   benefit_deduction d   ON d.deduction_id  = e.deduction_id
+            JOIN   employment        emp ON emp.employment_id = e.employment_id
+            JOIN   person            p   ON p.person_id = emp.person_id
             {whereClause}
             ORDER  BY e.created_at DESC
             OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY

@@ -4,6 +4,8 @@
 @attribute [Authorize(Roles = "PayrollOperator,PayrollAdmin,HrisAdmin,BenefitsAdmin")]
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Hosting
+@using Microsoft.Extensions.Hosting
 @using AllWorkHRIS.Module.Payroll.Queries
 @using System.Text
 @using Microsoft.JSInterop
@@ -13,6 +15,7 @@
 @inject PayRegisterQueryService QueryService
 @inject IJSRuntime              JS
 @inject AuthenticationStateProvider AuthStateProvider
+@inject IWebHostEnvironment     Env
 
 <PageTitle>Pay Register — AllWork HRIS</PageTitle>
 
@@ -100,6 +103,8 @@
                                 @onclick='() => SwitchTab("org")'>Org Rollup</button>
                         <button class="tab @(_activeTab == "detail"  ? "tab--active" : "")"
                                 @onclick='() => SwitchTab("detail")'>Employee Detail</button>
+                        <button class="tab @(_activeTab == "employer" ? "tab--active" : "")"
+                                @onclick='() => SwitchTab("employer")'>Employer Detail</button>
                     </div>
                 </Authorized>
             </AuthorizeView>
@@ -178,7 +183,25 @@
                                     </div>
                                 </div>
                                 <div class="export-row">
-                                    <button class="btn-link" @onclick="ExportSummaryCsvAsync">Download CSV</button>
+                                    <div class="export-row__links">
+                                        <button class="btn-link" @onclick="ExportSummaryCsvAsync">Download CSV</button>
+                                    </div>
+                                    @if (!Env.IsProduction())
+                                    {
+                                        @if (_summaryCopiedRecent)
+                                        {
+                                            <span class="copy-confirmed">
+                                                <span class="e-icons e-circle-check"></span>
+                                                <span class="copy-confirmed__bubble">copied</span>
+                                            </span>
+                                        }
+                                        else
+                                        {
+                                            <button type="button" class="copy-btn" @onclick="CopySummaryTsvAsync" title="Copy TSV">
+                                                <span class="e-icons e-copy"></span>
+                                            </button>
+                                        }
+                                    }
                                 </div>
                             </Authorized>
                         </AuthorizeView>
@@ -217,23 +240,23 @@
                                     <GridEvents TValue="PayRegisterOrgRow" DetailsExpanded="OnOrgRowExpandingAsync" />
                                     <GridColumns>
                                         <GridColumn HeaderText="@OrgGroupLabel" Field="GroupName" />
-                                        <GridColumn HeaderText="Headcount" Field="Headcount" TextAlign="TextAlign.Right" Width="100" />
-                                        <GridColumn HeaderText="Gross Wages" Field="GrossWages" TextAlign="TextAlign.Right" Width="110">
+                                        <GridColumn HeaderText="Headcount" Field="Headcount" TextAlign="TextAlign.Right" AutoFit="true" />
+                                        <GridColumn HeaderText="Gross Wages" Field="GrossWages" TextAlign="TextAlign.Right" AutoFit="true">
                                             <Template>@{ var r = (PayRegisterOrgRow)context; }@Fmt(r.GrossWages)</Template>
                                         </GridColumn>
-                                        <GridColumn HeaderText="EE Tax Withheld" Field="EmployeeTaxWithheld" TextAlign="TextAlign.Right" Width="120">
+                                        <GridColumn HeaderText="EE Tax Withheld" Field="EmployeeTaxWithheld" TextAlign="TextAlign.Right" AutoFit="true">
                                             <Template>@{ var r = (PayRegisterOrgRow)context; }@Fmt(r.EmployeeTaxWithheld)</Template>
                                         </GridColumn>
-                                        <GridColumn HeaderText="ER Tax Cost" Field="EmployerTaxCost" TextAlign="TextAlign.Right" Width="100">
+                                        <GridColumn HeaderText="ER Tax Cost" Field="EmployerTaxCost" TextAlign="TextAlign.Right" AutoFit="true">
                                             <Template>@{ var r = (PayRegisterOrgRow)context; }@Fmt(r.EmployerTaxCost)</Template>
                                         </GridColumn>
-                                        <GridColumn HeaderText="ER Benefit Cost" Field="EmployerBenefitCost" TextAlign="TextAlign.Right" Width="120">
+                                        <GridColumn HeaderText="ER Benefit Cost" Field="EmployerBenefitCost" TextAlign="TextAlign.Right" AutoFit="true">
                                             <Template>@{ var r = (PayRegisterOrgRow)context; }@Fmt(r.EmployerBenefitCost)</Template>
                                         </GridColumn>
-                                        <GridColumn HeaderText="Net Pay" Field="NetPay" TextAlign="TextAlign.Right" Width="100">
+                                        <GridColumn HeaderText="Net Pay" Field="NetPay" TextAlign="TextAlign.Right" AutoFit="true">
                                             <Template>@{ var r = (PayRegisterOrgRow)context; }@Fmt(r.NetPay)</Template>
                                         </GridColumn>
-                                        <GridColumn HeaderText="Total ER Cost" Field="TotalEmployerCost" TextAlign="TextAlign.Right" Width="110">
+                                        <GridColumn HeaderText="Total ER Cost" Field="TotalEmployerCost" TextAlign="TextAlign.Right" AutoFit="true">
                                             <Template>@{ var r = (PayRegisterOrgRow)context; }@Fmt(r.TotalEmployerCost)</Template>
                                         </GridColumn>
                                     </GridColumns>
@@ -298,7 +321,25 @@
                                     </DetailTemplate></GridTemplates>
                                 </SfGrid>
                                 <div class="export-row">
-                                    <button class="btn-link" @onclick="ExportOrgCsvAsync">Download CSV</button>
+                                    <div class="export-row__links">
+                                        <button class="btn-link" @onclick="ExportOrgCsvAsync">Download CSV</button>
+                                    </div>
+                                    @if (!Env.IsProduction())
+                                    {
+                                        @if (_orgCopiedRecent)
+                                        {
+                                            <span class="copy-confirmed">
+                                                <span class="e-icons e-circle-check"></span>
+                                                <span class="copy-confirmed__bubble">copied</span>
+                                            </span>
+                                        }
+                                        else
+                                        {
+                                            <button type="button" class="copy-btn" @onclick="CopyOrgTsvAsync" title="Copy TSV">
+                                                <span class="e-icons e-copy"></span>
+                                            </button>
+                                        }
+                                    }
                                 </div>
                             }
                         </div>
@@ -320,65 +361,87 @@
                             }
                             else
                             {
-                                <SfGrid TValue="PayRegisterEmployeeRow" DataSource="@FilteredEmployeeRows.ToList()"
-                                        AllowSorting="true" AllowPaging="true" CssClass="e-gridhover">
+                                <SfGrid TValue="PayRegisterEmployeeRow" DataSource="@_filteredRows"
+                                        AllowSorting="true" AllowPaging="false" CssClass="e-gridhover">
                                     <GridEvents TValue="PayRegisterEmployeeRow" DetailsExpanded="OnEmpRowExpandingAsync" />
-                                    <GridPageSettings PageSize="20" />
+                                    @* <GridPageSettings PageSize="20" /> *@
                                     <GridColumns>
-                                        <GridColumn HeaderText="#" Field="EmployeeNumber" Width="60" />
-                                        <GridColumn HeaderText="Employee" Field="EmployeeName" />
-                                        <GridColumn HeaderText="Dept" Field="DepartmentName" Width="90" />
-                                        <GridColumn HeaderText="Gross" Field="Gross" TextAlign="TextAlign.Right" Width="80">
+                                        <GridColumn HeaderText="EE #" Field="EmployeeNumber" Width="100" />
+                                        <GridColumn HeaderText="Employee" Field="EmployeeName" Width="170" />
+                                        <GridColumn HeaderText="Dept" Field="DepartmentName" Width="120" />
+                                        <GridColumn HeaderText="Gross" Field="Gross" TextAlign="TextAlign.Right" Width="90">
                                             <Template>@{ var e = (PayRegisterEmployeeRow)context; }@Fmt(e.Gross)</Template>
                                         </GridColumn>
-                                        <GridColumn HeaderText="@_columnLabels.LabelFederalTax" Field="FederalTax" TextAlign="TextAlign.Right" Width="70">
+                                        <GridColumn HeaderText="@_columnLabels.LabelFederalTax" Field="FederalTax" TextAlign="TextAlign.Right" Width="85">
                                             <Template>@{ var e = (PayRegisterEmployeeRow)context; }@Fmt(e.FederalTax)</Template>
                                         </GridColumn>
-                                        <GridColumn HeaderText="@_columnLabels.LabelPensionEe" Field="SsEe" TextAlign="TextAlign.Right" Width="70">
+                                        <GridColumn HeaderText="@_columnLabels.LabelPensionEe" Field="SsEe" TextAlign="TextAlign.Right" Width="85">
                                             <Template>@{ var e = (PayRegisterEmployeeRow)context; }@Fmt(e.SsEe)</Template>
                                         </GridColumn>
-                                        <GridColumn HeaderText="@_columnLabels.LabelInsuranceEe" Field="MedicareEe" TextAlign="TextAlign.Right" Width="70">
+                                        <GridColumn HeaderText="@_columnLabels.LabelInsuranceEe" Field="MedicareEe" TextAlign="TextAlign.Right" Width="115">
                                             <Template>@{ var e = (PayRegisterEmployeeRow)context; }@Fmt(e.MedicareEe)</Template>
                                         </GridColumn>
-                                        <GridColumn HeaderText="@_columnLabels.LabelStateTax" Field="StateTax" TextAlign="TextAlign.Right" Width="70">
+                                        <GridColumn HeaderText="@_columnLabels.LabelStateTax" Field="StateTax" TextAlign="TextAlign.Right" Width="90">
                                             <Template>@{ var e = (PayRegisterEmployeeRow)context; }@Fmt(e.StateTax)</Template>
                                         </GridColumn>
                                         <GridColumn HeaderText="@(_columnLabels.LabelLocalTax ?? "Local Tax")" Field="LocalTax"
-                                                    Visible="@(_columnLabels.LabelLocalTax is not null)" TextAlign="TextAlign.Right" Width="70">
+                                                    Visible="@(_columnLabels.LabelLocalTax is not null)" TextAlign="TextAlign.Right" Width="90">
                                             <Template>@{ var e = (PayRegisterEmployeeRow)context; }@Fmt(e.LocalTax)</Template>
                                         </GridColumn>
-                                        <GridColumn HeaderText="Benefits" Field="BenefitDeductions" TextAlign="TextAlign.Right" Width="80">
+                                        <GridColumn HeaderText="Benefits" Field="BenefitDeductions" TextAlign="TextAlign.Right" Width="90">
                                             <Template>@{ var e = (PayRegisterEmployeeRow)context; }@Fmt(e.BenefitDeductions)</Template>
                                         </GridColumn>
-                                        <GridColumn HeaderText="Retire" Field="RetirementDeductions" TextAlign="TextAlign.Right" Width="65">
+                                        <GridColumn HeaderText="Retire" Field="RetirementDeductions" TextAlign="TextAlign.Right" Width="80">
                                             <Template>@{ var e = (PayRegisterEmployeeRow)context; }@Fmt(e.RetirementDeductions)</Template>
                                         </GridColumn>
-                                        <GridColumn HeaderText="Garnish" Field="Garnishments" TextAlign="TextAlign.Right" Width="70">
-                                            <Template>@{ var e = (PayRegisterEmployeeRow)context; }@Fmt(e.Garnishments)</Template>
-                                        </GridColumn>
-                                        <GridColumn HeaderText="Net Pay" Field="NetPay" TextAlign="TextAlign.Right" Width="80">
+                                        <GridColumn HeaderText="Net Pay" Field="NetPay" TextAlign="TextAlign.Right" Width="95">
                                             <Template>@{ var e = (PayRegisterEmployeeRow)context; }<strong>@Fmt(e.NetPay)</strong></Template>
                                         </GridColumn>
-                                        <GridColumn HeaderText="@_columnLabels.LabelErPension" Field="EmployerSs" TextAlign="TextAlign.Right" Width="70">
-                                            <Template>@{ var e = (PayRegisterEmployeeRow)context; }@Fmt(e.EmployerSs)</Template>
-                                        </GridColumn>
-                                        <GridColumn HeaderText="@_columnLabels.LabelErInsurance" Field="EmployerMedicare" TextAlign="TextAlign.Right" Width="70">
-                                            <Template>@{ var e = (PayRegisterEmployeeRow)context; }@Fmt(e.EmployerMedicare)</Template>
-                                        </GridColumn>
-                                        <GridColumn HeaderText="ER Benefit" Field="EmployerBenefit" TextAlign="TextAlign.Right" Width="80">
-                                            <Template>@{ var e = (PayRegisterEmployeeRow)context; }@Fmt(e.EmployerBenefit)</Template>
-                                        </GridColumn>
                                     </GridColumns>
+                                    <GridAggregates>
+                                        <GridAggregate>
+                                            <GridAggregateColumns>
+                                                <GridAggregateColumn Field="Gross" Type="AggregateType.Sum">
+                                                    <FooterTemplate>@{ var a = (AggregateTemplateContext)context; }<strong>@Fmt(Convert.ToDecimal(a.Sum))</strong></FooterTemplate>
+                                                </GridAggregateColumn>
+                                                <GridAggregateColumn Field="FederalTax" Type="AggregateType.Sum">
+                                                    <FooterTemplate>@{ var a = (AggregateTemplateContext)context; }<strong>@Fmt(Convert.ToDecimal(a.Sum))</strong></FooterTemplate>
+                                                </GridAggregateColumn>
+                                                <GridAggregateColumn Field="SsEe" Type="AggregateType.Sum">
+                                                    <FooterTemplate>@{ var a = (AggregateTemplateContext)context; }<strong>@Fmt(Convert.ToDecimal(a.Sum))</strong></FooterTemplate>
+                                                </GridAggregateColumn>
+                                                <GridAggregateColumn Field="MedicareEe" Type="AggregateType.Sum">
+                                                    <FooterTemplate>@{ var a = (AggregateTemplateContext)context; }<strong>@Fmt(Convert.ToDecimal(a.Sum))</strong></FooterTemplate>
+                                                </GridAggregateColumn>
+                                                <GridAggregateColumn Field="StateTax" Type="AggregateType.Sum">
+                                                    <FooterTemplate>@{ var a = (AggregateTemplateContext)context; }<strong>@Fmt(Convert.ToDecimal(a.Sum))</strong></FooterTemplate>
+                                                </GridAggregateColumn>
+                                                <GridAggregateColumn Field="LocalTax" Type="AggregateType.Sum">
+                                                    <FooterTemplate>@{ var a = (AggregateTemplateContext)context; }<strong>@Fmt(Convert.ToDecimal(a.Sum))</strong></FooterTemplate>
+                                                </GridAggregateColumn>
+                                                <GridAggregateColumn Field="BenefitDeductions" Type="AggregateType.Sum">
+                                                    <FooterTemplate>@{ var a = (AggregateTemplateContext)context; }<strong>@Fmt(Convert.ToDecimal(a.Sum))</strong></FooterTemplate>
+                                                </GridAggregateColumn>
+                                                <GridAggregateColumn Field="RetirementDeductions" Type="AggregateType.Sum">
+                                                    <FooterTemplate>@{ var a = (AggregateTemplateContext)context; }<strong>@Fmt(Convert.ToDecimal(a.Sum))</strong></FooterTemplate>
+                                                </GridAggregateColumn>
+                                                <GridAggregateColumn Field="NetPay" Type="AggregateType.Sum">
+                                                    <FooterTemplate>@{ var a = (AggregateTemplateContext)context; }<strong>@Fmt(Convert.ToDecimal(a.Sum))</strong></FooterTemplate>
+                                                </GridAggregateColumn>
+                                            </GridAggregateColumns>
+                                        </GridAggregate>
+                                    </GridAggregates>
                                     <GridTemplates><DetailTemplate Context="empCtx">
                                         @{ var emp = (PayRegisterEmployeeRow)empCtx; }
                                         @if (_lineDetailCache.TryGetValue(emp.EmployeePayrollResultId, out var lines))
                                         {
+                                            <div class="line-detail-inset">
                                             <SfGrid TValue="PayRegisterLineItem" DataSource="@lines.ToList()" CssClass="e-gridhover">
                                                 <GridColumns>
-                                                    <GridColumn HeaderText="Category" Field="Category" Width="120" />
-                                                    <GridColumn HeaderText="Code" Field="Code" Width="80" />
+                                                    <GridColumn HeaderText="Category" Field="Category" Width="190" />
+                                                    <GridColumn HeaderText="Code" Field="Code" Width="230" />
                                                     <GridColumn HeaderText="Description" Field="Description" />
-                                                    <GridColumn HeaderText="Amount" Field="Amount" TextAlign="TextAlign.Right" Width="90">
+                                                    <GridColumn HeaderText="Amount" Field="Amount" TextAlign="TextAlign.Right" Width="100">
                                                         <Template>
                                                             @{ var li = (PayRegisterLineItem)context; }
                                                             <span class="@(li.Amount < 0 ? "amount-negative" : "")">@Fmt(li.Amount)</span>
@@ -386,6 +449,7 @@
                                                     </GridColumn>
                                                 </GridColumns>
                                             </SfGrid>
+                                            </div>
                                         }
                                         else
                                         {
@@ -394,33 +458,135 @@
                                     </DetailTemplate></GridTemplates>
                                 </SfGrid>
 
-                                @* Totals bar — aggregates all filtered employees, not just the current page *@
-                                @if (!_empLoading && FilteredEmployeeRows.Any())
-                                {
-                                    <div class="emp-totals-bar">
-                                        <span><strong>Total (@FilteredCount)</strong></span>
-                                        <span>Gross: <strong>@Fmt(FilteredEmployeeRows.Sum(r => r.Gross))</strong></span>
-                                        <span>Fed Tax: <strong>@Fmt(FilteredEmployeeRows.Sum(r => r.FederalTax))</strong></span>
-                                        <span>SS EE: <strong>@Fmt(FilteredEmployeeRows.Sum(r => r.SsEe))</strong></span>
-                                        <span>Med EE: <strong>@Fmt(FilteredEmployeeRows.Sum(r => r.MedicareEe))</strong></span>
-                                        <span>State Tax: <strong>@Fmt(FilteredEmployeeRows.Sum(r => r.StateTax))</strong></span>
-                                        @if (_columnLabels.LabelLocalTax is not null)
-                                        {
-                                            <span>Local Tax: <strong>@Fmt(FilteredEmployeeRows.Sum(r => r.LocalTax))</strong></span>
-                                        }
-                                        <span>Benefits: <strong>@Fmt(FilteredEmployeeRows.Sum(r => r.BenefitDeductions))</strong></span>
-                                        <span>Retire: <strong>@Fmt(FilteredEmployeeRows.Sum(r => r.RetirementDeductions))</strong></span>
-                                        <span>Garnish: <strong>@Fmt(FilteredEmployeeRows.Sum(r => r.Garnishments))</strong></span>
-                                        <span>Net Pay: <strong>@Fmt(FilteredEmployeeRows.Sum(r => r.NetPay))</strong></span>
-                                        <span>ER SS: <strong>@Fmt(FilteredEmployeeRows.Sum(r => r.EmployerSs))</strong></span>
-                                        <span>ER Med: <strong>@Fmt(FilteredEmployeeRows.Sum(r => r.EmployerMedicare))</strong></span>
-                                        <span>ER Benefit: <strong>@Fmt(FilteredEmployeeRows.Sum(r => r.EmployerBenefit))</strong></span>
+                                <div class="export-row">
+                                    <div class="export-row__links">
+                                        <button class="btn-link" @onclick="ExportEmployeeCsvAsync">Download CSV</button>
+                                        <button class="btn-link" @onclick="ExportLineDetailCsvAsync">Export with Line Detail</button>
                                     </div>
-                                }
+                                    @if (!Env.IsProduction())
+                                    {
+                                        @if (_empCopiedRecent)
+                                        {
+                                            <span class="copy-confirmed">
+                                                <span class="e-icons e-circle-check"></span>
+                                                <span class="copy-confirmed__bubble">copied</span>
+                                            </span>
+                                        }
+                                        else
+                                        {
+                                            <button type="button" class="copy-btn" @onclick="CopyEmployeeTsvAsync" title="Copy TSV">
+                                                <span class="e-icons e-copy"></span>
+                                            </button>
+                                        }
+                                    }
+                                </div>
+                            }
+                        </div>
+                    }
+
+                    @* ── Employer Detail ─────────────────────────────────── *@
+                    @if (_activeTab == "employer")
+                    {
+                        <div class="tab-content">
+                            <div class="detail-toolbar">
+                                <SfTextBox @bind-Value="_empFilter" Input="OnEmpFilterInput"
+                                           Placeholder="Filter by name or number…" Width="240px" />
+                                <span class="detail-count">@FilteredCount employees</span>
+                            </div>
+
+                            @if (_empLoading)
+                            {
+                                <div class="tab-loading">Loading…</div>
+                            }
+                            else
+                            {
+                                <SfGrid TValue="PayRegisterEmployeeRow" DataSource="@_filteredRows"
+                                        AllowSorting="true" AllowPaging="false" CssClass="e-gridhover">
+                                    <GridEvents TValue="PayRegisterEmployeeRow" DetailsExpanded="OnEmpRowExpandingAsync" />
+                                    @* <GridPageSettings PageSize="20" /> *@
+                                    <GridColumns>
+                                        <GridColumn HeaderText="EE #" Field="EmployeeNumber" Width="100" />
+                                        <GridColumn HeaderText="Employee" Field="EmployeeName" Width="170" />
+                                        <GridColumn HeaderText="Dept" Field="DepartmentName" Width="120" />
+                                        <GridColumn HeaderText="Gross" Field="Gross" TextAlign="TextAlign.Right" Width="90">
+                                            <Template>@{ var e = (PayRegisterEmployeeRow)context; }@Fmt(e.Gross)</Template>
+                                        </GridColumn>
+                                        <GridColumn HeaderText="@_columnLabels.LabelErPension" Field="EmployerSs" TextAlign="TextAlign.Right" Width="85">
+                                            <Template>@{ var e = (PayRegisterEmployeeRow)context; }@Fmt(e.EmployerSs)</Template>
+                                        </GridColumn>
+                                        <GridColumn HeaderText="@_columnLabels.LabelErInsurance" Field="EmployerMedicare" TextAlign="TextAlign.Right" Width="115">
+                                            <Template>@{ var e = (PayRegisterEmployeeRow)context; }@Fmt(e.EmployerMedicare)</Template>
+                                        </GridColumn>
+                                        <GridColumn HeaderText="ER Benefit" Field="EmployerBenefit" TextAlign="TextAlign.Right" Width="100">
+                                            <Template>@{ var e = (PayRegisterEmployeeRow)context; }@Fmt(e.EmployerBenefit)</Template>
+                                        </GridColumn>
+                                    </GridColumns>
+                                    <GridAggregates>
+                                        <GridAggregate>
+                                            <GridAggregateColumns>
+                                                <GridAggregateColumn Field="Gross" Type="AggregateType.Sum">
+                                                    <FooterTemplate>@{ var a = (AggregateTemplateContext)context; }<strong>@Fmt(Convert.ToDecimal(a.Sum))</strong></FooterTemplate>
+                                                </GridAggregateColumn>
+                                                <GridAggregateColumn Field="EmployerSs" Type="AggregateType.Sum">
+                                                    <FooterTemplate>@{ var a = (AggregateTemplateContext)context; }<strong>@Fmt(Convert.ToDecimal(a.Sum))</strong></FooterTemplate>
+                                                </GridAggregateColumn>
+                                                <GridAggregateColumn Field="EmployerMedicare" Type="AggregateType.Sum">
+                                                    <FooterTemplate>@{ var a = (AggregateTemplateContext)context; }<strong>@Fmt(Convert.ToDecimal(a.Sum))</strong></FooterTemplate>
+                                                </GridAggregateColumn>
+                                                <GridAggregateColumn Field="EmployerBenefit" Type="AggregateType.Sum">
+                                                    <FooterTemplate>@{ var a = (AggregateTemplateContext)context; }<strong>@Fmt(Convert.ToDecimal(a.Sum))</strong></FooterTemplate>
+                                                </GridAggregateColumn>
+                                            </GridAggregateColumns>
+                                        </GridAggregate>
+                                    </GridAggregates>
+                                    <GridTemplates><DetailTemplate Context="empCtx">
+                                        @{ var emp = (PayRegisterEmployeeRow)empCtx; }
+                                        @if (_lineDetailCache.TryGetValue(emp.EmployeePayrollResultId, out var lines))
+                                        {
+                                            <div class="line-detail-inset">
+                                            <SfGrid TValue="PayRegisterLineItem" DataSource="@lines.ToList()" CssClass="e-gridhover">
+                                                <GridColumns>
+                                                    <GridColumn HeaderText="Category" Field="Category" Width="190" />
+                                                    <GridColumn HeaderText="Code" Field="Code" Width="230" />
+                                                    <GridColumn HeaderText="Description" Field="Description" />
+                                                    <GridColumn HeaderText="Amount" Field="Amount" TextAlign="TextAlign.Right" Width="100">
+                                                        <Template>
+                                                            @{ var li = (PayRegisterLineItem)context; }
+                                                            <span class="@(li.Amount < 0 ? "amount-negative" : "")">@Fmt(li.Amount)</span>
+                                                        </Template>
+                                                    </GridColumn>
+                                                </GridColumns>
+                                            </SfGrid>
+                                            </div>
+                                        }
+                                        else
+                                        {
+                                            <span class="tab-loading">Loading…</span>
+                                        }
+                                    </DetailTemplate></GridTemplates>
+                                </SfGrid>
 
                                 <div class="export-row">
-                                    <button class="btn-link" @onclick="ExportEmployeeCsvAsync">Download CSV</button>
-                                    <button class="btn-link" @onclick="ExportLineDetailCsvAsync">Export with Line Detail</button>
+                                    <div class="export-row__links">
+                                        <button class="btn-link" @onclick="ExportEmployeeCsvAsync">Download CSV</button>
+                                        <button class="btn-link" @onclick="ExportLineDetailCsvAsync">Export with Line Detail</button>
+                                    </div>
+                                    @if (!Env.IsProduction())
+                                    {
+                                        @if (_erCopiedRecent)
+                                        {
+                                            <span class="copy-confirmed">
+                                                <span class="e-icons e-circle-check"></span>
+                                                <span class="copy-confirmed__bubble">copied</span>
+                                            </span>
+                                        }
+                                        else
+                                        {
+                                            <button type="button" class="copy-btn" @onclick="CopyEmployerTsvAsync" title="Copy TSV">
+                                                <span class="e-icons e-copy"></span>
+                                            </button>
+                                        }
+                                    }
                                 </div>
                             }
                         </div>
@@ -460,22 +626,33 @@
     // Column labels (country-driven)
     private PayRegisterColumnLabels _columnLabels = PayRegisterColumnLabels.Default;
 
-    // Employee Detail
+    // Employee Detail (also serves Employer Detail — same row data, different column projection)
     private IReadOnlyList<PayRegisterEmployeeRow> _allEmployeeRows = [];
     private bool                                  _empLoading;
     private string                                _empFilter  = "";
+    // Stable List reference for SfGrid DataSource — recomputed only on data load / filter change.
+    // Without this, every render produced a new List and Syncfusion reset row-expansion state.
+    private List<PayRegisterEmployeeRow>          _filteredRows = [];
+    private bool                                  _empCopiedRecent;
+    private bool                                  _erCopiedRecent;
+    private bool                                  _orgCopiedRecent;
+    private bool                                  _summaryCopiedRecent;
     private readonly Dictionary<Guid, IReadOnlyList<PayRegisterLineItem>> _lineDetailCache = new();
 
     // ── Computed ──────────────────────────────────────────────────────────────
 
-    private IEnumerable<PayRegisterEmployeeRow> FilteredEmployeeRows =>
-        string.IsNullOrWhiteSpace(_empFilter)
-            ? _allEmployeeRows
+    private IEnumerable<PayRegisterEmployeeRow> FilteredEmployeeRows => _filteredRows;
+
+    private int FilteredCount => _filteredRows.Count;
+
+    private void RecomputeFilteredRows()
+    {
+        _filteredRows = string.IsNullOrWhiteSpace(_empFilter)
+            ? _allEmployeeRows.ToList()
             : _allEmployeeRows.Where(r =>
                 r.EmployeeNumber.Contains(_empFilter, StringComparison.OrdinalIgnoreCase) ||
-                r.EmployeeName.Contains(_empFilter, StringComparison.OrdinalIgnoreCase));
-
-    private int FilteredCount => FilteredEmployeeRows.Count();
+                r.EmployeeName.Contains(_empFilter, StringComparison.OrdinalIgnoreCase)).ToList();
+    }
 
     private string OrgGroupLabel =>
         _orgDimension switch
@@ -523,6 +700,7 @@
         _runHeader     = null;
         _summary       = null;
         _allEmployeeRows = [];
+        _filteredRows    = [];
         _orgRows         = [];
         _orgGroupEmployees.Clear();
         _lineDetailCache.Clear();
@@ -545,9 +723,9 @@
         }
 
         // Re-load whichever tab the user is currently viewing
-        if (_activeTab == "org")          await LoadOrgAsync();
-        else if (_activeTab == "detail")  await LoadEmployeeDetailAsync();
-        else                              await LoadSummaryAsync();
+        if (_activeTab == "org")                                       await LoadOrgAsync();
+        else if (_activeTab == "detail" || _activeTab == "employer")   await LoadEmployeeDetailAsync();
+        else                                                            await LoadSummaryAsync();
     }
 
     // ── Tab switching ─────────────────────────────────────────────────────────
@@ -555,9 +733,10 @@
     private async Task SwitchTab(string tab)
     {
         _activeTab = tab;
-        if (tab == "summary" && _summary is null)       await LoadSummaryAsync();
-        if (tab == "org"     && !_orgRows.Any())        await LoadOrgAsync();
-        if (tab == "detail"  && !_allEmployeeRows.Any()) await LoadEmployeeDetailAsync();
+        if (tab == "summary"  && _summary is null)        await LoadSummaryAsync();
+        if (tab == "org"      && !_orgRows.Any())         await LoadOrgAsync();
+        if (tab == "detail"   && !_allEmployeeRows.Any()) await LoadEmployeeDetailAsync();
+        if (tab == "employer" && !_allEmployeeRows.Any()) await LoadEmployeeDetailAsync();
     }
 
     private async Task SwitchOrgDimensionAsync(string dimension)
@@ -593,6 +772,7 @@
         _empLoading = true;
         StateHasChanged();
         _allEmployeeRows = await QueryService.GetEmployeeDetailAsync(_selectedRunId.Value);
+        RecomputeFilteredRows();
         _empLoading = false;
     }
 
@@ -633,6 +813,7 @@
     private void OnEmpFilterInput(InputEventArgs args)
     {
         _empFilter = args.Value;
+        RecomputeFilteredRows();
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -701,12 +882,107 @@
         var base64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(content));
         await JS.InvokeVoidAsync("allworkFiles.downloadBase64", filename, "text/csv", base64);
     }
+
+    // Dev/test helper: copy current Employee Detail rows as TSV (Excel pastes TSV natively).
+    private async Task CopyEmployeeTsvAsync()
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("Employee #\tName\tDepartment\tGross\tFed Tax\tSS (EE)\tMedicare (EE)\tState Tax\tLocal Tax\tBenefits\tRetire (EE)\tNet Pay");
+        foreach (var r in FilteredEmployeeRows.OrderBy(r => r.EmployeeNumber))
+            sb.AppendLine(string.Join('\t',
+                r.EmployeeNumber,
+                Tsv(r.EmployeeName),
+                Tsv(r.DepartmentName),
+                r.Gross.ToString("F2"),
+                r.FederalTax.ToString("F2"),
+                r.SsEe.ToString("F2"),
+                r.MedicareEe.ToString("F2"),
+                r.StateTax.ToString("F2"),
+                r.LocalTax.ToString("F2"),
+                r.BenefitDeductions.ToString("F2"),
+                r.RetirementDeductions.ToString("F2"),
+                r.NetPay.ToString("F2")));
+        await JS.InvokeVoidAsync("allworkClipboard.copy", sb.ToString());
+        _empCopiedRecent = true;
+        StateHasChanged();
+        await Task.Delay(1800);
+        _empCopiedRecent = false;
+    }
+
+    private async Task CopyEmployerTsvAsync()
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine($"Employee #\tName\tDepartment\tGross\t{_columnLabels.LabelErPension}\t{_columnLabels.LabelErInsurance}\tER Benefit");
+        foreach (var r in FilteredEmployeeRows.OrderBy(r => r.EmployeeNumber))
+            sb.AppendLine(string.Join('\t',
+                r.EmployeeNumber,
+                Tsv(r.EmployeeName),
+                Tsv(r.DepartmentName),
+                r.Gross.ToString("F2"),
+                r.EmployerSs.ToString("F2"),
+                r.EmployerMedicare.ToString("F2"),
+                r.EmployerBenefit.ToString("F2")));
+        await JS.InvokeVoidAsync("allworkClipboard.copy", sb.ToString());
+        _erCopiedRecent = true;
+        StateHasChanged();
+        await Task.Delay(1800);
+        _erCopiedRecent = false;
+    }
+
+    private async Task CopyOrgTsvAsync()
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine($"{OrgGroupLabel}\tHeadcount\tGross Wages\tEE Tax Withheld\tER Tax Cost\tER Benefit Cost\tNet Pay\tTotal ER Cost");
+        foreach (var r in _orgRows)
+            sb.AppendLine(string.Join('\t',
+                Tsv(r.GroupName),
+                r.Headcount.ToString(),
+                r.GrossWages.ToString("F2"),
+                r.EmployeeTaxWithheld.ToString("F2"),
+                r.EmployerTaxCost.ToString("F2"),
+                r.EmployerBenefitCost.ToString("F2"),
+                r.NetPay.ToString("F2"),
+                r.TotalEmployerCost.ToString("F2")));
+        await JS.InvokeVoidAsync("allworkClipboard.copy", sb.ToString());
+        _orgCopiedRecent = true;
+        StateHasChanged();
+        await Task.Delay(1800);
+        _orgCopiedRecent = false;
+    }
+
+    private async Task CopySummaryTsvAsync()
+    {
+        if (_summary is null) return;
+        var sb = new StringBuilder();
+        sb.AppendLine("Line\tAmount");
+        sb.AppendLine($"Total Gross Payroll\t{_summary.TotalGrossPayroll:F2}");
+        sb.AppendLine($"Total Employer Taxes\t{_summary.TotalEmployerTaxes:F2}");
+        sb.AppendLine($"Total Employer Benefit Contributions\t{_summary.TotalEmployerBenefitContrib:F2}");
+        sb.AppendLine($"Total Employer Cost\t{_summary.TotalEmployerCost:F2}");
+        sb.AppendLine($"Total Employee Tax Withholdings\t{_summary.TotalEmployeeTaxWithholdings:F2}");
+        sb.AppendLine($"Total Employee Benefit Deductions\t{_summary.TotalEmployeeBenefitDeducts:F2}");
+        sb.AppendLine($"Total Net Pay\t{_summary.TotalNetPay:F2}");
+        sb.AppendLine($"Total Cash Required\t{_summary.TotalCashRequired:F2}");
+        await JS.InvokeVoidAsync("allworkClipboard.copy", sb.ToString());
+        _summaryCopiedRecent = true;
+        StateHasChanged();
+        await Task.Delay(1800);
+        _summaryCopiedRecent = false;
+    }
+
+    // TSV requires that tabs/newlines inside string fields be neutralised — Excel parses
+    // those as cell/row delimiters, so leaving them in would shred the layout on paste.
+    private static string Tsv(string? s) =>
+        (s ?? "").Replace('\t', ' ').Replace('\r', ' ').Replace('\n', ' ');
 }
 
 <style>
     .register-layout {
         display: flex;
-        height: calc(100vh - var(--topbar-height) - 2 * var(--space-6));
+        /* Subtract the PayrollShell tab strip too — this page renders below it, not
+           directly in .shell-content. Omitting it overflowed by the tab-strip height
+           and forced a page-level scrollbar. */
+        height: calc(100vh - var(--topbar-height) - var(--payroll-tabs-height) - 2 * var(--space-6));
         overflow: hidden;
     }
 
@@ -930,23 +1206,58 @@
 
     .table-scroll { overflow-x: auto; }
 
-    .emp-totals-bar {
-        display: flex;
-        flex-wrap: wrap;
-        gap: var(--space-3) var(--space-5);
-        font-size: var(--font-size-sm);
-        color: var(--aw-navy);
-        background: #f9fafb;
-        border: 1px solid #e5e7eb;
-        border-top: 2px solid #d1d5db;
-        padding: var(--space-2) var(--space-3);
-        margin-top: -1px;
+    /* Constrain the per-employee line-item inset so the boundary between the row's
+       expansion area and the unused right side is obvious. */
+    .line-detail-inset {
+        width: 62.5%;
+        border: 1px solid color-mix(in srgb, var(--module-payroll, #0f766e) 50%, white);
+        border-radius: 4px;
+        padding: 6px;
+        background: white;
     }
 
+    /* Grid footer: CSV links bottom-left, dev "Copy TSV" affordance bottom-right, same line. */
     .export-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: var(--space-2);
+        min-height: 22px;
+    }
+    .export-row__links {
         display: flex;
         gap: var(--space-4);
         font-size: var(--font-size-sm);
-        margin-top: var(--space-2);
+    }
+    .copy-btn {
+        background: transparent;
+        border: none;
+        cursor: pointer;
+        padding: 2px 6px;
+        color: #6b7280;
+        line-height: 1;
+        transition: color .15s ease;
+    }
+    .copy-btn .e-icons { font-size: 16px; }
+    .copy-btn:hover { color: var(--module-payroll, #0f766e); }
+    .copy-confirmed {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--module-payroll, #0f766e);
+        animation: copyFade .25s ease-out;
+    }
+    .copy-confirmed .e-icons { font-size: 16px; }
+    .copy-confirmed__bubble {
+        background: color-mix(in srgb, var(--module-payroll, #0f766e) 15%, white);
+        border: 1px solid color-mix(in srgb, var(--module-payroll, #0f766e) 45%, white);
+        padding: 1px 8px;
+        border-radius: 10px;
+        font-size: .75rem;
+        font-weight: 500;
+    }
+    @@keyframes copyFade {
+        from { opacity: 0; transform: translateY(-2px); }
+        to   { opacity: 1; transform: translateY(0); }
     }
 </style>
