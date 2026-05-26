@@ -473,14 +473,18 @@ html, body {
 /* ------------------------------------------------------------------ */
 .page-container  { padding: var(--space-6); }
 
-/* Standard inset for an in-grid row drill-down (a DetailTemplate). Narrower than
-   the host grid (so it nests under its parent row rather than reading as another
-   full-width grid — see the pack-columns preference), with a soft border tinted
-   from the page's accent so it feels native to whatever page hosts it.
-   A page/shell sets --inset-accent to its own accent (e.g. the active-tab color);
-   absent that, it falls back to a neutral slate. */
+/* Standard inset for an in-grid row drill-down (a DetailTemplate). The box hugs
+   its content (fit-content) so it nests under its parent row rather than reading
+   as another full-width grid (see the pack-columns preference), capped at 62.5%
+   of the host grid so a wide detail can't span the whole page. The intent is
+   fit-to-content; 62.5% is only the ceiling. Soft border tinted from the page's
+   accent so it feels native to whatever page hosts it — a page/shell sets
+   --inset-accent (e.g. the active-tab color); absent that, a neutral slate.
+   NOTE: the inner SfGrid must be Width="auto" so it reports an intrinsic width
+   for fit-content to measure; a Width="100%" grid would collapse the box. */
 .grid-detail-inset {
-    width: 62.5%;
+    width: fit-content;
+    max-width: 62.5%;
     border: 1px solid color-mix(in srgb, var(--inset-accent, #94a3b8) 50%, white);
     border-radius: 4px;
     padding: 6px;

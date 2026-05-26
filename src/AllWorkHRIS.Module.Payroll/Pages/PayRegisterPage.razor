@@ -236,7 +236,13 @@
                             }
                             else
                             {
-                                <SfGrid TValue="PayRegisterOrgRow" DataSource="@_orgRows.ToList()" AllowSorting="true" CssClass="e-gridhover">
+                                @* Bind the stable _orgRows reference, NOT _orgRows.ToList():
+                                   a per-render .ToList() hands SfGrid a new list instance on the
+                                   StateHasChanged fired by OnOrgRowExpandingAsync, so the grid
+                                   rebinds and drops the just-opened detail row (flash open/closed).
+                                   The Employee Detail grid binds its stable _filteredRows for the
+                                   same reason. *@
+                                <SfGrid TValue="PayRegisterOrgRow" DataSource="@_orgRows" AllowSorting="true" CssClass="e-gridhover">
                                     <GridEvents TValue="PayRegisterOrgRow" DetailsExpanded="OnOrgRowExpandingAsync" />
                                     <GridColumns>
                                         <GridColumn HeaderText="@OrgGroupLabel" Field="GroupName" />
@@ -291,28 +297,38 @@
                                         @{ var orgRow = (PayRegisterOrgRow)orgCtx; }
                                         @if (_orgGroupEmployees.TryGetValue(orgRow.GroupId, out var subEmps))
                                         {
-                                            <SfGrid TValue="PayRegisterEmployeeRow" DataSource="@subEmps.ToList()" CssClass="e-gridhover">
+                                            <div class="grid-detail-inset">
+                                            @* Width="auto" so the grid hugs its AutoFit columns instead of
+                                               stretching to the inset width — otherwise the leftover space
+                                               renders as an empty filler column (no flexible column here to
+                                               absorb it, unlike the line-detail grid's Description column). *@
+                                            <SfGrid TValue="PayRegisterEmployeeRow" DataSource="@subEmps" Width="auto" CssClass="e-gridhover">
                                                 <GridColumns>
-                                                    <GridColumn HeaderText="#" Field="EmployeeNumber" Width="60" />
-                                                    <GridColumn HeaderText="Employee" Field="EmployeeName" />
-                                                    <GridColumn HeaderText="Dept" Field="DepartmentName" Width="100" />
-                                                    <GridColumn HeaderText="Gross" TextAlign="TextAlign.Right" Width="80">
+                                                    <GridColumn HeaderText="EE #" Field="EmployeeNumber" AutoFit="true" />
+                                                    <GridColumn HeaderText="Employee" Field="EmployeeName" AutoFit="true" />
+                                                    <GridColumn HeaderText="Dept" Field="DepartmentName" AutoFit="true" />
+                                                    @* EE #/Employee/Dept stay AutoFit (unbounded text, never clip).
+                                                       Numeric columns get comfortable fixed widths — sized to
+                                                       header + max currency with air, so the number columns aren't
+                                                       cramped. Currency width is predictable, so clip risk is nil. *@
+                                                    <GridColumn HeaderText="Gross" TextAlign="TextAlign.Right" Width="95">
                                                         <Template>@{ var e = (PayRegisterEmployeeRow)context; }@Fmt(e.Gross)</Template>
                                                     </GridColumn>
-                                                    <GridColumn HeaderText="Fed Tax" TextAlign="TextAlign.Right" Width="70">
+                                                    <GridColumn HeaderText="Fed Tax" TextAlign="TextAlign.Right" Width="90">
                                                         <Template>@{ var e = (PayRegisterEmployeeRow)context; }@Fmt(e.FederalTax)</Template>
                                                     </GridColumn>
-                                                    <GridColumn HeaderText="SS (EE)" TextAlign="TextAlign.Right" Width="70">
+                                                    <GridColumn HeaderText="SS (EE)" TextAlign="TextAlign.Right" Width="90">
                                                         <Template>@{ var e = (PayRegisterEmployeeRow)context; }@Fmt(e.SsEe)</Template>
                                                     </GridColumn>
-                                                    <GridColumn HeaderText="Med (EE)" TextAlign="TextAlign.Right" Width="70">
+                                                    <GridColumn HeaderText="Med (EE)" TextAlign="TextAlign.Right" Width="95">
                                                         <Template>@{ var e = (PayRegisterEmployeeRow)context; }@Fmt(e.MedicareEe)</Template>
                                                     </GridColumn>
-                                                    <GridColumn HeaderText="Net Pay" TextAlign="TextAlign.Right" Width="80">
+                                                    <GridColumn HeaderText="Net Pay" TextAlign="TextAlign.Right" Width="100">
                                                         <Template>@{ var e = (PayRegisterEmployeeRow)context; }@Fmt(e.NetPay)</Template>
                                                     </GridColumn>
                                                 </GridColumns>
                                             </SfGrid>
+                                            </div>
                                         }
                                         else
                                         {
@@ -436,11 +452,11 @@
                                         @if (_lineDetailCache.TryGetValue(emp.EmployeePayrollResultId, out var lines))
                                         {
                                             <div class="grid-detail-inset">
-                                            <SfGrid TValue="PayRegisterLineItem" DataSource="@lines.ToList()" CssClass="e-gridhover">
+                                            <SfGrid TValue="PayRegisterLineItem" DataSource="@lines" Width="auto" CssClass="e-gridhover">
                                                 <GridColumns>
                                                     <GridColumn HeaderText="Category" Field="Category" Width="190" />
                                                     <GridColumn HeaderText="Code" Field="Code" Width="230" />
-                                                    <GridColumn HeaderText="Description" Field="Description" />
+                                                    <GridColumn HeaderText="Description" Field="Description" AutoFit="true" />
                                                     <GridColumn HeaderText="Amount" Field="Amount" TextAlign="TextAlign.Right" Width="100">
                                                         <Template>
                                                             @{ var li = (PayRegisterLineItem)context; }
@@ -544,11 +560,11 @@
                                         @if (_lineDetailCache.TryGetValue(emp.EmployeePayrollResultId, out var lines))
                                         {
                                             <div class="grid-detail-inset">
-                                            <SfGrid TValue="PayRegisterLineItem" DataSource="@lines.ToList()" CssClass="e-gridhover">
+                                            <SfGrid TValue="PayRegisterLineItem" DataSource="@lines" Width="auto" CssClass="e-gridhover">
                                                 <GridColumns>
                                                     <GridColumn HeaderText="Category" Field="Category" Width="190" />
                                                     <GridColumn HeaderText="Code" Field="Code" Width="230" />
-                                                    <GridColumn HeaderText="Description" Field="Description" />
+                                                    <GridColumn HeaderText="Description" Field="Description" AutoFit="true" />
                                                     <GridColumn HeaderText="Amount" Field="Amount" TextAlign="TextAlign.Right" Width="100">
                                                         <Template>
                                                             @{ var li = (PayRegisterLineItem)context; }
