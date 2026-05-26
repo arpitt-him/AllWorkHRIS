@@ -170,6 +170,20 @@
         width: 12rem;
     }
 
+    /* Pack columns to content rather than stretching to full width — a short
+       trailing column (Menu Items) orphaned at the far right is hard to trace
+       back to its row. Pin the first column to the same 12rem as the key/value
+       tables so the second column (Version) still aligns vertically with the
+       value columns in the Platform and Database sections. */
+    .modules-table {
+        width: auto;
+    }
+
+    .modules-table th:first-child,
+    .modules-table td:first-child {
+        width: 12rem;
+    }
+
     .module-name    { font-weight: 600; }
     .module-version { font-family: monospace; color: var(--color-text-secondary, #6b7280); }
     .module-menu-count { text-align: center; }
