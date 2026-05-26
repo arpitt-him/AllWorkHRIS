@@ -21,6 +21,19 @@
 
   <PropertyGroup>
     <WarningsAsErrors>$(WarningsAsErrors);RS0030</WarningsAsErrors>
+
+    <!--
+      Component version (SemVer) — single source of truth for the platform and every
+      module (lockstep). Drives each assembly's version, which IPlatformModule surfaces
+      as ModuleVersion (the per-module hardcoded overrides were removed). Bump per release:
+      Major = breaking module/schema contract, Minor = features, Patch = fixes.
+      A module that needs to diverge can set its own <Version> in its .csproj — this is
+      just the default. See ADR-018.
+
+      Baseline 0.6.1: continues the existing v0.1–v0.6 release-tag line (HEAD was v0.6 + 8
+      commits) with patch-level granularity, so the road to 1.0 is paced deliberately.
+    -->
+    <VersionPrefix>0.6.1</VersionPrefix>
   </PropertyGroup>
 
   <ItemGroup>

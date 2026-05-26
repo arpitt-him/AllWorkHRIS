@@ -1,7 +1,14 @@
 // AllWorkHRIS.Core/Data/IConnectionFactory.cs
 using System.Data;
+using System.Data.Common;
 
 namespace AllWorkHRIS.Core.Data;
+
+/// <summary>
+/// Non-sensitive details identifying which database the app is connected to.
+/// Never includes credentials (no username or password).
+/// </summary>
+public sealed record DatabaseInfo(string Provider, string Server, string Database);
 
 public interface IConnectionFactory
 {
@@ -11,6 +18,13 @@ public interface IConnectionFactory
     /// Caller is responsible for disposing the connection.
     /// </summary>
     IDbConnection CreateConnection();
+
+    /// <summary>
+    /// Returns the provider, server/host, and database name from the configured
+    /// connection string — for display (e.g. System Settings). Credential fields
+    /// are never read or returned. Does not open a connection.
+    /// </summary>
+    DatabaseInfo GetDatabaseInfo();
 }
 
 public sealed class ConnectionFactory : IConnectionFactory
@@ -38,5 +52,24 @@ public sealed class ConnectionFactory : IConnectionFactory
 
         connection.Open();
         return connection;
+    }
+
+    public DatabaseInfo GetDatabaseInfo()
+    {
+        // Parse key/value pairs without opening a connection. Credential keys
+        // (Username/User Id/Password/Pwd) are deliberately never read.
+        var b = new DbConnectionStringBuilder { ConnectionString = _connectionString };
+
+        string Lookup(params string[] keys)
+        {
+            foreach (var k in keys)
+                if (b.TryGetValue(k, out var v) && v?.ToString() is { Length: > 0 } s)
+                    return s;
+            return "—";
+        }
+
+        var server   = Lookup("Host", "Server", "Data Source", "DataSource", "Address");
+        var database = Lookup("Database", "Initial Catalog");
+        return new DatabaseInfo(_provider, server, database);
     }
 }

@@ -147,5 +147,8 @@ public sealed class PayrollModuleCompositionTests
     {
         public System.Data.IDbConnection CreateConnection()
             => throw new NotSupportedException("FakeConnectionFactory is not for DB use.");
+
+        public AllWorkHRIS.Core.Data.DatabaseInfo GetDatabaseInfo()
+            => new("test", "test", "test");
     }
 }

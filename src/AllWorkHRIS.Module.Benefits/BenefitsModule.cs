@@ -21,7 +21,6 @@ namespace AllWorkHRIS.Module.Benefits;
 public sealed class BenefitsModule : IPlatformModule
 {
     public string  ModuleName        => "Benefits";
-    public string  ModuleVersion     => "0.1.0";
     public string? ModuleDescription => "Benefit deduction elections and payroll delivery.";
 
     public void Register(ContainerBuilder builder)

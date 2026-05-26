@@ -17,7 +17,6 @@ namespace AllWorkHRIS.Module.TimeAttendance;
 public sealed class TimeAttendanceModule : IPlatformModule
 {
     public string  ModuleName        => "TimeAttendance";
-    public string  ModuleVersion     => "0.1.0";
     public string? ModuleDescription => "Time entry capture, approval, overtime detection, and payroll handoff.";
 
     public void Register(ContainerBuilder builder)

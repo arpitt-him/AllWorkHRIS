@@ -1,9 +1,15 @@
 @page "/about"
 @rendermode InteractiveServer
+@using System.Reflection
 @using AllWorkHRIS.Core.Composition
+@using AllWorkHRIS.Core.Data
 @using AllWorkHRIS.Core.Temporal
+@using Microsoft.AspNetCore.Hosting
+@using Microsoft.Extensions.Hosting
 @inject IReadOnlyList<IPlatformModule> Modules
 @inject ITemporalOverrideService TemporalOverride
+@inject IConnectionFactory ConnectionFactory
+@inject IWebHostEnvironment Env
 
 <PageTitle>System Settings — AllWork HRIS</PageTitle>
 
@@ -21,6 +27,10 @@
             <tr>
                 <th>Application</th>
                 <td>AllWork HRIS</td>
+            </tr>
+            <tr>
+                <th>Version</th>
+                <td>@AppVersion()</td>
             </tr>
             <tr>
                 <th>Runtime</th>
@@ -67,12 +77,58 @@
     }
 </div>
 
+<div class="about-section">
+    <h2 class="section-title">Database</h2>
+    @{ var db = GetDbInfo(); }
+    <table class="about-table">
+        <tbody>
+            <tr>
+                <th>Provider</th>
+                <td>@db.Provider</td>
+            </tr>
+            <tr>
+                <th>Server</th>
+                <td>@db.Server</td>
+            </tr>
+            <tr>
+                <th>Database</th>
+                <td>@db.Database</td>
+            </tr>
+        </tbody>
+    </table>
+    @if (!Env.IsProduction())
+    {
+        <p class="text-muted text-sm" style="margin-top:var(--space-2)">
+            Confirm you're pointed at the intended database (e.g. <code>allworkhris_dev</code>) before running payroll.
+        </p>
+    }
+</div>
+
 @if (TemporalOverride.IsEnabled)
 {
     <div class="about-section">
         <h2 class="section-title">Testing Tools</h2>
         <TemporalOverrideBar />
     </div>
+}
+
+@code {
+    // Safe DB identity (provider/server/database, no credentials). Defensive in case
+    // the connection string can't be parsed.
+    private DatabaseInfo GetDbInfo()
+    {
+        try { return ConnectionFactory.GetDatabaseInfo(); }
+        catch { return new DatabaseInfo("—", "—", "—"); }
+    }
+
+    // Product version from the host assembly's informational version (SemVer + git SHA,
+    // e.g. "0.6.1+abc1234"); falls back to the numeric assembly version. See ADR-018.
+    private static string AppVersion()
+    {
+        var asm  = System.Reflection.Assembly.GetExecutingAssembly();
+        var info = asm.GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        return string.IsNullOrWhiteSpace(info) ? (asm.GetName().Version?.ToString(3) ?? "—") : info;
+    }
 }
 
 <style>

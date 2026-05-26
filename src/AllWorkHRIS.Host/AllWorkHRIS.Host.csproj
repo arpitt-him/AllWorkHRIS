@@ -24,4 +24,26 @@
     <ProjectReference Include="..\AllWorkHRIS.Host.SharedUI\AllWorkHRIS.Host.SharedUI.csproj" />
   </ItemGroup>
 
+  <!--
+    Build provenance (ADR-018): append the short git SHA to the informational version so a
+    running build is identifiable as e.g. 0.6.1+abc1234 on the System Settings page.
+    Fail-safe: ContinueOnError + a guard, so a missing git / non-repo build never breaks the
+    build — it just omits the suffix.
+  -->
+  <Target Name="StampGitShaIntoInformationalVersion"
+          BeforeTargets="AddSourceRevisionToInformationalVersion;GetAssemblyVersion"
+          Condition="'$(SourceRevisionId)' == ''">
+    <Exec Command="git rev-parse --short HEAD"
+          ConsoleToMSBuild="true" ContinueOnError="true"
+          StandardOutputImportance="low" StandardErrorImportance="low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_GitShortSha" />
+      <Output TaskParameter="ExitCode" PropertyName="_GitExitCode" />
+    </Exec>
+    <!-- The SDK appends SourceRevisionId to AssemblyInformationalVersion as "+<sha>"
+         (IncludeSourceRevisionInInformationalVersion defaults true). -->
+    <PropertyGroup Condition="'$(_GitExitCode)' == '0' and '$(_GitShortSha)' != ''">
+      <SourceRevisionId>$(_GitShortSha)</SourceRevisionId>
+    </PropertyGroup>
+  </Target>
+
 </Project>

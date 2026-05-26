@@ -18,7 +18,6 @@ namespace AllWorkHRIS.Module.Payroll;
 public sealed class PayrollModule : IPlatformModule
 {
     public string  ModuleName        => "Payroll";
-    public string  ModuleVersion     => "0.1.0";
     public string? ModuleDescription => "Payroll run lifecycle, calculation engine, accumulators, and pay register.";
 
     public void Register(ContainerBuilder builder)

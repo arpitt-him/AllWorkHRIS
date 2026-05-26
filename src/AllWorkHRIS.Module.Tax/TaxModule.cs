@@ -13,7 +13,6 @@ namespace AllWorkHRIS.Module.Tax;
 public sealed class TaxModule : IPlatformModule
 {
     public string  ModuleName        => "Tax";
-    public string  ModuleVersion     => "0.1.0";
     public string? ModuleDescription => "Payroll calculation pipeline — tax withholdings, social insurance, and employer contributions.";
 
     public void Register(ContainerBuilder builder)
