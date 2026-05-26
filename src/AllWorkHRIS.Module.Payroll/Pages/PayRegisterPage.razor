@@ -552,12 +552,13 @@
                             }
                             else
                             {
+                                <div class="aw-paged-detail-grid">
                                 <SfGrid TValue="PayRegisterEmployeeRow" DataSource="@_filteredRows"
-                                        AllowSorting="true" AllowPaging="false" CssClass="e-gridhover">
+                                        AllowSorting="true" AllowPaging="true" Height="auto" Width="100%" CssClass="e-gridhover">
                                     <GridEvents TValue="PayRegisterEmployeeRow" DetailsExpanded="OnEmpRowExpandingAsync" />
-                                    @* <GridPageSettings PageSize="20" /> *@
+                                    <GridPageSettings PageSize="20" />
                                     <GridColumns>
-                                        <GridColumn HeaderText="EE #" Field="EmployeeNumber" Width="100" />
+                                        <GridColumn HeaderText="EE #" Field="EmployeeNumber" />
                                         <GridColumn HeaderText="Employee" Field="EmployeeName" Width="170" />
                                         <GridColumn HeaderText="Dept" Field="DepartmentName" Width="120" />
                                         <GridColumn HeaderText="Gross" Field="Gross" TextAlign="TextAlign.Right" Width="90">
@@ -617,6 +618,7 @@
                                         }
                                     </DetailTemplate></GridTemplates>
                                 </SfGrid>
+                                </div> @* /.aw-paged-detail-grid (Employer Detail) *@
 
                                 <div class="export-row">
                                     <div class="export-row__links">
