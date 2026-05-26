@@ -1123,10 +1123,9 @@ html, body {
     display: flex;
     flex-direction: column;
     min-height: 0;
-    /* Cancel .shell-content's top padding so the sticky tab strip pins flush to the
-       very top of the scroll area — otherwise content scrolls through the padding
-       band above the strip. The page's own top padding still provides spacing. */
-    margin-top: calc(-1 * var(--space-6));
+    /* Natural height: .shell-content (the full-width content area) owns the scroll, so
+       the scrollbar sits at the window's right edge — not inset inside the content. The
+       tab strip scrolls with the page (no sticky overlay, so no gap / scroll-through). */
 }
 
 .payroll-shell__header {
@@ -1190,10 +1189,6 @@ html, body {
     background: white;
     border-bottom: 2px solid #E5E7EB;
     gap: 0;
-    /* Stay pinned while the page scrolls at the browser edge (.shell-content). */
-    position: sticky;
-    top: 0;
-    z-index: 5;
 }
 
 .payroll-shell__body { flex: 1; }

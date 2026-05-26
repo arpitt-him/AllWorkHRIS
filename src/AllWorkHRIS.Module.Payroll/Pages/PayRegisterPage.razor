@@ -998,11 +998,11 @@
            active tab uses, so the inset always matches the tab-link color. */
         --inset-accent: var(--module-payroll, #0f766e);
         display: flex;
-        /* Subtract the PayrollShell tab strip too — this page renders below it, not
-           directly in .shell-content. Omitting it overflowed by the tab-strip height
-           and forced a page-level scrollbar. */
-        height: calc(100vh - var(--topbar-height) - var(--payroll-tabs-height) - 2 * var(--space-6));
-        overflow: hidden;
+        /* Natural flow: .shell-content (full-width content area) owns the scroll, so the
+           scrollbar sits at the window's right edge and an expanded detail inset grows
+           the page rather than an inset pane scrollbar. Top-align so the run-nav keeps
+           its natural height instead of stretching to the content. */
+        align-items: flex-start;
     }
 
     .register-nav {
@@ -1073,7 +1073,7 @@
 
     .register-content {
         flex: 1;
-        overflow-y: auto;
+        min-width: 0;
         padding: var(--space-5);
         display: flex;
         flex-direction: column;
