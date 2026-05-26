@@ -108,10 +108,11 @@
 
     <div class="shell-main">
         <TopBar />
-        @* Fixed slot for a shell's tab strip (e.g. PayrollShell) — rendered OUTSIDE
-           .shell-content so it stays pinned while the page scrolls. Empty for shells
-           that don't provide it. *@
-        <SectionOutlet SectionName="payroll-shell-tabs" />
+        @* Fixed slot for the active shell's tab strip (PayrollShell / HrisShell) —
+           rendered OUTSIDE .shell-content so it stays pinned while the page scrolls.
+           Only one shell is active at a time, so they share this single outlet.
+           Empty for pages whose layout doesn't provide it. *@
+        <SectionOutlet SectionName="shell-tabs" />
         <div class="shell-content">
             <ErrorBoundary>
                 <ChildContent>@Body</ChildContent>

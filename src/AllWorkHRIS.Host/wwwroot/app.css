@@ -1275,6 +1275,9 @@ html, body {
     background: white;
     border-bottom: 2px solid #E5E7EB;
     gap: 0;
+    /* Rendered in MainLayout's fixed slot (above .shell-content); hold height so it
+       doesn't compress and never scrolls with the page. */
+    flex-shrink: 0;
 }
 
 .hris-shell__body { flex: 1; }

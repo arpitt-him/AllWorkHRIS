@@ -1,9 +1,12 @@
 @inherits LayoutComponentBase
 @layout MainLayout
 @inject NavigationManager Nav
+@using Microsoft.AspNetCore.Components.Sections
 
-<div class="hris-shell">
-
+@* Tab strip renders into MainLayout's fixed slot (above .shell-content), so it stays
+   pinned while the page scrolls at the window edge. Shares the "shell-tabs" outlet
+   with PayrollShell (only one shell is active at a time). *@
+<SectionContent SectionName="shell-tabs">
     <div class="hris-shell__tabs">
         <a class="hris-tab @ActiveClass("/hris/employees")"         href="/hris/employees">Employees</a>
         <a class="hris-tab @ActiveClass("/hris/org")"               href="/hris/org">Org Structure</a>
@@ -11,12 +14,9 @@
         <a class="hris-tab @ActiveClass("/hris/workqueue")"         href="/hris/workqueue">Work Queue</a>
         <a class="hris-tab @ActiveClass("/hris/documents")"         href="/hris/documents/expiring">Documents</a>
     </div>
+</SectionContent>
 
-    <div class="hris-shell__body">
-        @Body
-    </div>
-
-</div>
+@Body
 
 @code {
     private string ActiveClass(string segment)
