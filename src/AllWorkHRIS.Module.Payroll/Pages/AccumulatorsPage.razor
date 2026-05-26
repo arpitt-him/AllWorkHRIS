@@ -158,17 +158,20 @@
                                     <span class="text-muted text-sm">@_filteredBalances.Count of @_employeeBalances.Count</span>
                                 }
                             </div>
-                            <div class="panel-card no-pad">
-                                @* Inline DetailTemplate drill-down with paging OFF. Paging +
-                                   DetailTemplate together produce a spurious inert grid
-                                   scrollbar (KI-1, re-confirmed 2026-05-26); the list is bounded
-                                   by the search filter (and, later, the attention-first default,
-                                   ToDo #29) rather than by pagination. *@
+                            <div class="panel-card no-pad aw-paged-detail-grid">
+                                @* Paging + inline DetailTemplate coexist via the KI-1 recipe:
+                                   fixed-px column widths trigger the ghost scrollbar, suppressed
+                                   by the scoped inline <style> at the bottom of this page (the
+                                   .aw-paged-detail-grid class on this panel-card is the wrapper).
+                                   Employee column is the fluid one (no Width). *@
                                 <SfGrid TValue="AccumulatorEmployeeBalanceRow"
                                         DataSource="@_filteredBalances"
-                                        AllowPaging="false"
+                                        AllowPaging="true"
                                         AllowSorting="true"
+                                        Height="auto"
+                                        Width="100%"
                                         CssClass="e-gridhover">
+                                    <GridPageSettings PageSize="25" />
                                     <GridEvents TValue="AccumulatorEmployeeBalanceRow"
                                                 DetailsExpanded="OnBalanceRowExpandingAsync" />
                                     <GridColumns>
@@ -1073,6 +1076,29 @@
 }
 
 <style>
+    /* ── KI-1 ghost-scrollbar fix (paging + inline DetailTemplate) ──────────────
+       Fixed-px column widths flip Syncfusion into strict table-layout and reserve an
+       inert vertical scrollbar gutter. Suppress it here; a real horizontal scrollbar
+       still works on overflow. MUST be inline (page body) so these rules win Syncfusion's
+       source-order cascade — do not move to app.css. Scoped to the .aw-paged-detail-grid
+       wrapper (the by-family balance grid's panel-card). See memory
+       project-accumulators-grid-scrollbar-issue. */
+    .aw-paged-detail-grid .e-gridcontent,
+    .aw-paged-detail-grid .e-content {
+        overflow-x: visible !important;
+        overflow-y: hidden !important;
+    }
+    .aw-paged-detail-grid .e-gridheader {
+        padding-right: 0 !important;
+    }
+    .aw-paged-detail-grid .e-detailrow,
+    .aw-paged-detail-grid .e-detailcell {
+        overflow: visible !important;
+    }
+    .aw-paged-detail-grid .e-grid {
+        overflow-x: auto !important;
+    }
+
     /* ── Page wrapper (fixed to viewport, no browser scroll) ────── */
     .accum-page {
         display: flex;
