@@ -4,6 +4,7 @@
 @inject IHrisSessionState            SessionState
 @inject NavigationManager            Nav
 @inject AuthenticationStateProvider  AuthStateProvider
+@using Microsoft.AspNetCore.Components.Sections
 @implements IDisposable
 
 <div class="shell-container">
@@ -107,6 +108,10 @@
 
     <div class="shell-main">
         <TopBar />
+        @* Fixed slot for a shell's tab strip (e.g. PayrollShell) — rendered OUTSIDE
+           .shell-content so it stays pinned while the page scrolls. Empty for shells
+           that don't provide it. *@
+        <SectionOutlet SectionName="payroll-shell-tabs" />
         <div class="shell-content">
             <ErrorBoundary>
                 <ChildContent>@Body</ChildContent>

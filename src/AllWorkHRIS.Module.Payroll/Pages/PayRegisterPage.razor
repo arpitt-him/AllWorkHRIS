@@ -19,6 +19,33 @@
 
 <PageTitle>Pay Register — AllWork HRIS</PageTitle>
 
+<style>
+    /* Force hide the locked vertical scrollbar track */
+	/* Also keep the internal content container from fighting an outer horizontal scroll */
+    .aw-paged-detail-grid .e-gridcontent,
+    .aw-paged-detail-grid .e-content {
+		overflow-x: visible !important;
+        overflow-y: hidden !important;	/* Retains our vertical ghost-scrollbar fix */
+    }
+    
+    /* Re-align header cells because the scrollbar space is gone */
+    .aw-paged-detail-grid .e-gridheader {
+        padding-right: 0px !important;
+    }
+
+    /* Prevent detail template content from clipping horizontally or vertically */
+    .aw-paged-detail-grid .e-detailrow,
+    .aw-paged-detail-grid .e-detailcell {
+        overflow: visible !important;
+    }
+	
+	/* Restores safe horizontal scrolling at the grid outer boundary wrapper */
+	.aw-paged-detail-grid .e-grid {
+		overflow-x: auto !important;
+	}
+</style>
+
+
 <div class="register-layout">
 
     @* ── Left nav: year / month / run tree ─────────────────────────────── *@
@@ -377,14 +404,15 @@
                             }
                             else
                             {
+                                <div class="aw-paged-detail-grid">
                                 <SfGrid TValue="PayRegisterEmployeeRow" DataSource="@_filteredRows"
-                                        AllowSorting="true" AllowPaging="false" CssClass="e-gridhover">
+                                        AllowSorting="true" AllowPaging="true" Height="auto" Width="100%" CssClass="e-gridhover">
                                     <GridEvents TValue="PayRegisterEmployeeRow" DetailsExpanded="OnEmpRowExpandingAsync" />
-                                    @* <GridPageSettings PageSize="20" /> *@
+                                    <GridPageSettings PageSize="20" />
                                     <GridColumns>
-                                        <GridColumn HeaderText="EE #" Field="EmployeeNumber" Width="100" />
-                                        <GridColumn HeaderText="Employee" Field="EmployeeName" Width="170" />
-                                        <GridColumn HeaderText="Dept" Field="DepartmentName" Width="120" />
+                                        <GridColumn HeaderText="EE #" Field="EmployeeNumber" Minwidth="120"/>
+                                        <GridColumn HeaderText="Employee" Field="EmployeeName" Width="180"/>
+                                        <GridColumn HeaderText="Dept" Field="DepartmentName" Width="130" />
                                         <GridColumn HeaderText="Gross" Field="Gross" TextAlign="TextAlign.Right" Width="90">
                                             <Template>@{ var e = (PayRegisterEmployeeRow)context; }@Fmt(e.Gross)</Template>
                                         </GridColumn>
@@ -394,14 +422,14 @@
                                         <GridColumn HeaderText="@_columnLabels.LabelPensionEe" Field="SsEe" TextAlign="TextAlign.Right" Width="85">
                                             <Template>@{ var e = (PayRegisterEmployeeRow)context; }@Fmt(e.SsEe)</Template>
                                         </GridColumn>
-                                        <GridColumn HeaderText="@_columnLabels.LabelInsuranceEe" Field="MedicareEe" TextAlign="TextAlign.Right" Width="115">
+                                        <GridColumn HeaderText="@_columnLabels.LabelInsuranceEe" Field="MedicareEe" TextAlign="TextAlign.Right" Width="125">
                                             <Template>@{ var e = (PayRegisterEmployeeRow)context; }@Fmt(e.MedicareEe)</Template>
                                         </GridColumn>
-                                        <GridColumn HeaderText="@_columnLabels.LabelStateTax" Field="StateTax" TextAlign="TextAlign.Right" Width="90">
+                                        <GridColumn HeaderText="@_columnLabels.LabelStateTax" Field="StateTax" TextAlign="TextAlign.Right" Width="100">
                                             <Template>@{ var e = (PayRegisterEmployeeRow)context; }@Fmt(e.StateTax)</Template>
                                         </GridColumn>
                                         <GridColumn HeaderText="@(_columnLabels.LabelLocalTax ?? "Local Tax")" Field="LocalTax"
-                                                    Visible="@(_columnLabels.LabelLocalTax is not null)" TextAlign="TextAlign.Right" Width="90">
+                                                    Visible="@(_columnLabels.LabelLocalTax is not null)" TextAlign="TextAlign.Right" Width="100">
                                             <Template>@{ var e = (PayRegisterEmployeeRow)context; }@Fmt(e.LocalTax)</Template>
                                         </GridColumn>
                                         <GridColumn HeaderText="Benefits" Field="BenefitDeductions" TextAlign="TextAlign.Right" Width="90">
@@ -473,6 +501,7 @@
                                         }
                                     </DetailTemplate></GridTemplates>
                                 </SfGrid>
+                                </div> @* /.aw-paged-detail-grid (scopes the ghost-scrollbar CSS to this grid) *@
 
                                 <div class="export-row">
                                     <div class="export-row__links">
