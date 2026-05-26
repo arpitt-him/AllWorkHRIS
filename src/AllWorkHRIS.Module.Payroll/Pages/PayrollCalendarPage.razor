@@ -86,6 +86,7 @@
             @* ── Convention / Offset (driven by selected frequency) ── *@
             @{
                 var newFreqCode = _frequencies.FirstOrDefault(f => f.Id == _newCtx.PayFrequencyId)?.Code ?? "";
+                var newRateCode = _rateTypes.FirstOrDefault(r => r.Id == _newCtx.RateTypeId)?.Code ?? "";
             }
             @if (newFreqCode == "MONTHLY")
             {
@@ -131,10 +132,13 @@
                             <SfNumericTextBox TValue="int" @bind-Value="_newCtx.PayDateOffsetDays" Min="1" Max="30" Width="100%" />
                         </div>
                     }
-                    <div class="form-field">
-                        <label class="form-label">Input Cutoff (days before pay date)</label>
-                        <SfNumericTextBox TValue="int" @bind-Value="_newCtx.CutoffOffsetDays" Min="1" Max="30" Width="100%" />
-                    </div>
+                    @if (newRateCode != "SALARY")
+                    {
+                        <div class="form-field">
+                            <label class="form-label">Input Cutoff (days before pay date)</label>
+                            <SfNumericTextBox TValue="int" @bind-Value="_newCtx.CutoffOffsetDays" Min="1" Max="30" Width="100%" />
+                        </div>
+                    }
                     @if (newFreqCode is "WEEKLY" or "BIWEEKLY")
                     {
                         <div class="form-field">
@@ -147,26 +151,29 @@
                             </SfDropDownList>
                         </div>
                     }
-                    <div class="form-field">
-                        <label class="form-label">OT Weekly Threshold (hrs)</label>
-                        <SfNumericTextBox TValue="decimal" @bind-Value="_newCtx.OtWeeklyThresholdHours"
-                                         Min="1" Max="168" Step="0.5m" Width="100%" />
-                        <span style="font-size:var(--font-size-sm);color:#6B7280">
-                            FLSA standard is 40.00. Override only if this payroll group has a lower company-configured threshold than the legal entity default.
-                        </span>
-                    </div>
-                    <div class="form-field">
-                        <label class="form-label">Workweek Start Day</label>
-                        <SfDropDownList TValue="int" TItem="IntOption"
-                                        DataSource="@_weekdayOptions"
-                                        @bind-Value="_newCtx.WorkweekStartDay"
-                                        Width="100%">
-                            <DropDownListFieldSettings Value="Value" Text="Label" />
-                        </SfDropDownList>
-                        <span style="font-size:var(--font-size-sm);color:#6B7280">
-                            Pre-populated from the legal entity default. FLSA workweek anchor — every non-exempt employee in this group uses this day.
-                        </span>
-                    </div>
+                    @if (newRateCode != "SALARY")
+                    {
+                        <div class="form-field">
+                            <label class="form-label">OT Weekly Threshold (hrs)</label>
+                            <SfNumericTextBox TValue="decimal" @bind-Value="_newCtx.OtWeeklyThresholdHours"
+                                             Min="1" Max="168" Step="0.5m" Width="100%" />
+                            <span style="font-size:var(--font-size-sm);color:#6B7280">
+                                FLSA standard is 40.00. Override only if this payroll group has a lower company-configured threshold than the legal entity default.
+                            </span>
+                        </div>
+                        <div class="form-field">
+                            <label class="form-label">Workweek Start Day</label>
+                            <SfDropDownList TValue="int" TItem="IntOption"
+                                            DataSource="@_weekdayOptions"
+                                            @bind-Value="_newCtx.WorkweekStartDay"
+                                            Width="100%">
+                                <DropDownListFieldSettings Value="Value" Text="Label" />
+                            </SfDropDownList>
+                            <span style="font-size:var(--font-size-sm);color:#6B7280">
+                                Pre-populated from the legal entity default. FLSA workweek anchor — every non-exempt employee in this group uses this day.
+                            </span>
+                        </div>
+                    }
                 </div>
             }
 

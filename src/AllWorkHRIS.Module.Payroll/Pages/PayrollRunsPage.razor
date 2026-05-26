@@ -391,7 +391,12 @@
         if (_selectedPeriod is not null)
         {
             var today         = DateOnly.FromDateTime(TemporalContext.GetOperativeDate());
-            var runThreshold  = _selectedPeriod.CalculationDate ?? _selectedPeriod.PayDate;
+            // "Early" means we haven't yet reached the normal earliest run point (the
+            // calculation date). The pay date is always the ceiling: once the operative
+            // date reaches the pay date you are never "early", even if a quirky calendar
+            // pushed the calculation date past the pay date.
+            var calcDate      = _selectedPeriod.CalculationDate ?? _selectedPeriod.PayDate;
+            var runThreshold  = calcDate < _selectedPeriod.PayDate ? calcDate : _selectedPeriod.PayDate;
             if (today < runThreshold)
             {
                 _confirmEarlyRun = true;

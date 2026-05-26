@@ -211,9 +211,12 @@
     }
 
     private static bool IsAdminRoute(string path) =>
-        path.StartsWith("/admin",       StringComparison.OrdinalIgnoreCase) ||
-        path.StartsWith("/config",      StringComparison.OrdinalIgnoreCase) ||
-        path.StartsWith("/payroll/tax", StringComparison.OrdinalIgnoreCase);
+        path.StartsWith("/admin",             StringComparison.OrdinalIgnoreCase) ||
+        path.StartsWith("/config",            StringComparison.OrdinalIgnoreCase) ||
+        // Global tax-admin pages drop the entity lock — but NOT /payroll/tax-profiles,
+        // which is legal-entity-scoped and must keep the selected client locked.
+        path.StartsWith("/payroll/tax/",      StringComparison.OrdinalIgnoreCase) ||
+        path.StartsWith("/payroll/tax-setup", StringComparison.OrdinalIgnoreCase);
 
     private void UpdateClientPickerState(string uri)
     {

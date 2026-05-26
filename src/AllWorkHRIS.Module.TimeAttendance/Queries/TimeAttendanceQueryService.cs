@@ -232,7 +232,7 @@ public sealed class TimeAttendanceQueryService
             LEFT   JOIN lkp_time_entry_status s ON s.id = te.status_id
             WHERE  pc.legal_entity_id = @LegalEntityId
             GROUP  BY pp.period_id, pp.period_year, pp.period_number, pp.pay_date
-            ORDER  BY pp.period_start_date DESC
+            ORDER  BY pp.period_start_date ASC
             """,
             new { LegalEntityId = legalEntityId })).ToList();
     }

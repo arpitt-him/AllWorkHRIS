@@ -224,7 +224,8 @@
                                     TextAlign="TextAlign.Right" Format="N2" />
                         <GridColumn Field="NetPayAmount" HeaderText="Net Pay" Width="110"
                                     TextAlign="TextAlign.Right" Format="N2" />
-                        <GridColumn Field="ResultStatusId" HeaderText="Status" Width="110">
+                        <GridColumn Field="ResultStatusId" HeaderText="Status" Width="120"
+                                    TextAlign="TextAlign.Center" HeaderTextAlign="TextAlign.Center">
                             <Template>
                                 @{ var r = (EmployeePayrollResult)context; }
                                 <span class="badge @GetResultStatusClass(r.ResultStatusId)">@GetResultStatusLabel(r.ResultStatusId)</span>

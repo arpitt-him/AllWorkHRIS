@@ -112,16 +112,19 @@
                         <span class="detail-label">Open Periods</span>
                         <span class="detail-value">@_allPeriods.Count(p => p.CalendarStatus == "OPEN")</span>
                     </div>
-                    <div class="detail-field">
-                        <span class="detail-label">OT Threshold</span>
-                        <span class="detail-value">@_context.OtWeeklyThresholdHours.ToString("0.##") hrs / week</span>
-                    </div>
-                    <div class="detail-field">
-                        <span class="detail-label">Workweek Start</span>
-                        <span class="detail-value">@WorkweekDayLabel(_context.WorkweekStartDay)</span>
-                    </div>
+                    @if (!_isSalary)
+                    {
+                        <div class="detail-field">
+                            <span class="detail-label">OT Threshold</span>
+                            <span class="detail-value">@_context.OtWeeklyThresholdHours.ToString("0.##") hrs / week</span>
+                        </div>
+                        <div class="detail-field">
+                            <span class="detail-label">Workweek Start</span>
+                            <span class="detail-value">@WorkweekDayLabel(_context.WorkweekStartDay)</span>
+                        </div>
+                    }
                 </div>
-                @if (!_showEditSettings && !_showDeleteConfirm && !_showGenerateForm && !_showClearConfirm)
+                @if (!_isSalary && !_showEditSettings && !_showDeleteConfirm && !_showGenerateForm && !_showClearConfirm)
                 {
                     <button class="btn-secondary" style="margin-left:var(--space-4);white-space:nowrap"
                             @onclick="BeginEditSettings">
@@ -295,10 +298,13 @@
                             </div>
                         }
                     }
-                    <div class="form-field">
-                        <label class="form-label">Input Cutoff (days before pay date)</label>
-                        <SfNumericTextBox TValue="int" @bind-Value="_genForm.CutoffOffsetDays" Min="1" Max="30" />
-                    </div>
+                    @if (!_isSalary)
+                    {
+                        <div class="form-field">
+                            <label class="form-label">Input Cutoff (days before pay date)</label>
+                            <SfNumericTextBox TValue="int" @bind-Value="_genForm.CutoffOffsetDays" Min="1" Max="30" />
+                        </div>
+                    }
                     <div class="form-field">
                         <label class="form-label">Run Lead (banking days before pay date)</label>
                         <SfNumericTextBox TValue="int" @bind-Value="_genForm.CalculationLeadDays" Min="3" Max="30" />
@@ -368,9 +374,12 @@
                     <GridColumn Field="PeriodEndDate" HeaderText="End Date" Width="120">
                         <Template>@{ var p = (PayrollPeriod)context; }@p.PeriodEndDate.ToString("yyyy-MM-dd")</Template>
                     </GridColumn>
-                    <GridColumn Field="InputCutoffDate" HeaderText="Cutoff" Width="120">
-                        <Template>@{ var p = (PayrollPeriod)context; }@p.InputCutoffDate.ToString("yyyy-MM-dd")</Template>
-                    </GridColumn>
+                    @if (!_isSalary)
+                    {
+                        <GridColumn Field="InputCutoffDate" HeaderText="Cutoff" Width="120">
+                            <Template>@{ var p = (PayrollPeriod)context; }@p.InputCutoffDate.ToString("yyyy-MM-dd")</Template>
+                        </GridColumn>
+                    }
                     <GridColumn HeaderText="Run Date" Width="220">
                         <Template>
                             @{ var p = (PayrollPeriod)context; }
@@ -447,6 +456,12 @@
     private List<PayrollPeriod> _allPeriods  = [];
     private List<PayrollPeriod> _yearPeriods = [];
     private List<LookupEntry>   _frequencies = [];
+    private List<LookupEntry>   _rateTypes   = [];
+
+    // True when this context's rate type is Salary — OT / hourly-pay fields are hidden.
+    private bool _isSalary =>
+        _context is not null
+        && _rateTypes.FirstOrDefault(r => r.Id == _context.CompensationRateTypeId)?.Code == "SALARY";
 
     private int     _selectedYear;
     private string  _periodStatusFilter = "";
@@ -491,6 +506,9 @@
 
         try { _frequencies = LookupCache.GetAll(LookupTables.PayFrequency).OrderBy(f => f.Id).ToList(); }
         catch { _frequencies = DefaultFrequencies(); }
+
+        try { _rateTypes = LookupCache.GetAll(LookupTables.CompensationRateType).OrderBy(r => r.Id).ToList(); }
+        catch { _rateTypes = []; }
 
         _context = await ContextRepo.GetByIdAsync(ContextId);
         if (_context is not null)
@@ -680,19 +698,36 @@
                 var payDate      = PayDateComputer.Compute(
                     end, freqCode, _genForm.Convention, _genForm.PayDateOffsetDays);
 
-                // Cutoff: N calendar days before pay date, but never before the period ends.
-                var rawCutoff    = payDate.AddDays(-_genForm.CutoffOffsetDays);
-                var minCutoff    = PayDateComputer.ShiftForwardToBusinessDay(end.AddDays(1));
-                var cutoff       = rawCutoff <= end
-                    ? minCutoff
-                    : PayDateComputer.ShiftToBusinessDay(rawCutoff);
-
-                // Run date: N banking days before pay date, but never before the cutoff.
-                var rawRunDate   = PayDateComputer.SubtractBankingDays(payDate, _genForm.CalculationLeadDays);
-                var minRunDate   = PayDateComputer.ShiftForwardToBusinessDay(cutoff.AddDays(1));
-                var runDate      = rawRunDate < minRunDate ? minRunDate : rawRunDate;
-
                 var transmission = PayDateComputer.SubtractBankingDays(payDate, 2);
+                var rawRunDate   = PayDateComputer.SubtractBankingDays(payDate, _genForm.CalculationLeadDays);
+                var afterClose   = PayDateComputer.ShiftForwardToBusinessDay(end.AddDays(1));
+
+                DateOnly cutoff, runDate;
+                if (afterClose < rawRunDate)
+                {
+                    // Normal: the pay date lags the period close enough to place the
+                    // input cutoff after the period ends and still calculate beforehand.
+                    var rawCutoff  = payDate.AddDays(-_genForm.CutoffOffsetDays);
+                    cutoff         = rawCutoff <= end
+                        ? afterClose
+                        : PayDateComputer.ShiftToBusinessDay(rawCutoff);
+                    var minRunDate = PayDateComputer.ShiftForwardToBusinessDay(cutoff.AddDays(1));
+                    runDate        = rawRunDate < minRunDate ? minRunDate : rawRunDate;
+                }
+                else
+                {
+                    // No-lag period (e.g. semi-monthly / monthly paid on the period-close
+                    // date): there is no room after the close, so anchor backward from the
+                    // pay date. The calc/run date is the configured banking-day lead before
+                    // pay; the cutoff is the configured calendar offset before pay, never
+                    // later than the calc date. This keeps the ordering
+                    // cutoff <= calc <= transmission <= pay date — the dates never run past
+                    // the pay date the way the forward-from-close rule could.
+                    runDate = rawRunDate;
+                    cutoff  = PayDateComputer.ShiftToBusinessDay(payDate.AddDays(-_genForm.CutoffOffsetDays));
+                    if (cutoff > runDate) cutoff = runDate;
+                }
+
                 var status       = end < today ? "CLOSED" : "OPEN";
 
                 await ContextRepo.InsertPeriodAsync(new PayrollPeriod

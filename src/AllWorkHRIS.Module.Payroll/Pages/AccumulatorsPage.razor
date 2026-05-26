@@ -1048,7 +1048,11 @@
            directly in .shell-content. Without it the page overflowed by the tab-strip
            height and forced a page-level scrollbar (same cause as Pay Register). */
         height: calc(100vh - var(--topbar-height) - var(--payroll-tabs-height) - 2 * var(--space-6));
-        overflow: hidden;
+        /* Own the vertical scroll here so the scrollbar sits at the page's right edge,
+           not inset inside the detail pane. The height clamp still prevents the page
+           from pushing a scrollbar over the PayrollShell tab strip. */
+        overflow-y: auto;
+        overflow-x: hidden;
         padding: var(--space-6);
     }
 
@@ -1064,9 +1068,10 @@
     .accum-layout {
         display: flex;
         gap: var(--space-4);
-        flex: 1;
+        /* Grow to fill the clamped page when content is short, but expand with content
+           when it's tall — the page (.accum-page) provides the single scrollbar. */
+        flex: 1 0 auto;
         min-height: 0;
-        overflow: hidden;
     }
 
     /* ── Family panel ────────────────────────────────────────────── */
@@ -1103,7 +1108,7 @@
         display: flex;
         flex-direction: column;
         gap: var(--space-4);
-        overflow-y: auto;
+        /* No internal scroll — the page scrolls as a whole (see .accum-page). */
     }
 
     .accum-family-header {
