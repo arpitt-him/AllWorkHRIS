@@ -148,20 +148,29 @@
                         }
                         else
                         {
+                            <div class="accum-emp-search-row" style="margin-bottom:var(--space-3)">
+                                <SfTextBox @bind-Value="_familySearch"
+                                           Input="OnFamilySearchInput"
+                                           Placeholder="Filter by name or employee number…"
+                                           Width="360px" />
+                                @if (_familySearch.Trim().Length > 0)
+                                {
+                                    <span class="text-muted text-sm">@_filteredBalances.Count of @_employeeBalances.Count</span>
+                                }
+                            </div>
                             <div class="panel-card no-pad">
+                                @* Drill-down lives in an on-click panel below the grid (see
+                                   _familyDrillRow), not an inline DetailTemplate — that lets us
+                                   paginate. AllowPaging + DetailTemplate together triggered
+                                   Syncfusion's spurious right-edge scrollbar (KI-1, 2026-05-25). *@
                                 <SfGrid TValue="AccumulatorEmployeeBalanceRow"
-                                        DataSource="@_employeeBalances"
-                                        AllowPaging="false"
+                                        DataSource="@_filteredBalances"
+                                        AllowPaging="true"
                                         AllowSorting="true"
                                         CssClass="e-gridhover">
-                                    @* Paging stays OFF on this grid: AllowPaging + DetailTemplate together
-                                       trigger Syncfusion's spurious right-edge scrollbar (KI-1, root cause
-                                       isolated 2026-05-25). Plain paginated grids elsewhere are fine. To
-                                       reclaim paging here, replace the inline DetailTemplate drill-down with
-                                       an on-click side/below panel (as the By-Employee view already does). *@
-                                    @* <GridPageSettings PageSize="25" /> *@
+                                    <GridPageSettings PageSize="25" />
                                     <GridEvents TValue="AccumulatorEmployeeBalanceRow"
-                                                DetailsExpanded="OnBalanceRowExpandingAsync" />
+                                                OnRecordClick="OnBalanceRowClickAsync" />
                                     <GridColumns>
                                         <GridColumn Field="@nameof(AccumulatorEmployeeBalanceRow.EmployeeNumber)"
                                                     HeaderText="Emp #" Width="110" />
@@ -209,22 +218,6 @@
                                             </Template>
                                         </GridColumn>
                                     </GridColumns>
-                                    <GridTemplates>
-                                        <DetailTemplate Context="detailCtx">
-                                            @{ var row = (AccumulatorEmployeeBalanceRow)detailCtx; }
-                                            @if (_impactCache.TryGetValue(row.EmploymentId, out var cachedImpacts))
-                                            {
-                                                @RenderImpactGrid(cachedImpacts)
-                                            }
-                                            else
-                                            {
-                                                <div class="detail-loading">
-                                                    <SfSpinner Visible="true" Size="20" />
-                                                    <span>Loading impact trail…</span>
-                                                </div>
-                                            }
-                                        </DetailTemplate>
-                                    </GridTemplates>
                                 </SfGrid>
                                 <div class="accum-grid-footer">
                                     <button class="btn-link" @onclick="ExportFamilyBalancesCsvAsync">Download CSV</button>
@@ -245,6 +238,26 @@
                                         }
                                     }
                                 </div>
+                            </div>
+                        }
+
+                        @* Employee impact drill-in — opens on row click (replaces the old
+                           inline DetailTemplate so the grid above can paginate). *@
+                        @if (_familyDrillRow is not null)
+                        {
+                            <div class="panel-card">
+                                <div class="section-subheader">
+                                    <span>Impact Trail — @_familyDrillRow.EmployeeName (@_selectedYear)</span>
+                                    <button class="btn-icon-sm" @onclick="CloseFamilyDrill">✕</button>
+                                </div>
+                                @if (_loadingFamilyDrill)
+                                {
+                                    <SfSpinner Visible="true" Size="24" />
+                                }
+                                else
+                                {
+                                    @RenderImpactGrid(_familyDrillImpacts)
+                                }
                             </div>
                         }
 
@@ -491,7 +504,11 @@
     private AccumulatorFamilyListItem?                   _selectedFamily;
     private AccumulatorFamilyMeta?                       _familyMeta;
     private int                                          _selectedYear;
-    private readonly Dictionary<Guid, IReadOnlyList<AccumulatorImpactRow>> _impactCache = [];
+    private string                                       _familySearch     = "";
+    private IReadOnlyList<AccumulatorEmployeeBalanceRow> _filteredBalances = [];
+    private AccumulatorEmployeeBalanceRow?               _familyDrillRow;
+    private IReadOnlyList<AccumulatorImpactRow>          _familyDrillImpacts = [];
+    private bool                                         _loadingFamilyDrill;
 
     // By Employee
     private string                                         _searchQuery           = "";
@@ -537,7 +554,10 @@
         _employeeBalances = [];
         _resetHistory     = [];
         _hasRetroactive   = false;
-        _impactCache.Clear();
+        _filteredBalances   = [];
+        _familySearch       = "";
+        _familyDrillRow     = null;
+        _familyDrillImpacts = [];
     }
 
     // ── Data loading ──────────────────────────────────────────────────────────
@@ -561,7 +581,10 @@
         _employeeBalances = [];
         _resetHistory     = [];
         _hasRetroactive   = false;
-        _impactCache.Clear();
+        _filteredBalances   = [];
+        _familySearch       = "";
+        _familyDrillRow     = null;
+        _familyDrillImpacts = [];
         StateHasChanged();
 
         _familyMeta     = await QueryService.GetFamilyMetaAsync(family.FamilyId, EntityId);
@@ -587,32 +610,66 @@
         _selectedYear    = tab.Year;
         _loadingBalances = true;
         _hasRetroactive  = false;
-        _impactCache.Clear();
+        _familySearch       = "";
+        _familyDrillRow     = null;
+        _familyDrillImpacts = [];
         StateHasChanged();
 
         _employeeBalances = await QueryService.GetEmployeeBalancesAsync(
             _selectedFamily!.FamilyId, EntityId, tab.Year);
         _resetHistory     = await QueryService.GetResetHistoryAsync(
             _selectedFamily!.FamilyId, EntityId);
+        _filteredBalances = _employeeBalances;
 
         _loadingBalances = false;
         StateHasChanged();
     }
 
-    private async Task OnBalanceRowExpandingAsync(DetailsExpandedEventArgs<AccumulatorEmployeeBalanceRow> args)
+    private void OnFamilySearchInput(InputEventArgs args)
     {
-        if (args.Data is null) return;
-        var row = args.Data;
-        if (_impactCache.ContainsKey(row.EmploymentId)) return;
+        _familySearch = args.Value ?? "";
+        var q = _familySearch.Trim();
+        _filteredBalances = q.Length == 0
+            ? _employeeBalances
+            : _employeeBalances.Where(b =>
+                  (b.EmployeeName?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                  (b.EmployeeNumber?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false))
+              .ToList();
+        StateHasChanged();
+    }
+
+    private async Task OnBalanceRowClickAsync(RecordClickEventArgs<AccumulatorEmployeeBalanceRow> args)
+    {
+        if (args.RowData is null || _selectedFamily is null) return;
+        var row = args.RowData;
+
+        // Toggle off if the same employee row is clicked again.
+        if (_familyDrillRow?.EmploymentId == row.EmploymentId)
+        {
+            CloseFamilyDrill();
+            return;
+        }
+
+        _familyDrillRow     = row;
+        _loadingFamilyDrill = true;
+        _familyDrillImpacts = [];
+        StateHasChanged();
 
         var impacts = await QueryService.GetEmployeeFamilyImpactAsync(
-            row.EmploymentId, _selectedFamily!.FamilyId, _selectedYear);
-        _impactCache[row.EmploymentId] = impacts;
+            row.EmploymentId, _selectedFamily.FamilyId, _selectedYear);
+        _familyDrillImpacts = impacts;
+        _loadingFamilyDrill = false;
 
         if (!_hasRetroactive && impacts.Any(i => i.IsRetroactive || i.IsReversal || i.IsCorrection))
             _hasRetroactive = true;
 
-        await InvokeAsync(StateHasChanged);
+        StateHasChanged();
+    }
+
+    private void CloseFamilyDrill()
+    {
+        _familyDrillRow     = null;
+        _familyDrillImpacts = [];
     }
 
     // ── By Employee ───────────────────────────────────────────────────────────
@@ -1044,16 +1101,13 @@
     .accum-page {
         display: flex;
         flex-direction: column;
-        /* Subtract the PayrollShell tab strip — this page renders below it, not
-           directly in .shell-content. Without it the page overflowed by the tab-strip
-           height and forced a page-level scrollbar (same cause as Pay Register). */
-        height: calc(100vh - var(--topbar-height) - var(--payroll-tabs-height) - 2 * var(--space-6));
-        /* Own the vertical scroll here so the scrollbar sits at the page's right edge,
-           not inset inside the detail pane. The height clamp still prevents the page
-           from pushing a scrollbar over the PayrollShell tab strip. */
-        overflow-y: auto;
-        overflow-x: hidden;
+        /* Natural flow: let the shared .shell-content scroll at the browser's right
+           edge. The PayrollShell tab strip is sticky, so it stays visible while this
+           page scrolls. (No viewport height clamp / inner scroll.) */
         padding: var(--space-6);
+        /* Small breathing room below the sticky tab strip so the page heading isn't
+           crowded against it (the shell's negative top margin sits the strip flush up top). */
+        margin-top: var(--space-4);
     }
 
     .accum-page-header {
@@ -1068,10 +1122,9 @@
     .accum-layout {
         display: flex;
         gap: var(--space-4);
-        /* Grow to fill the clamped page when content is short, but expand with content
-           when it's tall — the page (.accum-page) provides the single scrollbar. */
-        flex: 1 0 auto;
-        min-height: 0;
+        /* Top-align so the short family list keeps its natural height instead of
+           stretching to match the tall detail pane. */
+        align-items: flex-start;
     }
 
     /* ── Family panel ────────────────────────────────────────────── */
