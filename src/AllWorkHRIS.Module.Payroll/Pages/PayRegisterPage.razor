@@ -435,7 +435,7 @@
                                         @{ var emp = (PayRegisterEmployeeRow)empCtx; }
                                         @if (_lineDetailCache.TryGetValue(emp.EmployeePayrollResultId, out var lines))
                                         {
-                                            <div class="line-detail-inset">
+                                            <div class="grid-detail-inset">
                                             <SfGrid TValue="PayRegisterLineItem" DataSource="@lines.ToList()" CssClass="e-gridhover">
                                                 <GridColumns>
                                                     <GridColumn HeaderText="Category" Field="Category" Width="190" />
@@ -543,7 +543,7 @@
                                         @{ var emp = (PayRegisterEmployeeRow)empCtx; }
                                         @if (_lineDetailCache.TryGetValue(emp.EmployeePayrollResultId, out var lines))
                                         {
-                                            <div class="line-detail-inset">
+                                            <div class="grid-detail-inset">
                                             <SfGrid TValue="PayRegisterLineItem" DataSource="@lines.ToList()" CssClass="e-gridhover">
                                                 <GridColumns>
                                                     <GridColumn HeaderText="Category" Field="Category" Width="190" />
@@ -978,6 +978,9 @@
 
 <style>
     .register-layout {
+        /* Page accent for the shared .grid-detail-inset border — same expression the
+           active tab uses, so the inset always matches the tab-link color. */
+        --inset-accent: var(--module-payroll, #0f766e);
         display: flex;
         /* Subtract the PayrollShell tab strip too — this page renders below it, not
            directly in .shell-content. Omitting it overflowed by the tab-strip height
@@ -1208,13 +1211,8 @@
 
     /* Constrain the per-employee line-item inset so the boundary between the row's
        expansion area and the unused right side is obvious. */
-    .line-detail-inset {
-        width: 62.5%;
-        border: 1px solid color-mix(in srgb, var(--module-payroll, #0f766e) 50%, white);
-        border-radius: 4px;
-        padding: 6px;
-        background: white;
-    }
+    /* Inset styling for the row drill-down now lives in the shared .grid-detail-inset
+       (app.css); this page sets --inset-accent on .register-layout to tint it. */
 
     /* Grid footer: CSV links bottom-left, dev "Copy TSV" affordance bottom-right, same line. */
     .export-row {

@@ -473,6 +473,20 @@ html, body {
 /* ------------------------------------------------------------------ */
 .page-container  { padding: var(--space-6); }
 
+/* Standard inset for an in-grid row drill-down (a DetailTemplate). Narrower than
+   the host grid (so it nests under its parent row rather than reading as another
+   full-width grid — see the pack-columns preference), with a soft border tinted
+   from the page's accent so it feels native to whatever page hosts it.
+   A page/shell sets --inset-accent to its own accent (e.g. the active-tab color);
+   absent that, it falls back to a neutral slate. */
+.grid-detail-inset {
+    width: 62.5%;
+    border: 1px solid color-mix(in srgb, var(--inset-accent, #94a3b8) 50%, white);
+    border-radius: 4px;
+    padding: 6px;
+    background: white;
+}
+
 .page-header {
     display: flex;
     justify-content: space-between;
