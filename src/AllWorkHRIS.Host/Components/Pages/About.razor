@@ -59,7 +59,11 @@
                     <th>Module</th>
                     <th>Version</th>
                     <th>Description</th>
-                    <th>Menu Items</th>
+                    <th class="module-menu-head">Menu Items</th>
+                    @* Spacer absorbs the leftover width so the table is full-width (its
+                       separators align with Platform/Database) while the real columns
+                       stay packed left — no orphaned trailing column. *@
+                    <th class="module-spacer"></th>
                 </tr>
             </thead>
             <tbody>
@@ -70,6 +74,7 @@
                         <td class="module-version">@module.ModuleVersion</td>
                         <td class="module-description">@(module.ModuleDescription ?? "—")</td>
                         <td class="module-menu-count">@module.GetMenuContributions().Count()</td>
+                        <td class="module-spacer"></td>
                     </tr>
                 }
             </tbody>
@@ -170,23 +175,30 @@
         width: 12rem;
     }
 
-    /* Pack columns to content rather than stretching to full width — a short
-       trailing column (Menu Items) orphaned at the far right is hard to trace
-       back to its row. Pin the first column to the same 12rem as the key/value
-       tables so the second column (Version) still aligns vertically with the
-       value columns in the Platform and Database sections. */
-    .modules-table {
-        width: auto;
-    }
-
+    /* The three sections (Platform / Loaded Modules / Database) should read as one
+       continuous table: each spans full width (inherited .about-table width:100%)
+       with a shared 12rem first column. Pinning Module to 12rem aligns Version under
+       the Platform/Database value columns; letting Description absorb the slack means
+       Menu Items follows it cleanly instead of being stranded across an empty gap. */
     .modules-table th:first-child,
     .modules-table td:first-child {
         width: 12rem;
     }
 
+    .module-spacer { width: 100%; }   /* absorbs slack on the right; keeps columns packed left */
+
+    /* Keep descriptions on one line so the greedy spacer can't collapse the column
+       to its longest word; the column sizes to the full text, spacer takes the rest. */
+    .module-description { white-space: nowrap; }
+
+    /* Menu Items is a count: right-align header + cells to match the numeric-column
+       convention used in the SfGrids (a plain HTML table cell defaults to left).
+       nowrap so the header stays on one line. */
+    .module-menu-head,
+    .module-menu-count { text-align: right; white-space: nowrap; }
+
     .module-name    { font-weight: 600; }
     .module-version { font-family: monospace; color: var(--color-text-secondary, #6b7280); }
-    .module-menu-count { text-align: center; }
 
     .empty-state {
         color: var(--color-text-secondary, #6b7280);
