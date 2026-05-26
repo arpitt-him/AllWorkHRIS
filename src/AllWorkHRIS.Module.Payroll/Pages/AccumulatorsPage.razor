@@ -61,9 +61,10 @@
                     {
                         <div class="family-item @FamilyItemClass(fam)" @onclick="() => SelectFamilyAsync(fam)">
                             <span class="family-name">@fam.Label</span>
-                            @if (fam.IsTaxRelated)
+                            @{ var (badgeText, badgeCss) = FamilyBadge(fam); }
+                            @if (!string.IsNullOrEmpty(badgeText))
                             {
-                                <span class="badge badge-tax">TAX</span>
+                                <span class="badge @badgeCss">@badgeText</span>
                             }
                         </div>
                     }
@@ -247,12 +248,12 @@
                             </div>
                         }
 
-                        @* Reset history *@
+                        @* Period closing balances (the balance carried at each reset boundary) *@
                         @if (_resetHistory.Count > 0)
                         {
                             <div class="panel-card">
                                 <div class="section-subheader">
-                                    <span>Reset History</span>
+                                    <span>Period Closing Balances</span>
                                 </div>
                                 <table class="config-table">
                                     <thead>
@@ -274,7 +275,7 @@
                                     </tbody>
                                 </table>
                                 <div class="accum-grid-footer">
-                                    <button class="btn-link" @onclick="ExportResetHistoryCsvAsync">Download CSV</button>
+                                    <button class="btn-link" @onclick="ExportPeriodClosingBalancesCsvAsync">Download CSV</button>
                                     @if (!Env.IsProduction())
                                     {
                                         @if (_resetHistoryCopiedRecent)
@@ -286,7 +287,7 @@
                                         }
                                         else
                                         {
-                                            <button type="button" class="copy-btn" @onclick="CopyResetHistoryTsvAsync" title="Copy TSV">
+                                            <button type="button" class="copy-btn" @onclick="CopyPeriodClosingBalancesTsvAsync" title="Copy TSV">
                                                 <span class="e-icons e-copy"></span>
                                             </button>
                                         }
@@ -828,6 +829,21 @@
     private string FamilyItemClass(AccumulatorFamilyListItem f) =>
         _selectedFamily?.FamilyId == f.FamilyId ? "family-item family-item--active" : "family-item";
 
+    // Category chip per family. Tax families are flagged generically (is_tax_related);
+    // others get a per-family label so the meaning is honest (Retirement reads
+    // "RETIREMENT", not its raw DEDUCTION result class). New capped-deduction families
+    // (e.g. HSA / FSA — see ToDo) should add their own case here.
+    private static (string Label, string Css) FamilyBadge(AccumulatorFamilyListItem fam)
+    {
+        if (fam.IsTaxRelated) return ("TAX", "badge-tax");
+        return fam.Code switch
+        {
+            "GROSS_WAGES" => ("EARNINGS",   "badge-earning"),
+            "RETIREMENT"  => ("RETIREMENT", "badge-retirement"),
+            _             => ("", "")
+        };
+    }
+
     private string YearTabClass(AccumulatorYearTab t) =>
         _selectedYear == t.Year ? "year-tab year-tab--active" : "year-tab";
 
@@ -858,14 +874,14 @@
         await DownloadCsvAsync($"accumulators-family-{_selectedFamily.Code}-{_selectedYear}.csv", sb.ToString());
     }
 
-    private async Task ExportResetHistoryCsvAsync()
+    private async Task ExportPeriodClosingBalancesCsvAsync()
     {
         if (_selectedFamily is null) return;
         var sb = new StringBuilder();
         sb.AppendLine("Period,Closing Balance,Last Updated");
         foreach (var h in _resetHistory)
             sb.AppendLine($"{h.PeriodYear},{h.ClosingBalance:F2},{h.LastUpdatedDate:yyyy-MM-dd}");
-        await DownloadCsvAsync($"accumulators-reset-history-{_selectedFamily.Code}.csv", sb.ToString());
+        await DownloadCsvAsync($"accumulators-period-closing-balances-{_selectedFamily.Code}.csv", sb.ToString());
     }
 
     private async Task ExportEmployeeSummaryCsvAsync()
@@ -938,7 +954,7 @@
         _familyBalancesCopiedRecent = false;
     }
 
-    private async Task CopyResetHistoryTsvAsync()
+    private async Task CopyPeriodClosingBalancesTsvAsync()
     {
         if (_selectedFamily is null) return;
         var sb = new StringBuilder();
@@ -1294,7 +1310,9 @@
 
     .btn-icon-sm:hover { color: var(--text-primary); background: var(--hover-bg); }
 
-    .badge-tax     { background: #dbeafe; color: #1e40af; font-size: 10px; padding: 1px 5px; border-radius: 10px; font-weight: 600; }
+    .badge-tax        { background: #dbeafe; color: #1e40af; font-size: 10px; padding: 1px 5px; border-radius: 10px; font-weight: 600; }
+    .badge-earning    { background: #dcfce7; color: #166534; font-size: 10px; padding: 1px 6px; border-radius: 10px; font-weight: 600; }
+    .badge-retirement { background: #e0e7ff; color: #3730a3; font-size: 10px; padding: 1px 6px; border-radius: 10px; font-weight: 600; }
     .badge-neutral { background: #f3f4f6; color: #374151; font-size: 10px; padding: 1px 6px; border-radius: 10px; font-weight: 500; }
     .badge-info    { background: #e0f2fe; color: #0369a1; font-size: 10px; padding: 1px 6px; border-radius: 10px; font-weight: 500; }
     .badge-warning { background: #fef3c7; color: #92400e; font-size: 10px; padding: 1px 6px; border-radius: 10px; font-weight: 600; }

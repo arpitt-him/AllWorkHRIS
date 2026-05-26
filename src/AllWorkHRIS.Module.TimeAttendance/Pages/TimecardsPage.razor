@@ -398,6 +398,7 @@
     private static string TimecardStatus(TimecardSummaryRow row)
     {
         if (row.SubmittedCount > 0) return "PENDING";
+        if (row.LockedCount > 0) return "LOCKED";   // handed off to payroll (run released)
         if (row.ApprovedCount > 0 && row.RejectedCount == 0) return "APPROVED";
         if (row.RejectedCount > 0) return "REJECTED";
         return "DRAFT";

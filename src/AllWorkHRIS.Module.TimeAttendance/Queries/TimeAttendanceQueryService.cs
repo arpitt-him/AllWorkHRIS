@@ -22,7 +22,8 @@ public sealed record TimecardSummaryRow(
     decimal OvertimeHours,
     long    SubmittedCount,
     long    ApprovedCount,
-    long    RejectedCount);
+    long    RejectedCount,
+    long    LockedCount);
 
 public sealed record TimeEntryRow(
     Guid            TimeEntryId,
@@ -167,7 +168,8 @@ public sealed class TimeAttendanceQueryService
                 SUM(CASE WHEN c.code = 'OVERTIME' AND s.code != 'REJECTED' THEN te.duration ELSE 0 END) AS overtime_hours,
                 COUNT(CASE WHEN s.code = 'SUBMITTED' THEN 1 END) AS submitted_count,
                 COUNT(CASE WHEN s.code = 'APPROVED'  THEN 1 END) AS approved_count,
-                COUNT(CASE WHEN s.code = 'REJECTED'  THEN 1 END) AS rejected_count
+                COUNT(CASE WHEN s.code = 'REJECTED'  THEN 1 END) AS rejected_count,
+                COUNT(CASE WHEN s.code = 'LOCKED'    THEN 1 END) AS locked_count
             FROM   time_entry te
             JOIN   lkp_time_entry_status s ON s.id = te.status_id
             JOIN   lkp_time_category     c ON c.id = te.time_category_id
