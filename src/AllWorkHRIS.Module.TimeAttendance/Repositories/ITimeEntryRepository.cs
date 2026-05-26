@@ -14,7 +14,7 @@ public interface ITimeEntryRepository
     Task<Guid>                    InsertAsync(TimeEntry entry, IUnitOfWork uow);
     Task                          UpdateStatusAsync(Guid timeEntryId, string status, Guid actorId, IUnitOfWork uow);
     Task                          UpdateStatusWithReasonAsync(Guid timeEntryId, string status, Guid actorId, string reason, IUnitOfWork uow);
-    Task                          LockAsync(Guid timeEntryId, Guid payrollRunId, IUnitOfWork uow);
+    Task                          LockAsync(Guid timeEntryId, Guid payrollRunId, DateTimeOffset lockedAt, IUnitOfWork uow);
     Task                          ReclassifyAsync(Guid timeEntryId, string timeCategory, IUnitOfWork uow);
     Task<bool>                    EmploymentExistsAsync(Guid employmentId);
     Task<string?>                 GetPeriodStatusAsync(Guid payrollPeriodId);

@@ -119,22 +119,22 @@ public sealed class EmploymentService : IEmploymentService
 
         try
         {
-            var person   = Person.CreateNew(command, _lookupCache);
+            var person   = Person.CreateNew(command, _lookupCache, _temporalContext.GetOperativeNow());
             personId     = await _personRepository.InsertAsync(person, uow);
 
-            var address  = PersonAddress.CreateFromHire(command, personId);
+            var address  = PersonAddress.CreateFromHire(command, personId, _temporalContext.GetOperativeNow());
             await _personAddressRepository.InsertAsync(address, uow);
 
-            var employment = Employment.CreateFromHire(command, personId, _lookupCache);
+            var employment = Employment.CreateFromHire(command, personId, _lookupCache, _temporalContext.GetOperativeNow());
             employmentId   = await _employmentRepository.InsertAsync(employment, uow);
 
-            var assignment = Assignment.CreateInitial(command, employmentId, _lookupCache);
+            var assignment = Assignment.CreateInitial(command, employmentId, _lookupCache, _temporalContext.GetOperativeNow());
             await _assignmentRepository.InsertAsync(assignment, uow);
 
-            var compensation = CompensationRecord.CreateInitial(command, employmentId, _lookupCache);
+            var compensation = CompensationRecord.CreateInitial(command, employmentId, _lookupCache, _temporalContext.GetOperativeNow());
             await _compensationRepository.InsertAsync(compensation, uow);
 
-            var hireEvent = EmployeeEvent.CreateHire(employmentId, command, _lookupCache);
+            var hireEvent = EmployeeEvent.CreateHire(employmentId, command, _lookupCache, _temporalContext.GetOperativeNow());
             eventId       = await _eventRepository.InsertAsync(hireEvent, uow);
 
             uow.Commit();
@@ -157,7 +157,7 @@ public sealed class EmploymentService : IEmploymentService
             LegalEntityId    = command.LegalEntityId,
             FlsaStatus       = _lookupCache.GetCode(LookupTables.FlsaStatus, command.FlsaStatusId),
             PayrollContextId = command.PayrollContextId,
-            EventTimestamp   = DateTimeOffset.UtcNow
+            EventTimestamp   = _temporalContext.GetOperativeNow()
         });
 
         await _onboardingService.CreatePlanAsync(
@@ -187,7 +187,7 @@ public sealed class EmploymentService : IEmploymentService
 
         try
         {
-            var now = DateTimeOffset.UtcNow;
+            var now = _temporalContext.GetOperativeNow();
 
             var employment = new Employment
             {
@@ -283,7 +283,7 @@ public sealed class EmploymentService : IEmploymentService
 
             await _compensationRepository.InsertAsync(compensation, uow);
 
-            var rehireEvent = EmployeeEvent.CreateRehire(employmentId, command, _lookupCache);
+            var rehireEvent = EmployeeEvent.CreateRehire(employmentId, command, _lookupCache, _temporalContext.GetOperativeNow());
             eventId         = await _eventRepository.InsertAsync(rehireEvent, uow);
 
             uow.Commit();
@@ -303,7 +303,7 @@ public sealed class EmploymentService : IEmploymentService
             EffectiveDate     = command.EmploymentStartDate,
             PriorEmploymentId = priorEmployment?.EmploymentId,
             PayrollContextId  = command.PayrollContextId,
-            EventTimestamp    = DateTimeOffset.UtcNow
+            EventTimestamp    = _temporalContext.GetOperativeNow()
         });
 
         await _onboardingService.CreatePlanAsync(
@@ -330,7 +330,7 @@ public sealed class EmploymentService : IEmploymentService
             await _employmentRepository.UpdateStatusAsync(
                 command.EmploymentId, _terminatedStatusId, command.TerminationDate, uow);
 
-            var terminationEvent = EmployeeEvent.CreateTermination(command.EmploymentId, command, _lookupCache);
+            var terminationEvent = EmployeeEvent.CreateTermination(command.EmploymentId, command, _lookupCache, _temporalContext.GetOperativeNow());
             eventId = await _eventRepository.InsertAsync(terminationEvent, uow);
 
             uow.Commit();
@@ -350,7 +350,7 @@ public sealed class EmploymentService : IEmploymentService
             TerminationDate = command.TerminationDate,
             EventType       = "TERMINATION",
             ReasonCode      = command.ReasonCode,
-            EventTimestamp  = DateTimeOffset.UtcNow
+            EventTimestamp  = _temporalContext.GetOperativeNow()
         });
     }
 
@@ -359,7 +359,7 @@ public sealed class EmploymentService : IEmploymentService
         var current = await _assignmentRepository.GetActiveByEmploymentIdAsync(command.EmploymentId)
             ?? throw new DomainException("No active assignment found for this employment.");
 
-        var now = DateTimeOffset.UtcNow;
+        var now = _temporalContext.GetOperativeNow();
         var newAssignment = new Assignment
         {
             AssignmentId        = Guid.NewGuid(),
@@ -385,7 +385,7 @@ public sealed class EmploymentService : IEmploymentService
             await _assignmentRepository.InsertAsync(newAssignment, uow);
             await _employmentRepository.UpdateDepartmentAndLocationAsync(
                 command.EmploymentId, command.NewDepartmentId, command.NewLocationId, command.InitiatedBy, uow);
-            var transferEvent = EmployeeEvent.CreateTransfer(command.EmploymentId, command, _lookupCache);
+            var transferEvent = EmployeeEvent.CreateTransfer(command.EmploymentId, command, _lookupCache, _temporalContext.GetOperativeNow());
             await _eventRepository.InsertAsync(transferEvent, uow);
             uow.Commit();
         }
@@ -403,7 +403,7 @@ public sealed class EmploymentService : IEmploymentService
         {
             await _employmentRepository.UpdateManagerAsync(
                 command.EmploymentId, command.NewManagerEmploymentId, command.InitiatedBy, uow);
-            var managerEvent = EmployeeEvent.CreateManagerChange(command.EmploymentId, command, _lookupCache);
+            var managerEvent = EmployeeEvent.CreateManagerChange(command.EmploymentId, command, _lookupCache, _temporalContext.GetOperativeNow());
             await _eventRepository.InsertAsync(managerEvent, uow);
             uow.Commit();
         }
@@ -489,17 +489,20 @@ public sealed class PersonService : IPersonService
     private readonly IPersonRepository               _personRepository;
     private readonly IPersonAddressRepository        _addressRepository;
     private readonly IPersonChangeRequestRepository  _changeRequestRepository;
+    private readonly ITemporalContext                _temporalContext;
 
     public PersonService(
         IConnectionFactory             connectionFactory,
         IPersonRepository              personRepository,
         IPersonAddressRepository       addressRepository,
-        IPersonChangeRequestRepository changeRequestRepository)
+        IPersonChangeRequestRepository changeRequestRepository,
+        ITemporalContext               temporalContext)
     {
         _connectionFactory       = connectionFactory;
         _personRepository        = personRepository;
         _addressRepository       = addressRepository;
         _changeRequestRepository = changeRequestRepository;
+        _temporalContext         = temporalContext;
     }
 
     public async Task<Person?> GetByIdAsync(Guid personId)
@@ -535,7 +538,7 @@ public sealed class PersonService : IPersonService
             LanguagePreference     = command.LanguagePreference,
             VeteranStatus          = command.VeteranStatus,
             DisabilityStatus       = command.DisabilityStatus,
-            LastUpdateTimestamp    = DateTimeOffset.UtcNow,
+            LastUpdateTimestamp    = _temporalContext.GetOperativeNow(),
             LastUpdatedBy          = command.InitiatedBy.ToString()
         };
 
@@ -565,7 +568,7 @@ public sealed class PersonService : IPersonService
             CurrentValueJson      = command.CurrentValueJson,
             RequestedValueJson    = command.RequestedValueJson,
             RequestedBy           = command.RequestedBy,
-            RequestedAt           = DateTimeOffset.UtcNow,
+            RequestedAt           = _temporalContext.GetOperativeNow(),
             Status                = PersonChangeStatus.Pending,
         };
         using var uow = new UnitOfWork(_connectionFactory);
@@ -610,18 +613,19 @@ public sealed class PersonService : IPersonService
 
     private void ApplyChangeToPersonRecord(PersonChangeRequest request, Person person, IUnitOfWork uow)
     {
+        var now = _temporalContext.GetOperativeNow();
         var updated = request.ChangeType switch
         {
-            PersonChangeType.LegalName => ApplyLegalName(request, person),
-            PersonChangeType.DateOfBirth => ApplyDateOfBirth(request, person),
-            PersonChangeType.NationalIdentifier => ApplyNationalIdentifier(request, person),
+            PersonChangeType.LegalName => ApplyLegalName(request, person, now),
+            PersonChangeType.DateOfBirth => ApplyDateOfBirth(request, person, now),
+            PersonChangeType.NationalIdentifier => ApplyNationalIdentifier(request, person, now),
             _ => throw new DomainException($"Unknown change type: {request.ChangeType}")
         };
         // Fire and forget inside the transaction — same pattern as UpdatePersonAsync
         _personRepository.UpdateAsync(updated, uow).GetAwaiter().GetResult();
     }
 
-    private static Person ApplyLegalName(PersonChangeRequest request, Person person)
+    private static Person ApplyLegalName(PersonChangeRequest request, Person person, DateTimeOffset now)
     {
         var doc = System.Text.Json.JsonDocument.Parse(request.RequestedValueJson).RootElement;
         return person with
@@ -630,30 +634,30 @@ public sealed class PersonService : IPersonService
             LegalMiddleName     = doc.TryGetProperty("legalMiddleName", out var mn)  ? mn.GetString()  : person.LegalMiddleName,
             LegalLastName       = doc.GetProperty("legalLastName").GetString()!,
             NameSuffix          = doc.TryGetProperty("nameSuffix", out var sfx)      ? sfx.GetString() : person.NameSuffix,
-            LastUpdateTimestamp = DateTimeOffset.UtcNow,
+            LastUpdateTimestamp = now,
             LastUpdatedBy       = "change_request"
         };
     }
 
-    private static Person ApplyDateOfBirth(PersonChangeRequest request, Person person)
+    private static Person ApplyDateOfBirth(PersonChangeRequest request, Person person, DateTimeOffset now)
     {
         var doc = System.Text.Json.JsonDocument.Parse(request.RequestedValueJson).RootElement;
         return person with
         {
             DateOfBirth         = DateOnly.Parse(doc.GetProperty("dateOfBirth").GetString()!),
-            LastUpdateTimestamp = DateTimeOffset.UtcNow,
+            LastUpdateTimestamp = now,
             LastUpdatedBy       = "change_request"
         };
     }
 
-    private static Person ApplyNationalIdentifier(PersonChangeRequest request, Person person)
+    private static Person ApplyNationalIdentifier(PersonChangeRequest request, Person person, DateTimeOffset now)
     {
         var doc = System.Text.Json.JsonDocument.Parse(request.RequestedValueJson).RootElement;
         return person with
         {
             NationalIdentifier     = doc.GetProperty("nationalIdentifier").GetString(),
             NationalIdentifierType = doc.TryGetProperty("nationalIdentifierType", out var t) ? t.GetString() : person.NationalIdentifierType,
-            LastUpdateTimestamp    = DateTimeOffset.UtcNow,
+            LastUpdateTimestamp    = now,
             LastUpdatedBy          = "change_request"
         };
     }
@@ -760,7 +764,7 @@ public sealed class CompensationService : ICompensationService
             await _compensationRepository.CloseCurrentAsync(
                 command.EmploymentId, command.EffectiveDate.AddDays(-1), command.EffectiveDate, uow);
 
-            var now       = DateTimeOffset.UtcNow;
+            var now       = _temporalContext.GetOperativeNow();
             var newRecord = new CompensationRecord
             {
                 CompensationId       = Guid.NewGuid(),
@@ -785,7 +789,7 @@ public sealed class CompensationService : ICompensationService
 
             await _compensationRepository.InsertAsync(newRecord, uow);
 
-            var compEvent = EmployeeEvent.CreateCompensationChange(command.EmploymentId, command, _lookupCache);
+            var compEvent = EmployeeEvent.CreateCompensationChange(command.EmploymentId, command, _lookupCache, _temporalContext.GetOperativeNow());
             var eventId   = await _eventRepository.InsertAsync(compEvent, uow);
 
             uow.Commit();
@@ -873,7 +877,7 @@ public sealed class LifecycleEventService : ILifecycleEventService
             EffectiveDate     = DateOnly.FromDateTime(_temporalContext.GetOperativeDate()),
             EventReason       = reasonCode,
             InitiatedBy       = initiatedBy,
-            CreationTimestamp = DateTimeOffset.UtcNow
+            CreationTimestamp = _temporalContext.GetOperativeNow()
         };
 
         using var uow = new UnitOfWork(_connectionFactory);
@@ -930,6 +934,7 @@ public sealed class OrgStructureService : IOrgStructureService
     private readonly IOrgUnitRepository    _orgUnitRepository;
     private readonly ILookupCache          _lookupCache;
     private readonly ITaxProfileRepository _taxProfileRepository;
+    private readonly ITemporalContext      _temporalContext;
 
     private readonly int _legalEntityTypeId;
     private readonly int _divisionTypeId;
@@ -941,12 +946,14 @@ public sealed class OrgStructureService : IOrgStructureService
         IConnectionFactory    connectionFactory,
         IOrgUnitRepository    orgUnitRepository,
         ILookupCache          lookupCache,
-        ITaxProfileRepository taxProfileRepository)
+        ITaxProfileRepository taxProfileRepository,
+        ITemporalContext      temporalContext)
     {
         _connectionFactory    = connectionFactory;
         _orgUnitRepository    = orgUnitRepository;
         _lookupCache          = lookupCache;
         _taxProfileRepository = taxProfileRepository;
+        _temporalContext      = temporalContext;
         _legalEntityTypeId  = lookupCache.GetId(LookupTables.OrgUnitType, "LEGAL_ENTITY");
         _divisionTypeId     = lookupCache.GetId(LookupTables.OrgUnitType, "DIVISION");
         _departmentTypeId   = lookupCache.GetId(LookupTables.OrgUnitType, "DEPARTMENT");
@@ -1012,7 +1019,7 @@ public sealed class OrgStructureService : IOrgStructureService
             throw new ValidationException("Country code is required for legal entities.");
 
         var typeId    = _lookupCache.GetId(LookupTables.OrgUnitType, command.OrgUnitTypeCode);
-        var now       = DateTimeOffset.UtcNow;
+        var now       = _temporalContext.GetOperativeNow();
         var newId     = Guid.NewGuid();
 
         var orgUnit = new OrgUnit
@@ -1136,12 +1143,14 @@ public sealed class JobService : IJobService
     private readonly IJobRepository  _jobRepository;
     private readonly ILookupCache    _lookupCache;
     private readonly IConnectionFactory _connectionFactory;
+    private readonly ITemporalContext _temporalContext;
 
-    public JobService(IJobRepository jobRepository, ILookupCache lookupCache, IConnectionFactory connectionFactory)
+    public JobService(IJobRepository jobRepository, ILookupCache lookupCache, IConnectionFactory connectionFactory, ITemporalContext temporalContext)
     {
         _jobRepository      = jobRepository;
         _lookupCache        = lookupCache;
         _connectionFactory  = connectionFactory;
+        _temporalContext    = temporalContext;
     }
 
     public Task<IEnumerable<Job>> GetAllActiveAsync()
@@ -1152,7 +1161,7 @@ public sealed class JobService : IJobService
 
     public async Task<Guid> CreateJobAsync(CreateJobCommand command)
     {
-        var now = DateTimeOffset.UtcNow;
+        var now = _temporalContext.GetOperativeNow();
         var job = new Job
         {
             JobId                 = Guid.NewGuid(),
@@ -1205,19 +1214,22 @@ public sealed class PositionService : IPositionService
     private readonly IOrgUnitRepository  _orgUnitRepository;
     private readonly ILookupCache        _lookupCache;
     private readonly IConnectionFactory  _connectionFactory;
+    private readonly ITemporalContext    _temporalContext;
 
     public PositionService(
         IPositionRepository positionRepository,
         IJobRepository      jobRepository,
         IOrgUnitRepository  orgUnitRepository,
         ILookupCache        lookupCache,
-        IConnectionFactory  connectionFactory)
+        IConnectionFactory  connectionFactory,
+        ITemporalContext    temporalContext)
     {
         _positionRepository = positionRepository;
         _jobRepository      = jobRepository;
         _orgUnitRepository  = orgUnitRepository;
         _lookupCache        = lookupCache;
         _connectionFactory  = connectionFactory;
+        _temporalContext    = temporalContext;
     }
 
     public Task<IEnumerable<Position>> GetByJobIdAsync(Guid jobId)
@@ -1239,7 +1251,7 @@ public sealed class PositionService : IPositionService
         if (orgUnit.LegalEntityId != job.LegalEntityId)
             throw new DomainException("The selected department belongs to a different legal entity than the selected job.");
 
-        var now = DateTimeOffset.UtcNow;
+        var now = _temporalContext.GetOperativeNow();
         var position = new Position
         {
             PositionId          = Guid.NewGuid(),

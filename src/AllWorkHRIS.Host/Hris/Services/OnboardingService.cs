@@ -63,7 +63,7 @@ public sealed class OnboardingService : IOnboardingService
         Guid employmentId, DateOnly startDate, Guid initiatedBy)
     {
         var planId = Guid.NewGuid();
-        var now    = DateTimeOffset.UtcNow;
+        var now    = _temporalContext.GetOperativeNow();
 
         var plan = new OnboardingPlan
         {
@@ -258,7 +258,7 @@ public sealed class OnboardingService : IOnboardingService
                 OnboardingPlanId = plan.OnboardingPlanId,
                 EmploymentId     = plan.EmploymentId,
                 TenantId         = Guid.Empty,
-                EventTimestamp   = DateTimeOffset.UtcNow
+                EventTimestamp   = _temporalContext.GetOperativeNow()
             });
         }
     }

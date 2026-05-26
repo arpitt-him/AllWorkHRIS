@@ -67,7 +67,8 @@ public sealed class DashboardGateTests : IAsyncLifetime
     private IOrgStructureService OrgService()
     {
         var orgRepo = new OrgUnitRepository(_connectionFactory);
-        return new OrgStructureService(_connectionFactory, orgRepo, _lookupCache, new NullTaxProfileRepository());
+        return new OrgStructureService(_connectionFactory, orgRepo, _lookupCache, new NullTaxProfileRepository(),
+            new AllWorkHRIS.Core.Temporal.SystemTemporalContext());
     }
 
     // -----------------------------------------------------------------------

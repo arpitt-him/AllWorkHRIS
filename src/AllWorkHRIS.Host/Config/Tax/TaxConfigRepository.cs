@@ -1,4 +1,5 @@
 using AllWorkHRIS.Core.Data;
+using AllWorkHRIS.Core.Temporal;
 using Dapper;
 
 namespace AllWorkHRIS.Host.Config.Tax;
@@ -175,7 +176,12 @@ public interface ITaxConfigRepository
 public sealed class TaxConfigRepository : ITaxConfigRepository
 {
     private readonly IConnectionFactory _db;
-    public TaxConfigRepository(IConnectionFactory db) => _db = db;
+    private readonly ITemporalContext   _temporal;
+    public TaxConfigRepository(IConnectionFactory db, ITemporalContext temporal)
+    {
+        _db = db;
+        _temporal = temporal;
+    }
 
     public async Task<IReadOnlyList<TaxStepConfigRow>> GetStepsByJurisdictionAsync(string jurisdictionCode)
     {
@@ -449,7 +455,7 @@ public sealed class TaxConfigRepository : ITaxConfigRepository
 
         var isActive = newStatus == "ACTIVE";
         var action   = StatusToAction(priorStatus, newStatus);
-        var now      = DateTime.UtcNow;
+        var now      = _temporal.GetOperativeNow().UtcDateTime;
 
         using var conn = _db.CreateConnection();
         using var tx   = conn.BeginTransaction();
@@ -476,7 +482,7 @@ public sealed class TaxConfigRepository : ITaxConfigRepository
         await conn.ExecuteAsync(sql, new { IsRequired = isRequired, FieldId = fieldId }, tx);
         await conn.ExecuteAsync(auditSql,
             new { EntityId = fieldId.ToString(), Actor = actor,
-                  Now = DateTime.UtcNow, Note = $"is_required → {isRequired}" }, tx);
+                  Now = _temporal.GetOperativeNow().UtcDateTime, Note = $"is_required → {isRequired}" }, tx);
         tx.Commit();
     }
 
@@ -503,7 +509,7 @@ public sealed class TaxConfigRepository : ITaxConfigRepository
         await conn.ExecuteAsync(sql, new { NewStatus = newStatus, IsActive = isActive, FieldId = fieldId }, tx);
         await conn.ExecuteAsync(auditSql,
             new { EntityId = fieldId.ToString(), ActionCode = action, PriorStatus = priorStatus,
-                  NewStatus = newStatus, Actor = actor, Now = DateTime.UtcNow, Note = note }, tx);
+                  NewStatus = newStatus, Actor = actor, Now = _temporal.GetOperativeNow().UtcDateTime, Note = note }, tx);
         tx.Commit();
     }
 

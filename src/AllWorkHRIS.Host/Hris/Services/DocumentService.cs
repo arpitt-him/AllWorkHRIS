@@ -1,5 +1,6 @@
 using AllWorkHRIS.Core.Data;
 using AllWorkHRIS.Core.Lookups;
+using AllWorkHRIS.Core.Temporal;
 using AllWorkHRIS.Host.Hris.Commands;
 using AllWorkHRIS.Host.Hris.Domain;
 using AllWorkHRIS.Host.Hris.Repositories;
@@ -29,6 +30,7 @@ public sealed class DocumentService : IDocumentService
     private readonly IDocumentRepository     _documentRepository;
     private readonly IDocumentStorageService _storageService;
     private readonly ILookupCache            _lookupCache;
+    private readonly ITemporalContext        _temporal;
 
     private readonly int _activeStatusId;
     private readonly int _supersededStatusId;
@@ -40,12 +42,14 @@ public sealed class DocumentService : IDocumentService
         IConnectionFactory      connectionFactory,
         IDocumentRepository     documentRepository,
         IDocumentStorageService storageService,
-        ILookupCache            lookupCache)
+        ILookupCache            lookupCache,
+        ITemporalContext        temporal)
     {
         _connectionFactory  = connectionFactory;
         _documentRepository = documentRepository;
         _storageService     = storageService;
         _lookupCache        = lookupCache;
+        _temporal           = temporal;
 
         _activeStatusId     = lookupCache.GetId(LookupTables.DocumentStatus, "ACTIVE");
         _supersededStatusId = lookupCache.GetId(LookupTables.DocumentStatus, "SUPERSEDED");
@@ -94,11 +98,11 @@ public sealed class DocumentService : IDocumentService
                 ExpirationDate    = command.ExpirationDate,
                 StorageReference  = storageRef,
                 FileFormat        = command.FileFormat,
-                UploadDate        = DateTimeOffset.UtcNow,
+                UploadDate        = _temporal.GetOperativeNow(),
                 UploadedBy        = command.UploadedBy,
                 LegalHoldFlag     = false,
                 CreatedBy         = command.UploadedBy,
-                CreationTimestamp = DateTimeOffset.UtcNow
+                CreationTimestamp = _temporal.GetOperativeNow()
             };
 
             await _documentRepository.InsertAsync(document, uow);
@@ -126,7 +130,7 @@ public sealed class DocumentService : IDocumentService
         try
         {
             await _documentRepository.SetVerifiedAsync(
-                command.DocumentId, command.VerifiedBy, DateTimeOffset.UtcNow, uow);
+                command.DocumentId, command.VerifiedBy, _temporal.GetOperativeNow(), uow);
             uow.Commit();
         }
         catch
@@ -171,11 +175,11 @@ public sealed class DocumentService : IDocumentService
                 ExpirationDate    = command.ExpirationDate,
                 StorageReference  = storageRef,
                 FileFormat        = command.FileFormat,
-                UploadDate        = DateTimeOffset.UtcNow,
+                UploadDate        = _temporal.GetOperativeNow(),
                 UploadedBy        = command.UploadedBy,
                 LegalHoldFlag     = false,
                 CreatedBy         = command.UploadedBy,
-                CreationTimestamp = DateTimeOffset.UtcNow
+                CreationTimestamp = _temporal.GetOperativeNow()
             };
 
             await _documentRepository.InsertAsync(document, uow);
@@ -229,7 +233,7 @@ public sealed class DocumentService : IDocumentService
         var stream = await _storageService.RetrieveAsync(doc.StorageReference);
 
         await _documentRepository.LogDownloadAsync(
-            documentId, requestedBy, DateTimeOffset.UtcNow);
+            documentId, requestedBy, _temporal.GetOperativeNow());
 
         return stream;
     }

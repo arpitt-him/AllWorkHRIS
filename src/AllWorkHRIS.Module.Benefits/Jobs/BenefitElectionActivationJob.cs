@@ -10,6 +10,7 @@ public sealed class BenefitElectionActivationJob : BackgroundService
 {
     private readonly IServiceScopeFactory                  _scopeFactory;
     private readonly ITemporalOverrideService              _overrideService;
+    private readonly IWallClock                            _clock;
     private readonly ILogger<BenefitElectionActivationJob> _logger;
 
     private DateOnly?     _lastRunDate;
@@ -18,10 +19,12 @@ public sealed class BenefitElectionActivationJob : BackgroundService
     public BenefitElectionActivationJob(
         IServiceScopeFactory                  scopeFactory,
         ITemporalOverrideService              overrideService,
+        IWallClock                            clock,
         ILogger<BenefitElectionActivationJob> logger)
     {
         _scopeFactory    = scopeFactory;
         _overrideService = overrideService;
+        _clock           = clock;
         _logger          = logger;
 
         _overrideService.OnChanged += () => _tdo = true;
@@ -42,8 +45,8 @@ public sealed class BenefitElectionActivationJob : BackgroundService
                 _logger.LogError(ex, "BenefitElectionActivationJob cycle failed.");
             }
 
-            var deadline = DateTime.UtcNow.AddHours(24);
-            while (!ct.IsCancellationRequested && !_tdo && DateTime.UtcNow < deadline)
+            var deadline = _clock.UtcNow.AddHours(24);
+            while (!ct.IsCancellationRequested && !_tdo && _clock.UtcNow < deadline)
                 await Task.Delay(TimeSpan.FromSeconds(10), ct);
         }
     }

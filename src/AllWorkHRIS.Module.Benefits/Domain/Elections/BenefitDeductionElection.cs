@@ -37,9 +37,8 @@ public sealed record BenefitDeductionElection
     public Guid?            SourceEventId               { get; init; }
 
     public static BenefitDeductionElection Create(
-        CreateElectionCommand cmd, string taxTreatment, string deductionCode)
+        CreateElectionCommand cmd, string taxTreatment, string deductionCode, DateTimeOffset now)
     {
-        var now    = DateTimeOffset.UtcNow;
         var today  = DateOnly.FromDateTime(now.UtcDateTime);
         var status = cmd.EffectiveStartDate <= today ? ElectionStatus.Active : ElectionStatus.Pending;
         return new BenefitDeductionElection
@@ -67,9 +66,8 @@ public sealed record BenefitDeductionElection
     }
 
     public static BenefitDeductionElection CreateRevision(
-        BenefitDeductionElection prior, UpdateElectionCommand cmd)
+        BenefitDeductionElection prior, UpdateElectionCommand cmd, DateTimeOffset now)
     {
-        var now    = DateTimeOffset.UtcNow;
         var today  = DateOnly.FromDateTime(now.UtcDateTime);
         var status = cmd.EffectiveStartDate <= today ? ElectionStatus.Active : ElectionStatus.Pending;
         return new BenefitDeductionElection
@@ -102,9 +100,8 @@ public sealed record BenefitDeductionElection
     // Prospective amendment: new election starts at AmendmentDate; prior is trimmed and superseded.
     // Null values in cmd carry forward from prior.
     public static BenefitDeductionElection CreateAmendment(
-        BenefitDeductionElection prior, AmendElectionCommand cmd)
+        BenefitDeductionElection prior, AmendElectionCommand cmd, DateTimeOffset now)
     {
-        var now    = DateTimeOffset.UtcNow;
         var today  = DateOnly.FromDateTime(now.UtcDateTime);
         var status = cmd.AmendmentDate <= today ? ElectionStatus.Active : ElectionStatus.Pending;
         return new BenefitDeductionElection
@@ -136,9 +133,8 @@ public sealed record BenefitDeductionElection
     // Retroactive correction: supersedes prior and inserts replacement with corrected data.
     // Null values in cmd carry forward from prior.
     public static BenefitDeductionElection CreateCorrection(
-        BenefitDeductionElection prior, CorrectElectionCommand cmd)
+        BenefitDeductionElection prior, CorrectElectionCommand cmd, DateTimeOffset now)
     {
-        var now    = DateTimeOffset.UtcNow;
         var today  = DateOnly.FromDateTime(now.UtcDateTime);
         var start  = cmd.EffectiveStartDate ?? prior.EffectiveStartDate;
         var status = start <= today ? ElectionStatus.Active : ElectionStatus.Pending;

@@ -1,5 +1,6 @@
 using Autofac;
 using AllWorkHRIS.Core.Events;
+using AllWorkHRIS.Core.Temporal;
 using AllWorkHRIS.Module.Payroll.Domain.Profile;
 using AllWorkHRIS.Module.Payroll.Repositories;
 
@@ -19,7 +20,7 @@ public sealed class HireEventHandler
         await using var scope = _rootScope.BeginLifetimeScope();
         var repo = scope.Resolve<IPayrollProfileRepository>();
 
-        var now = DateTimeOffset.UtcNow;
+        var now = scope.Resolve<ITemporalContext>().GetOperativeNow();
         var profile = new PayrollProfile
         {
             PayrollProfileId    = Guid.NewGuid(),

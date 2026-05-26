@@ -668,7 +668,7 @@
         {
             var spans    = ComputePeriodSpans(_genForm.FirstPeriodStart, _selectedYear, freqCode);
             var existing = _yearPeriods.Select(p => p.PeriodNumber).ToHashSet();
-            var now      = DateTimeOffset.UtcNow;
+            var now      = TemporalContext.GetOperativeNow();
             var today    = DateOnly.FromDateTime(TemporalContext.GetOperativeDate());
 
             for (int i = 0; i < spans.Count; i++)

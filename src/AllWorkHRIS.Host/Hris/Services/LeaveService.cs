@@ -133,7 +133,7 @@ public sealed class LeaveService : ILeaveService
         var payrollImpactTypeId = _lookupCache.GetId(
             LookupTables.PayrollImpactType, leaveTypeInfo.PayrollImpactCode);
 
-        var now = DateTimeOffset.UtcNow;
+        var now = _temporalContext.GetOperativeNow();
         var request = new LeaveRequest
         {
             LeaveRequestId      = Guid.NewGuid(),
@@ -183,7 +183,7 @@ public sealed class LeaveService : ILeaveService
             ?? throw new DomainException("Leave type configuration not found.");
 
         var requestedDays = CalculateWorkingDays(request.LeaveStartDate, request.LeaveEndDate);
-        var now = DateTimeOffset.UtcNow;
+        var now = _temporalContext.GetOperativeNow();
 
         using var uow = new UnitOfWork(_connectionFactory);
         try
@@ -313,7 +313,7 @@ public sealed class LeaveService : ILeaveService
                 TenantId       = Guid.Empty,
                 ReturnDate     = command.ReturnDate,
                 InitiatedBy    = command.InitiatedBy,
-                EventTimestamp = DateTimeOffset.UtcNow
+                EventTimestamp = _temporalContext.GetOperativeNow()
             });
         }
         catch

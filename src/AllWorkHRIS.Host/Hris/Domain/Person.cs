@@ -29,9 +29,8 @@ public sealed record Person
     public DateTimeOffset LastUpdateTimestamp { get; init; }
     public string LastUpdatedBy { get; init; } = default!;
 
-    public static Person CreateNew(HireEmployeeCommand command, ILookupCache lookupCache)
+    public static Person CreateNew(HireEmployeeCommand command, ILookupCache lookupCache, DateTimeOffset now)
     {
-        var now = DateTimeOffset.UtcNow;
         return new Person
         {
             PersonId               = Guid.NewGuid(),
@@ -81,7 +80,7 @@ public sealed record PersonAddress
     public Guid CreatedBy { get; init; }
     public DateTimeOffset CreationTimestamp { get; init; }
 
-    public static PersonAddress CreateFromHire(HireEmployeeCommand command, Guid personId)
+    public static PersonAddress CreateFromHire(HireEmployeeCommand command, Guid personId, DateTimeOffset now)
         => new()
         {
             PersonAddressId    = Guid.NewGuid(),
@@ -97,7 +96,7 @@ public sealed record PersonAddress
             EmailPersonal      = command.EmailPersonal,
             EffectiveStartDate = command.EmploymentStartDate,
             CreatedBy          = command.InitiatedBy,
-            CreationTimestamp  = DateTimeOffset.UtcNow
+            CreationTimestamp  = now
         };
 }
 

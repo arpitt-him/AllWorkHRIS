@@ -39,11 +39,14 @@ public sealed record TimeEntry
     public TimeCategory    Category => Enum.Parse<TimeCategory>(TimeCategoryCode.Replace("_", ""), ignoreCase: true);
     public EntryMethod     Method   => Enum.Parse<EntryMethod>(EntryMethodCode.Replace("_", ""), ignoreCase: true);
 
+    // 'now' is supplied by the calling service (ITemporalContext.GetOperativeNow()) so
+    // submitted/created timestamps are TDO-aware rather than raw wall-clock.
     public static TimeEntry Create(
         SubmitTimeEntryCommand command,
         int statusId,
         int timeCategoryId,
-        int entryMethodId) =>
+        int entryMethodId,
+        DateTimeOffset now) =>
         new()
         {
             TimeEntryId     = Guid.NewGuid(),
@@ -58,19 +61,20 @@ public sealed record TimeEntry
             StatusId        = statusId,
             EntryMethodId   = entryMethodId,
             SubmittedBy     = command.SubmittedBy,
-            SubmittedAt     = DateTimeOffset.UtcNow,
+            SubmittedAt     = now,
             Notes           = command.Notes,
             ProjectCode     = command.ProjectCode,
             TaskCode        = command.TaskCode,
-            CreatedAt       = DateTimeOffset.UtcNow,
-            UpdatedAt       = DateTimeOffset.UtcNow
+            CreatedAt       = now,
+            UpdatedAt       = now
         };
 
     public static TimeEntry CreateCorrection(
         TimeEntry original,
         CorrectTimeEntryCommand command,
         int submittedStatusId,
-        int timeCategoryId) =>
+        int timeCategoryId,
+        DateTimeOffset now) =>
         new()
         {
             TimeEntryId           = Guid.NewGuid(),
@@ -85,11 +89,11 @@ public sealed record TimeEntry
             StatusId              = submittedStatusId,
             EntryMethodId         = original.EntryMethodId,
             SubmittedBy           = command.CorrectedBy,
-            SubmittedAt           = DateTimeOffset.UtcNow,
+            SubmittedAt           = now,
             OriginalTimeEntryId   = original.TimeEntryId,
             CorrectionReason      = command.CorrectionReason,
             RetroactiveFlag       = command.RetroactiveFlag,
-            CreatedAt             = DateTimeOffset.UtcNow,
-            UpdatedAt             = DateTimeOffset.UtcNow
+            CreatedAt             = now,
+            UpdatedAt             = now
         };
 }

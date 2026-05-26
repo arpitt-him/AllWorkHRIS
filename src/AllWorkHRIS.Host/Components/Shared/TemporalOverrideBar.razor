@@ -1,6 +1,7 @@
 @using AllWorkHRIS.Core.Temporal
 @using Syncfusion.Blazor.Calendars
 @inject ITemporalOverrideService TemporalOverride
+@inject IWallClock Clock
 
 @if (TemporalOverride.IsEnabled)
 {
@@ -13,7 +14,7 @@
             }
             else
             {
-                <span class="temporal-panel__badge">&#128336; System Date — @DateOnly.FromDateTime(DateTime.UtcNow).ToString("yyyy-MM-dd")</span>
+                <span class="temporal-panel__badge">&#128336; System Date — @Clock.Today.ToString("yyyy-MM-dd")</span>
             }
         </div>
 
@@ -30,7 +31,7 @@
                 <span class="temporal-panel__confirm-msg">
                     @if (_pendingClear)
                     {
-                        <span>Clear the override and return to system date (<strong>@DateOnly.FromDateTime(DateTime.UtcNow).ToString("yyyy-MM-dd")</strong>)?</span>
+                        <span>Clear the override and return to system date (<strong>@Clock.Today.ToString("yyyy-MM-dd")</strong>)?</span>
                     }
                     else
                     {
@@ -65,7 +66,7 @@
     {
         _inputDate = TemporalOverride.IsOverrideActive
             ? TemporalOverride.OverrideDate!.Value
-            : DateOnly.FromDateTime(DateTime.Today);
+            : Clock.Today;
     }
 
     private void RequestSet()
@@ -85,7 +86,7 @@
         if (_pendingClear)
         {
             TemporalOverride.ClearOverride();
-            _inputDate = DateOnly.FromDateTime(DateTime.Today);
+            _inputDate = Clock.Today;
         }
         else
         {

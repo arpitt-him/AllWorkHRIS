@@ -1,3 +1,4 @@
+using AllWorkHRIS.Core.Temporal;
 using AllWorkHRIS.Host.Hris.Domain;
 using AllWorkHRIS.Host.Hris.Repositories;
 
@@ -19,9 +20,13 @@ public interface IWorkQueueService
 public sealed class WorkQueueService : IWorkQueueService
 {
     private readonly IWorkQueueRepository _repository;
+    private readonly ITemporalContext     _temporal;
 
-    public WorkQueueService(IWorkQueueRepository repository)
-        => _repository = repository;
+    public WorkQueueService(IWorkQueueRepository repository, ITemporalContext temporal)
+    {
+        _repository = repository;
+        _temporal   = temporal;
+    }
 
     public async Task<Guid> CreateLeaveApprovalTaskAsync(Guid leaveRequestId, Guid employmentId)
     {
@@ -37,7 +42,7 @@ public sealed class WorkQueueService : IWorkQueueService
             Priority        = WorkQueuePriority.Normal,
             Title           = "Leave Request Pending Approval",
             Description     = $"Leave request {leaveRequestId} requires your approval.",
-            CreatedAt       = DateTimeOffset.UtcNow
+            CreatedAt       = _temporal.GetOperativeNow()
         };
         return await _repository.InsertAsync(item);
     }
@@ -93,7 +98,7 @@ public sealed class WorkQueueService : IWorkQueueService
             Title           = $"{docTypeCode} document expiring in {daysUntil} days",
             Description     = $"Document '{doc.DocumentName}' expires on {doc.ExpirationDate}.",
             DueDate         = doc.ExpirationDate,
-            CreatedAt       = DateTimeOffset.UtcNow
+            CreatedAt       = _temporal.GetOperativeNow()
         };
         await _repository.InsertAsync(item);
     }
@@ -113,7 +118,7 @@ public sealed class WorkQueueService : IWorkQueueService
             Priority        = WorkQueuePriority.Normal,
             Title           = $"Onboarding task: {taskType}",
             DueDate         = dueDate,
-            CreatedAt       = DateTimeOffset.UtcNow
+            CreatedAt       = _temporal.GetOperativeNow()
         };
         await _repository.InsertAsync(item);
     }
@@ -132,7 +137,7 @@ public sealed class WorkQueueService : IWorkQueueService
             Priority        = WorkQueuePriority.Normal,
             Title           = "Time Entry Pending Approval",
             Description     = $"Time entry {timeEntryId} requires your approval.",
-            CreatedAt       = DateTimeOffset.UtcNow
+            CreatedAt       = _temporal.GetOperativeNow()
         };
         return await _repository.InsertAsync(item);
     }
@@ -151,7 +156,7 @@ public sealed class WorkQueueService : IWorkQueueService
             Priority        = WorkQueuePriority.Normal,
             Title           = $"Overtime detected — week of {weekStart:yyyy-MM-dd}",
             Description     = $"{overtimeHours:F2} overtime hours reclassified for week starting {weekStart:yyyy-MM-dd}.",
-            CreatedAt       = DateTimeOffset.UtcNow
+            CreatedAt       = _temporal.GetOperativeNow()
         };
         await _repository.InsertAsync(item);
     }
@@ -170,7 +175,7 @@ public sealed class WorkQueueService : IWorkQueueService
             Priority        = WorkQueuePriority.High,
             Title           = "Retroactive time correction — payroll review required",
             Description     = $"Correction {correctionId} may affect payroll period {periodId}. Review required.",
-            CreatedAt       = DateTimeOffset.UtcNow
+            CreatedAt       = _temporal.GetOperativeNow()
         };
         await _repository.InsertAsync(item);
     }

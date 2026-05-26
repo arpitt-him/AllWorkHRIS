@@ -5,6 +5,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <!-- Test code legitimately uses real/fixed clock values in arrange/setup; the
+         TDO-awareness policy (RS0030) applies to production code, not tests. -->
+    <NoWarn>$(NoWarn);RS0030</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

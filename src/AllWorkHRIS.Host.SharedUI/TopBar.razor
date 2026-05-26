@@ -2,6 +2,7 @@
 @implements IDisposable
 @inject AuthenticationStateProvider AuthStateProvider
 @inject ITemporalOverrideService    TemporalOverride
+@inject IWallClock                  Clock
 @inject NavigationManager           Nav
 
 <div class="shell-topbar">
@@ -48,7 +49,7 @@
 
     private bool TdoActive =>
         TemporalOverride.IsOverrideActive &&
-        TemporalOverride.OverrideDate != DateOnly.FromDateTime(DateTime.Today);
+        TemporalOverride.OverrideDate != Clock.Today;
 
     protected override async Task OnInitializedAsync()
     {

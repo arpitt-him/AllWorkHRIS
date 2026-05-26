@@ -88,14 +88,15 @@ public sealed class PayrollGateTests : IDisposable
         // HRIS infrastructure (same wiring as HireEmployeeIntegrationTests)
         var personRepo        = new PersonRepository(_connectionFactory);
         var personAddressRepo = new PersonAddressRepository(_connectionFactory);
-        var employmentRepo    = new EmploymentRepository(_connectionFactory);
-        var assignmentRepo    = new AssignmentRepository(_connectionFactory);
-        var compensationRepo  = new CompensationRepository(_connectionFactory);
+        var temporalCtx       = new AllWorkHRIS.Core.Temporal.SystemTemporalContext();
+        var employmentRepo    = new EmploymentRepository(_connectionFactory, temporalCtx);
+        var assignmentRepo    = new AssignmentRepository(_connectionFactory, temporalCtx);
+        var compensationRepo  = new CompensationRepository(_connectionFactory, temporalCtx);
         var eventRepo         = new EmployeeEventRepository(_connectionFactory);
         var eventPublisher    = new InProcessEventBus();
         var temporalContext   = new SystemTemporalContext();
         var workQueueRepo     = new WorkQueueRepository(_connectionFactory);
-        var workQueueService  = new WorkQueueService(workQueueRepo);
+        var workQueueService  = new WorkQueueService(workQueueRepo, new AllWorkHRIS.Core.Temporal.SystemTemporalContext());
         var onboardingRepo    = new OnboardingRepository(_connectionFactory);
         var onboardingService = new OnboardingService(
             _connectionFactory, onboardingRepo, workQueueService,
@@ -116,13 +117,12 @@ public sealed class PayrollGateTests : IDisposable
         var resultRepo      = new EmployeePayrollResultRepository(_connectionFactory);
         var accumulatorRepo = new AccumulatorRepository(_connectionFactory);
         var resultLineRepo  = new ResultLineRepository(_connectionFactory);
-        var temporalCtx     = new AllWorkHRIS.Core.Temporal.SystemTemporalContext();
         var accumulatorSvc  = new AccumulatorService(accumulatorRepo, resultLineRepo,
                                   temporalCtx, _connectionFactory);
 
         _runService = new PayrollRunService(
             _runRepo, contextRepo, resultRepo, accumulatorSvc, queue,
-            NullLogger<PayrollRunService>.Instance, auditService);
+            temporalCtx, NullLogger<PayrollRunService>.Instance, auditService);
     }
 
     // ---------------------------------------------------------------------------

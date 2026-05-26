@@ -25,9 +25,11 @@ public sealed class OverridableTemporalContext : ITemporalContext, ITemporalOver
     public DateTime GetOperativeDate()
     {
         lock (_lock)
+#pragma warning disable RS0030 // Sanctioned wrapper: real UTC clock is the no-override fallback.
         return _override.HasValue
             ? _override.Value.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc)
             : DateTime.UtcNow;
+#pragma warning restore RS0030
     }
 
     public void SetOverride(DateOnly date)

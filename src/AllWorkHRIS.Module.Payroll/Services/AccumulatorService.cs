@@ -22,22 +22,9 @@ public sealed class AccumulatorService : IAccumulatorService
         _connectionFactory = connectionFactory;
     }
 
-    /// <summary>
-    /// Audit timestamp that honors the Temporal Date Override. When a TDO is active
-    /// (dev only) the simulated operative date is stamped — so accumulator balances and
-    /// impacts show the TDO date in "Last Updated" rather than the real wall clock.
-    /// When no override is active, GetOperativeDate() returns UtcNow, so production
-    /// behavior is unchanged. The current time-of-day is retained to preserve ordering.
-    /// </summary>
-    private DateTimeOffset OperativeNow()
-    {
-        var op = _temporalContext.GetOperativeDate();
-        return new DateTimeOffset(op.Date + DateTime.UtcNow.TimeOfDay, TimeSpan.Zero);
-    }
-
     public async Task ApplyAsync(EmployeePayrollResult result, Guid runId, CancellationToken ct = default)
     {
-        var now  = OperativeNow();
+        var now  = _temporalContext.GetOperativeNow();
         var asOf = DateOnly.FromDateTime(_temporalContext.GetOperativeDate());
 
         var earningsLines     = await _resultLineRepo.GetEarningsByResultIdAsync(result.EmployeePayrollResultId);
@@ -88,7 +75,7 @@ public sealed class AccumulatorService : IAccumulatorService
         var impacts = await _accumulatorRepo.GetImpactsByResultIdAsync(employeePayrollResultId);
         if (impacts.Count == 0) return;
 
-        var now = OperativeNow();
+        var now = _temporalContext.GetOperativeNow();
 
         // Insert a negating impact row for every original impact, linking back to it.
         foreach (var original in impacts)
@@ -233,7 +220,7 @@ public sealed class AccumulatorService : IAccumulatorService
             ScopeTypeId                 = def.ScopeTypeId,
             ScopeObjectId               = result.EmploymentId,
             ContributionAmount          = delta,
-            ContributionTypeId          = 1,      // STANDARD
+            ContributionTypeId          = 1,      // ORIGINAL (lkp_contribution_type id 1)
             BeforeValue                 = priorValue,
             AfterValue                  = newValue,
             CreationTimestamp           = now

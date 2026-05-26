@@ -3,6 +3,7 @@ using Dapper;
 using Microsoft.Extensions.Logging;
 using AllWorkHRIS.Core.Audit;
 using AllWorkHRIS.Core.Data;
+using AllWorkHRIS.Core.Temporal;
 
 namespace AllWorkHRIS.Host.Platform.Audit;
 
@@ -13,15 +14,18 @@ public sealed class AuditService : IAuditService
 
     private readonly IConnectionFactory      _connectionFactory;
     private readonly IHttpContextAccessor    _httpContextAccessor;
+    private readonly IWallClock              _clock;
     private readonly ILogger<AuditService>   _logger;
 
     public AuditService(
         IConnectionFactory    connectionFactory,
         IHttpContextAccessor  httpContextAccessor,
+        IWallClock            clock,
         ILogger<AuditService> logger)
     {
         _connectionFactory   = connectionFactory;
         _httpContextAccessor = httpContextAccessor;
+        _clock               = clock;
         _logger              = logger;
     }
 
@@ -58,7 +62,7 @@ public sealed class AuditService : IAuditService
             {
                 AuditEventId     = Guid.NewGuid(),
                 TenantId         = _platformTenantId,
-                EventTimestamp   = DateTimeOffset.UtcNow,
+                EventTimestamp   = _clock.UtcNow,
                 auditEvent.EventType,
                 auditEvent.ModuleName,
                 auditEvent.EntityType,

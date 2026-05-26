@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using AllWorkHRIS.Core.Pipeline;
+using AllWorkHRIS.Core.Temporal;
 using AllWorkHRIS.Module.Payroll.Domain.Results;
 using AllWorkHRIS.Module.Payroll.Repositories;
 
@@ -13,6 +14,7 @@ public sealed partial class CalculationEngine : ICalculationEngine
     private readonly IBenefitStepProvider          _benefitStepProvider;
     private readonly IAccumulatorService           _accumulatorService;
     private readonly IPayrollHoursSource           _hoursSource;
+    private readonly ITemporalContext              _temporal;
     private readonly ILogger<CalculationEngine>    _logger;
 
     public CalculationEngine(
@@ -22,6 +24,7 @@ public sealed partial class CalculationEngine : ICalculationEngine
         IBenefitStepProvider          benefitStepProvider,
         IAccumulatorService           accumulatorService,
         IPayrollHoursSource           hoursSource,
+        ITemporalContext              temporal,
         ILogger<CalculationEngine>    logger)
     {
         _resultLineRepo      = resultLineRepo;
@@ -30,6 +33,7 @@ public sealed partial class CalculationEngine : ICalculationEngine
         _benefitStepProvider = benefitStepProvider;
         _accumulatorService  = accumulatorService;
         _hoursSource         = hoursSource;
+        _temporal            = temporal;
         _logger              = logger;
     }
 
@@ -55,18 +59,22 @@ public sealed partial class CalculationEngine : ICalculationEngine
 
         try
         {
+            // One operative timestamp for the whole calc — every result line this employee's
+            // calculation produces shares the same "created at" instant (it is one atomic calc).
+            var now = _temporal.GetOperativeNow();
+
             // Resolve non-exempt pay data once — shared by Steps 1 and 2.
             var nonExemptData = await ResolveNonExemptDataAsync(input, ct);
 
             // Step 1 — Base earnings (regular/salary)
-            var baseEarnings = await StepBaseEarningsAsync(input, employeePayrollResultId, nonExemptData, ct);
+            var baseEarnings = await StepBaseEarningsAsync(input, employeePayrollResultId, nonExemptData, now, ct);
             foreach (var line in baseEarnings)
                 await _resultLineRepo.InsertEarningsLineAsync(line);
 
             ct.ThrowIfCancellationRequested();
 
             // Step 2 — Premium earnings (overtime premium at 0.5× rate for NON_EXEMPT)
-            var premiumEarnings = await StepPremiumEarningsAsync(input, employeePayrollResultId, nonExemptData, ct);
+            var premiumEarnings = await StepPremiumEarningsAsync(input, employeePayrollResultId, nonExemptData, now, ct);
             foreach (var line in premiumEarnings)
                 await _resultLineRepo.InsertEarningsLineAsync(line);
 
@@ -121,7 +129,7 @@ public sealed partial class CalculationEngine : ICalculationEngine
 
             // Step 3 — Pre-tax deductions
             var preTaxDeductions = StepPreTaxDeductions(
-                input, employeePayrollResultId, allBenefitSteps, benefitCtx);
+                input, employeePayrollResultId, allBenefitSteps, benefitCtx, now);
             foreach (var line in preTaxDeductions)
                 await _resultLineRepo.InsertDeductionLineAsync(line);
 
@@ -157,7 +165,7 @@ public sealed partial class CalculationEngine : ICalculationEngine
             // Both are passed separately so the FICA steps use the correct wage base.
             // Guard against negative FICA base in the unlikely event FICA-exempt deductions exceed gross.
             var ficaTaxableWages = Math.Max(benefitCtx.FicaTaxableWages + (grossPay - cashGross), 0m);
-            var taxLines = await StepTaxWithholdingsAsync(input, employeePayrollResultId, taxableWages, ficaTaxableWages, ct);
+            var taxLines = await StepTaxWithholdingsAsync(input, employeePayrollResultId, taxableWages, ficaTaxableWages, now, ct);
             foreach (var line in taxLines)
                 await _resultLineRepo.InsertTaxLineAsync(line);
 
@@ -165,7 +173,7 @@ public sealed partial class CalculationEngine : ICalculationEngine
 
             // Step 7 — Post-tax deductions
             var postTaxDeductions = StepPostTaxDeductions(
-                input, employeePayrollResultId, allBenefitSteps, benefitCtx);
+                input, employeePayrollResultId, allBenefitSteps, benefitCtx, now);
             foreach (var line in postTaxDeductions)
                 await _resultLineRepo.InsertDeductionLineAsync(line);
 
@@ -173,7 +181,7 @@ public sealed partial class CalculationEngine : ICalculationEngine
 
             // Step 8 — Employer contributions (benefit ER amounts + match steps)
             var employerContributions = StepEmployerContributions(
-                input, employeePayrollResultId, benefitCtx);
+                input, employeePayrollResultId, benefitCtx, now);
             foreach (var line in employerContributions)
                 await _resultLineRepo.InsertEmployerContributionLineAsync(line);
 
@@ -281,9 +289,8 @@ public sealed partial class CalculationEngine : ICalculationEngine
     }
 
     private Task<IReadOnlyList<EarningsResultLine>> StepBaseEarningsAsync(
-        CalculationInput input, Guid resultId, NonExemptPayData? nonExempt, CancellationToken ct)
+        CalculationInput input, Guid resultId, NonExemptPayData? nonExempt, DateTimeOffset now, CancellationToken ct)
     {
-        var now   = DateTimeOffset.UtcNow;
         var lines = new List<EarningsResultLine>();
 
         if (nonExempt is not null)
@@ -320,7 +327,7 @@ public sealed partial class CalculationEngine : ICalculationEngine
     }
 
     private Task<IReadOnlyList<EarningsResultLine>> StepPremiumEarningsAsync(
-        CalculationInput input, Guid resultId, NonExemptPayData? nonExempt, CancellationToken ct)
+        CalculationInput input, Guid resultId, NonExemptPayData? nonExempt, DateTimeOffset now, CancellationToken ct)
     {
         if (nonExempt is null || nonExempt.OtHours <= 0m || nonExempt.HourlyRate <= 0m)
             return Task.FromResult<IReadOnlyList<EarningsResultLine>>([]);
@@ -332,7 +339,7 @@ public sealed partial class CalculationEngine : ICalculationEngine
         IReadOnlyList<EarningsResultLine> lines =
         [
             MakeEarningsLine(resultId, input.EmploymentId, "OT_PREM", "Overtime Premium",
-                nonExempt.OtHours, nonExempt.HourlyRate * 0.5m, premAmount, DateTimeOffset.UtcNow)
+                nonExempt.OtHours, nonExempt.HourlyRate * 0.5m, premAmount, now)
         ];
         return Task.FromResult(lines);
     }
@@ -366,9 +373,9 @@ public sealed partial class CalculationEngine : ICalculationEngine
 
     private static IReadOnlyList<DeductionResultLine> StepPreTaxDeductions(
         CalculationInput input, Guid resultId,
-        IReadOnlyList<ICalculationStep> benefitSteps, CalculationContext benefitCtx)
+        IReadOnlyList<ICalculationStep> benefitSteps, CalculationContext benefitCtx,
+        DateTimeOffset now)
     {
-        var now   = DateTimeOffset.UtcNow;
         var lines = new List<DeductionResultLine>();
 
         foreach (var step in benefitSteps.Where(s => s.SequenceNumber < 800
@@ -400,9 +407,9 @@ public sealed partial class CalculationEngine : ICalculationEngine
 
     private static IReadOnlyList<DeductionResultLine> StepPostTaxDeductions(
         CalculationInput input, Guid resultId,
-        IReadOnlyList<ICalculationStep> benefitSteps, CalculationContext benefitCtx)
+        IReadOnlyList<ICalculationStep> benefitSteps, CalculationContext benefitCtx,
+        DateTimeOffset now)
     {
-        var now   = DateTimeOffset.UtcNow;
         var lines = new List<DeductionResultLine>();
 
         foreach (var step in benefitSteps.Where(s => s.SequenceNumber >= 800
@@ -433,9 +440,9 @@ public sealed partial class CalculationEngine : ICalculationEngine
     }
 
     private static IReadOnlyList<EmployerContributionResultLine> StepEmployerContributions(
-        CalculationInput input, Guid resultId, CalculationContext benefitCtx)
+        CalculationInput input, Guid resultId, CalculationContext benefitCtx,
+        DateTimeOffset now)
     {
-        var now   = DateTimeOffset.UtcNow;
         var lines = new List<EmployerContributionResultLine>();
 
         foreach (var (code, amount) in benefitCtx.EmployerStepResults)
@@ -466,7 +473,7 @@ public sealed partial class CalculationEngine : ICalculationEngine
     // ── Tax step ─────────────────────────────────────────────────────────────
 
     private async Task<IReadOnlyList<TaxResultLine>> StepTaxWithholdingsAsync(
-        CalculationInput input, Guid resultId, decimal taxableWages, decimal ficaTaxableWages, CancellationToken ct)
+        CalculationInput input, Guid resultId, decimal taxableWages, decimal ficaTaxableWages, DateTimeOffset now, CancellationToken ct)
     {
         var jurisdictions = await _jurisdictionLookup.GetJurisdictionsAsync(
             input.EmploymentId, input.PayDate, ct);
@@ -476,7 +483,6 @@ public sealed partial class CalculationEngine : ICalculationEngine
         var ytdBalances = await _accumulatorService.GetYtdBalancesAsync(input.EmploymentId, input.PayDate);
 
         var lines = new List<TaxResultLine>();
-        var now   = DateTimeOffset.UtcNow;
 
         foreach (var jur in jurisdictions)
         {

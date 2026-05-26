@@ -168,11 +168,7 @@
 
             using var ms = new MemoryStream(bytes);
             _result     = await ImportService.ImportAsync(ms, importedBy, SessionState.SelectedLegalEntityId);
-            var operativeDate = TemporalContext.GetOperativeDate();
-            _importedAt = new DateTimeOffset(
-                operativeDate.Year, operativeDate.Month, operativeDate.Day,
-                DateTime.Now.Hour, DateTime.Now.Minute, DateTime.Now.Second,
-                DateTimeOffset.Now.Offset);
+            _importedAt = TemporalContext.GetOperativeNow();
             _step       = Step.Done;
         }
         catch (Exception ex) { _fileError = ex.Message; }

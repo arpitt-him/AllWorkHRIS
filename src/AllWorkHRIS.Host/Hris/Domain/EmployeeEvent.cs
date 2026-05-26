@@ -17,7 +17,7 @@ public sealed record EmployeeEvent
     public DateTimeOffset CreationTimestamp { get; init; }
 
     public static EmployeeEvent CreateHire(
-        Guid employmentId, HireEmployeeCommand command, ILookupCache lookupCache)
+        Guid employmentId, HireEmployeeCommand command, ILookupCache lookupCache, DateTimeOffset now)
     {
         return new EmployeeEvent
         {
@@ -27,12 +27,12 @@ public sealed record EmployeeEvent
             EffectiveDate     = command.EmploymentStartDate,
             EventReason       = command.ChangeReasonCode,
             InitiatedBy       = command.InitiatedBy,
-            CreationTimestamp = DateTimeOffset.UtcNow
+            CreationTimestamp = now
         };
     }
 
     public static EmployeeEvent CreateRehire(
-        Guid employmentId, RehireEmployeeCommand command, ILookupCache lookupCache)
+        Guid employmentId, RehireEmployeeCommand command, ILookupCache lookupCache, DateTimeOffset now)
     {
         return new EmployeeEvent
         {
@@ -42,12 +42,12 @@ public sealed record EmployeeEvent
             EffectiveDate     = command.EmploymentStartDate,
             EventReason       = command.ChangeReasonCode,
             InitiatedBy       = command.InitiatedBy,
-            CreationTimestamp = DateTimeOffset.UtcNow
+            CreationTimestamp = now
         };
     }
 
     public static EmployeeEvent CreateTermination(
-        Guid employmentId, TerminateEmployeeCommand command, ILookupCache lookupCache)
+        Guid employmentId, TerminateEmployeeCommand command, ILookupCache lookupCache, DateTimeOffset now)
     {
         return new EmployeeEvent
         {
@@ -58,12 +58,12 @@ public sealed record EmployeeEvent
             EventReason       = command.ReasonCode,
             Notes             = command.Notes,
             InitiatedBy       = command.InitiatedBy,
-            CreationTimestamp = DateTimeOffset.UtcNow
+            CreationTimestamp = now
         };
     }
 
     public static EmployeeEvent CreateCompensationChange(
-        Guid employmentId, ChangeCompensationCommand command, ILookupCache lookupCache)
+        Guid employmentId, ChangeCompensationCommand command, ILookupCache lookupCache, DateTimeOffset now)
     {
         return new EmployeeEvent
         {
@@ -73,12 +73,12 @@ public sealed record EmployeeEvent
             EffectiveDate     = command.EffectiveDate,
             EventReason       = command.ChangeReasonCode,
             InitiatedBy       = command.InitiatedBy,
-            CreationTimestamp = DateTimeOffset.UtcNow
+            CreationTimestamp = now
         };
     }
 
     public static EmployeeEvent CreateTransfer(
-        Guid employmentId, TransferEmployeeCommand command, ILookupCache lookupCache)
+        Guid employmentId, TransferEmployeeCommand command, ILookupCache lookupCache, DateTimeOffset now)
     {
         return new EmployeeEvent
         {
@@ -89,12 +89,12 @@ public sealed record EmployeeEvent
             EventReason       = command.ReasonCode,
             Notes             = command.Notes,
             InitiatedBy       = command.InitiatedBy,
-            CreationTimestamp = DateTimeOffset.UtcNow
+            CreationTimestamp = now
         };
     }
 
     public static EmployeeEvent CreateManagerChange(
-        Guid employmentId, ChangeManagerCommand command, ILookupCache lookupCache)
+        Guid employmentId, ChangeManagerCommand command, ILookupCache lookupCache, DateTimeOffset now)
     {
         return new EmployeeEvent
         {
@@ -105,7 +105,7 @@ public sealed record EmployeeEvent
             EventReason       = "MANAGER_CHANGE",
             Notes             = command.Notes,
             InitiatedBy       = command.InitiatedBy,
-            CreationTimestamp = DateTimeOffset.UtcNow
+            CreationTimestamp = now
         };
     }
 }

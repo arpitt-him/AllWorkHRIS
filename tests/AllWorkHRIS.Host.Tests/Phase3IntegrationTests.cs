@@ -58,7 +58,7 @@ public class LeaveIntegrationTests : IDisposable
         var leaveBalanceRepo    = new LeaveBalanceRepository(_connectionFactory);
         var leaveTypeConfigRepo = new LeaveTypeConfigRepository(_connectionFactory);
         var workQueueRepo       = new WorkQueueRepository(_connectionFactory);
-        var workQueueService    = new WorkQueueService(workQueueRepo);
+        var workQueueService    = new WorkQueueService(workQueueRepo, new AllWorkHRIS.Core.Temporal.SystemTemporalContext());
         var eventPublisher      = new InProcessEventBus();
         var temporalContext     = new SystemTemporalContext();
 
@@ -529,7 +529,8 @@ public class DocumentIntegrationTests : IDisposable
         _documentRepository = documentRepo;
 
         _documentService = new DocumentService(
-            _connectionFactory, documentRepo, storageService, _lookupCache);
+            _connectionFactory, documentRepo, storageService, _lookupCache,
+            new AllWorkHRIS.Core.Temporal.SystemTemporalContext());
     }
 
     // -----------------------------------------------------------------------

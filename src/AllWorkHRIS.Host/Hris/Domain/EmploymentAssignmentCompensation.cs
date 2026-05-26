@@ -35,9 +35,8 @@ public sealed record Employment
     public string LastUpdatedBy { get; init; } = default!;
 
     public static Employment CreateFromHire(
-        HireEmployeeCommand command, Guid personId, ILookupCache lookupCache)
+        HireEmployeeCommand command, Guid personId, ILookupCache lookupCache, DateTimeOffset now)
     {
-        var now = DateTimeOffset.UtcNow;
         return new Employment
         {
             EmploymentId             = Guid.NewGuid(),
@@ -89,9 +88,8 @@ public sealed record Assignment
     public DateTimeOffset LastUpdateTimestamp { get; init; }
 
     public static Assignment CreateInitial(
-        HireEmployeeCommand command, Guid employmentId, ILookupCache lookupCache)
+        HireEmployeeCommand command, Guid employmentId, ILookupCache lookupCache, DateTimeOffset now)
     {
-        var now = DateTimeOffset.UtcNow;
         return new Assignment
         {
             AssignmentId        = Guid.NewGuid(),
@@ -136,9 +134,8 @@ public sealed record CompensationRecord
     public DateTimeOffset LastUpdateTimestamp { get; init; }
 
     public static CompensationRecord CreateInitial(
-        HireEmployeeCommand command, Guid employmentId, ILookupCache lookupCache)
+        HireEmployeeCommand command, Guid employmentId, ILookupCache lookupCache, DateTimeOffset now)
     {
-        var now          = DateTimeOffset.UtcNow;
         var rateTypeCode = lookupCache.GetCode(LookupTables.CompensationRateType, command.RateTypeId);
         var flsaCode     = lookupCache.GetCode(LookupTables.FlsaStatus,           command.FlsaStatusId);
         var freqCode     = lookupCache.GetCode(LookupTables.PayFrequency,          command.PayFrequencyId);

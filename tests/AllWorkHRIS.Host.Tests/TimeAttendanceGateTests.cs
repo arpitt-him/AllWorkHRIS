@@ -68,7 +68,7 @@ public sealed class TimeAttendanceGateTests : IAsyncLifetime
             SubmittedBy     = empId
         };
 
-        var entry = TimeEntry.Create(cmd, statusId: 1, timeCategoryId: 10, entryMethodId: 5);
+        var entry = TimeEntry.Create(cmd, statusId: 1, timeCategoryId: 10, entryMethodId: 5, now: DateTimeOffset.UtcNow);
 
         Assert.Equal(empId,    entry.EmploymentId);
         Assert.Equal(periodId, entry.PayrollPeriodId);
@@ -98,8 +98,8 @@ public sealed class TimeAttendanceGateTests : IAsyncLifetime
             SubmittedBy     = empId
         };
 
-        var a = TimeEntry.Create(cmd, 1, 10, 5);
-        var b = TimeEntry.Create(cmd, 1, 10, 5);
+        var a = TimeEntry.Create(cmd, 1, 10, 5, DateTimeOffset.UtcNow);
+        var b = TimeEntry.Create(cmd, 1, 10, 5, DateTimeOffset.UtcNow);
 
         Assert.NotEqual(Guid.Empty, a.TimeEntryId);
         Assert.NotEqual(a.TimeEntryId, b.TimeEntryId);
@@ -123,7 +123,7 @@ public sealed class TimeAttendanceGateTests : IAsyncLifetime
             EntryMethod     = "MANUAL",
             SubmittedBy     = empId
         };
-        var original = TimeEntry.Create(originalCmd, 5, 10, 1); // StatusId=5 (LOCKED)
+        var original = TimeEntry.Create(originalCmd, 5, 10, 1, DateTimeOffset.UtcNow); // StatusId=5 (LOCKED)
 
         var corrCmd = new CorrectTimeEntryCommand
         {
@@ -135,7 +135,7 @@ public sealed class TimeAttendanceGateTests : IAsyncLifetime
             CorrectedBy         = Guid.NewGuid()
         };
         var correction = TimeEntry.CreateCorrection(original, corrCmd,
-            submittedStatusId: 2, timeCategoryId: 10);
+            submittedStatusId: 2, timeCategoryId: 10, now: DateTimeOffset.UtcNow);
 
         Assert.Equal(original.TimeEntryId,    correction.OriginalTimeEntryId);
         Assert.Equal(original.EmploymentId,   correction.EmploymentId);

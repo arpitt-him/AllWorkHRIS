@@ -1,5 +1,6 @@
 using Dapper;
 using AllWorkHRIS.Core.Data;
+using AllWorkHRIS.Core.Temporal;
 using AllWorkHRIS.Module.TimeAttendance.Domain.Schedule;
 
 namespace AllWorkHRIS.Module.TimeAttendance.Repositories;
@@ -7,9 +8,13 @@ namespace AllWorkHRIS.Module.TimeAttendance.Repositories;
 public sealed class WorkScheduleRepository : IWorkScheduleRepository
 {
     private readonly IConnectionFactory _connectionFactory;
+    private readonly ITemporalContext   _temporal;
 
-    public WorkScheduleRepository(IConnectionFactory connectionFactory)
-        => _connectionFactory = connectionFactory;
+    public WorkScheduleRepository(IConnectionFactory connectionFactory, ITemporalContext temporal)
+    {
+        _connectionFactory = connectionFactory;
+        _temporal          = temporal;
+    }
 
     public async Task<WorkSchedule?> GetByIdAsync(Guid workScheduleId)
     {
@@ -68,7 +73,7 @@ public sealed class WorkScheduleRepository : IWorkScheduleRepository
 
         if (legalEntityId.HasValue)
         {
-            var schedule = await GetActiveForEntityAsync(legalEntityId.Value, DateOnly.FromDateTime(DateTime.UtcNow));
+            var schedule = await GetActiveForEntityAsync(legalEntityId.Value, DateOnly.FromDateTime(_temporal.GetOperativeDate()));
             if (schedule is not null)
                 return schedule.WorkweekStartDay;
         }
@@ -98,8 +103,8 @@ public sealed class WorkScheduleRepository : IWorkScheduleRepository
             schedule.WorkweekStartDay,
             EffectiveDate = schedule.EffectiveDate.ToDateTime(TimeOnly.MinValue),
             EndDate       = schedule.EndDate.HasValue ? (object)schedule.EndDate.Value.ToDateTime(TimeOnly.MinValue) : DBNull.Value,
-            CreatedAt     = DateTimeOffset.UtcNow,
-            UpdatedAt     = DateTimeOffset.UtcNow
+            CreatedAt     = _temporal.GetOperativeNow(),
+            UpdatedAt     = _temporal.GetOperativeNow()
         }, uow.Transaction);
         return schedule.WorkScheduleId;
     }

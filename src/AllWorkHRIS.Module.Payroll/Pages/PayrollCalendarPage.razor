@@ -369,7 +369,7 @@
         _contextError = null;
         try
         {
-            var now = DateTimeOffset.UtcNow;
+            var now = TemporalContext.GetOperativeNow();
             var ctx = new PayrollContext
             {
                 PayrollContextId        = Guid.NewGuid(),

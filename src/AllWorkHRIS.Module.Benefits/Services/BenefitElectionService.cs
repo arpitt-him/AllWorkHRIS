@@ -88,7 +88,7 @@ public sealed class BenefitElectionService : IBenefitElectionService
                     $"An active election for '{deduction.Code}' already covers this period.");
             }
 
-            var election   = BenefitDeductionElection.Create(command, deduction.TaxTreatment, deduction.Code);
+            var election   = BenefitDeductionElection.Create(command, deduction.TaxTreatment, deduction.Code, _temporalContext.GetOperativeNow());
             var electionId = await _electionRepository.InsertAsync(election, uow);
             uow.Commit();
             return electionId;
@@ -120,7 +120,7 @@ public sealed class BenefitElectionService : IBenefitElectionService
             foreach (var prior in overlapping)
                 await _electionRepository.UpdateStatusAsync(prior.ElectionId, ElectionStatus.Superseded, uow);
 
-            var election   = BenefitDeductionElection.Create(command, deduction.TaxTreatment, deduction.Code);
+            var election   = BenefitDeductionElection.Create(command, deduction.TaxTreatment, deduction.Code, _temporalContext.GetOperativeNow());
             var electionId = await _electionRepository.InsertAsync(election, uow);
             uow.Commit();
             return electionId;
@@ -160,7 +160,7 @@ public sealed class BenefitElectionService : IBenefitElectionService
                 throw new InvalidOperationException(
                     $"Another active election for '{prior.DeductionCode}' overlaps the amendment period.");
 
-            var amendment = BenefitDeductionElection.CreateAmendment(prior, command);
+            var amendment = BenefitDeductionElection.CreateAmendment(prior, command, _temporalContext.GetOperativeNow());
             var newId     = await _electionRepository.InsertAsync(amendment, uow);
             uow.Commit();
             return newId;
@@ -182,7 +182,7 @@ public sealed class BenefitElectionService : IBenefitElectionService
         try
         {
             await _electionRepository.UpdateStatusAsync(prior.ElectionId, ElectionStatus.Superseded, uow);
-            var correction = BenefitDeductionElection.CreateCorrection(prior, command);
+            var correction = BenefitDeductionElection.CreateCorrection(prior, command, _temporalContext.GetOperativeNow());
             var newId      = await _electionRepository.InsertAsync(correction, uow);
             uow.Commit();
             return newId;
@@ -202,7 +202,7 @@ public sealed class BenefitElectionService : IBenefitElectionService
         try
         {
             await _electionRepository.UpdateStatusAsync(prior.ElectionId, ElectionStatus.Superseded, uow);
-            var updated = BenefitDeductionElection.CreateRevision(prior, command);
+            var updated = BenefitDeductionElection.CreateRevision(prior, command, _temporalContext.GetOperativeNow());
             var newId   = await _electionRepository.InsertAsync(updated, uow);
             uow.Commit();
             return newId;
@@ -260,7 +260,7 @@ public sealed class BenefitElectionService : IBenefitElectionService
     public async Task TerminateAllActiveAsync(Guid employmentId, Guid sourceEventId, CancellationToken ct = default)
     {
         var active = await _electionRepository.GetActiveByEmploymentIdAsync(
-            employmentId, DateOnly.FromDateTime(DateTime.UtcNow), ct);
+            employmentId, DateOnly.FromDateTime(_temporalContext.GetOperativeDate()), ct);
 
         using var uow = new UnitOfWork(_connectionFactory);
         try
@@ -275,7 +275,7 @@ public sealed class BenefitElectionService : IBenefitElectionService
     public async Task SuspendAllActiveAsync(Guid employmentId, Guid sourceEventId, CancellationToken ct = default)
     {
         var active = await _electionRepository.GetActiveByEmploymentIdAsync(
-            employmentId, DateOnly.FromDateTime(DateTime.UtcNow), ct);
+            employmentId, DateOnly.FromDateTime(_temporalContext.GetOperativeDate()), ct);
 
         using var uow = new UnitOfWork(_connectionFactory);
         try

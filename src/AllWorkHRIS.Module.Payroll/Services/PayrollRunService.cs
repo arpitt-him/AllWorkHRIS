@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Threading.Channels;
 using AllWorkHRIS.Core.Audit;
+using AllWorkHRIS.Core.Temporal;
 using AllWorkHRIS.Module.Payroll.Commands;
 using AllWorkHRIS.Module.Payroll.Domain.Run;
 using AllWorkHRIS.Module.Payroll.Repositories;
@@ -15,6 +16,7 @@ public sealed class PayrollRunService : IPayrollRunService
     private readonly IEmployeePayrollResultRepository   _resultRepo;
     private readonly IAccumulatorService                _accumulatorService;
     private readonly Channel<Guid>                      _queue;
+    private readonly ITemporalContext                   _temporal;
     private readonly ILogger<PayrollRunService>         _logger;
     private readonly IAuditService                      _auditService;
 
@@ -24,6 +26,7 @@ public sealed class PayrollRunService : IPayrollRunService
         IEmployeePayrollResultRepository resultRepo,
         IAccumulatorService              accumulatorService,
         Channel<Guid>                    queue,
+        ITemporalContext                 temporal,
         ILogger<PayrollRunService>       logger,
         IAuditService                    auditService)
     {
@@ -32,6 +35,7 @@ public sealed class PayrollRunService : IPayrollRunService
         _resultRepo         = resultRepo;
         _accumulatorService = accumulatorService;
         _queue              = queue;
+        _temporal           = temporal;
         _logger             = logger;
         _auditService       = auditService;
     }
@@ -46,7 +50,7 @@ public sealed class PayrollRunService : IPayrollRunService
         var period = await _contextRepo.GetPeriodByIdAsync(command.PeriodId)
             ?? throw new InvalidOperationException($"Payroll period {command.PeriodId} not found.");
 
-        var now = DateTimeOffset.UtcNow;
+        var now = _temporal.GetOperativeNow();
         var run = new PayrollRun
         {
             RunId                      = Guid.NewGuid(),

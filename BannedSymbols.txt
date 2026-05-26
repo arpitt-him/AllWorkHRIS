@@ -1,0 +1,5 @@
+P:System.DateTime.UtcNow;Raw clock access is banned. Use IWallClock.UtcNow for physical/audit time, or ITemporalContext.GetOperativeDate() for operative/business time (TDO-aware).
+P:System.DateTime.Now;Raw clock access is banned (UTC-only policy). Use IWallClock.UtcNow or ITemporalContext.GetOperativeDate().
+P:System.DateTime.Today;Raw clock access is banned. Use IWallClock.Today, or DateOnly.FromDateTime(ITemporalContext.GetOperativeDate()) for operative date.
+P:System.DateTimeOffset.UtcNow;Raw clock access is banned. Use IWallClock.UtcNow for physical/audit time, or ITemporalContext.GetOperativeDate() for operative/business time (TDO-aware).
+P:System.DateTimeOffset.Now;Raw clock access is banned (local-offset). Use IWallClock.UtcNow.

@@ -69,19 +69,11 @@ public sealed class PayrollRunJob : BackgroundService
         var engine        = scope.Resolve<ICalculationEngine>();
         var accumulator   = scope.Resolve<IAccumulatorService>();
         var temporal      = scope.Resolve<ITemporalContext>();
+        var wallClock     = scope.Resolve<IWallClock>();
 
-        // Audit-style timestamp: TDO operative date for the date portion (so it
-        // matches the simulated environment) + real UTC time-of-day so the duration
-        // of an actual run is visible. Stored with offset = UTC because Npgsql
-        // requires offset 0 for PostgreSQL `timestamptz` parameters.
-        DateTimeOffset TdoNow()
-        {
-            var op     = temporal.GetOperativeDate();
-            var utcNow = DateTime.UtcNow;
-            return new DateTimeOffset(op.Year, op.Month, op.Day,
-                                      utcNow.Hour, utcNow.Minute, utcNow.Second,
-                                      TimeSpan.Zero);
-        }
+        // Audit-style timestamp: TDO operative date + real time-of-day (so a run's
+        // duration is visible), stored at UTC offset. Centralised in GetOperativeNow().
+        DateTimeOffset TdoNow() => temporal.GetOperativeNow();
 
         var run = await runRepo.GetByIdAsync(runId);
         if (run is null)
@@ -174,7 +166,7 @@ public sealed class PayrollRunJob : BackgroundService
             {
                 RunId = runId, PercentComplete = 0, Processed = 0, Total = total,
                 Failed = 0, StatusMessage = $"Calculating {total} employees…",
-                RunStatus = "CALCULATING", UpdatedAt = DateTimeOffset.UtcNow
+                RunStatus = "CALCULATING", UpdatedAt = wallClock.UtcNow
             });
 
             int processed = 0;
@@ -300,7 +292,7 @@ public sealed class PayrollRunJob : BackgroundService
                         RunId = runId, PercentComplete = pct, Processed = processed,
                         Total = total, Failed = failed,
                         StatusMessage = $"Calculated {processed} of {total}…",
-                        RunStatus = "CALCULATING", UpdatedAt = DateTimeOffset.UtcNow
+                        RunStatus = "CALCULATING", UpdatedAt = wallClock.UtcNow
                     });
                 }
             }
@@ -320,7 +312,7 @@ public sealed class PayrollRunJob : BackgroundService
                 Total = total, Failed = failed,
                 StatusMessage = $"Complete — {processed} calculated, {failed} failed{blockedMsg}",
                 RunStatus = failed == total && total > 0 ? "FAILED" : "CALCULATED",
-                UpdatedAt = DateTimeOffset.UtcNow
+                UpdatedAt = wallClock.UtcNow
             });
             _logger.LogInformation(
                 "Run {RunId}: complete — {Processed} calculated, {Failed} failed, {Blocked} blocked (onboarding)",

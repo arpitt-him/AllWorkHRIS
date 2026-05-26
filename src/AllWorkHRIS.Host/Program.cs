@@ -133,6 +133,13 @@ builder.Host.ConfigureContainer<ContainerBuilder>(autofacBuilder =>
                       .SingleInstance();
     }
 
+    // Physical wall-clock — the sanctioned source of real time (audit/infra),
+    // distinct from ITemporalContext (operative/TDO time). Always real, regardless
+    // of the override.
+    autofacBuilder.RegisterType<WallClock>()
+                  .As<IWallClock>()
+                  .SingleInstance();
+
     // Lookup cache — must be singleton so it is initialized once and shared
     autofacBuilder.RegisterType<LookupCache>()
                   .As<ILookupCache>()

@@ -1,0 +1,37 @@
+<Project>
+
+  <!--
+    Solution-wide enforcement of the temporal-access policy.
+
+    Microsoft.CodeAnalysis.BannedApiAnalyzers reads BannedSymbols.txt and raises
+    RS0030 wherever banned APIs are used. Here it bans raw clock access
+    (DateTime/DateTimeOffset .UtcNow/.Now/.Today) so every timestamp must route
+    through an explicit abstraction:
+      - ITemporalContext.GetOperativeDate()  → operative/business time (TDO-aware)
+      - IWallClock.UtcNow / .Today         → genuine physical/audit time
+
+    The sanctioned wrapper implementations (WallClock, SystemTemporalContext,
+    OverridableTemporalContext) suppress RS0030 locally with a justification.
+
+    Backlog reached zero on 2026-05-25, so RS0030 is now promoted to a build ERROR
+    (WarningsAsErrors below) — a raw clock call can no longer compile in production.
+    The test project opts out via <NoWarn>RS0030</NoWarn> (NoWarn beats
+    WarningsAsErrors), so test code may use real clocks freely.
+  -->
+
+  <PropertyGroup>
+    <WarningsAsErrors>$(WarningsAsErrors);RS0030</WarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" Version="3.3.4">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <AdditionalFiles Include="$(MSBuildThisFileDirectory)BannedSymbols.txt" />
+  </ItemGroup>
+
+</Project>

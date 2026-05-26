@@ -1,6 +1,7 @@
 using Dapper;
 using AllWorkHRIS.Core.Data;
 using AllWorkHRIS.Core.Lookups;
+using AllWorkHRIS.Core.Temporal;
 using AllWorkHRIS.Module.TimeAttendance.Domain;
 
 namespace AllWorkHRIS.Module.TimeAttendance.Repositories;
@@ -9,11 +10,13 @@ public sealed class TimeEntryRepository : ITimeEntryRepository
 {
     private readonly IConnectionFactory _connectionFactory;
     private readonly ILookupCache       _lookupCache;
+    private readonly ITemporalContext   _temporal;
 
-    public TimeEntryRepository(IConnectionFactory connectionFactory, ILookupCache lookupCache)
+    public TimeEntryRepository(IConnectionFactory connectionFactory, ILookupCache lookupCache, ITemporalContext temporal)
     {
         _connectionFactory = connectionFactory;
         _lookupCache       = lookupCache;
+        _temporal          = temporal;
     }
 
     private const string SelectBase = """
@@ -182,7 +185,7 @@ public sealed class TimeEntryRepository : ITimeEntryRepository
             Status      = status,
             ActorId     = actorId,
             Reason      = (object?)null,
-            Now         = DateTimeOffset.UtcNow,
+            Now         = _temporal.GetOperativeNow(),
             TimeEntryId = timeEntryId
         }, uow.Transaction);
     }
@@ -202,12 +205,12 @@ public sealed class TimeEntryRepository : ITimeEntryRepository
         {
             StatusId    = statusId,
             Reason      = reason,
-            Now         = DateTimeOffset.UtcNow,
+            Now         = _temporal.GetOperativeNow(),
             TimeEntryId = timeEntryId
         }, uow.Transaction);
     }
 
-    public async Task LockAsync(Guid timeEntryId, Guid payrollRunId, IUnitOfWork uow)
+    public async Task LockAsync(Guid timeEntryId, Guid payrollRunId, DateTimeOffset lockedAt, IUnitOfWork uow)
     {
         var lockedId = _lookupCache.GetId(TimeAttendanceLookupTables.TimeEntryStatus, "LOCKED");
         const string sql = """
@@ -221,7 +224,7 @@ public sealed class TimeEntryRepository : ITimeEntryRepository
         {
             StatusId      = lockedId,
             PayrollRunId  = payrollRunId,
-            Now           = DateTimeOffset.UtcNow,
+            Now           = lockedAt,
             TimeEntryId   = timeEntryId
         }, uow.Transaction);
     }
@@ -238,7 +241,7 @@ public sealed class TimeEntryRepository : ITimeEntryRepository
         await uow.Connection.ExecuteAsync(sql, new
         {
             CategoryId  = categoryId,
-            Now         = DateTimeOffset.UtcNow,
+            Now         = _temporal.GetOperativeNow(),
             TimeEntryId = timeEntryId
         }, uow.Transaction);
     }

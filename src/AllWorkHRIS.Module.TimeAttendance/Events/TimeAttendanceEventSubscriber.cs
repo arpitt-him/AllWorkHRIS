@@ -2,6 +2,7 @@ using Dapper;
 using AllWorkHRIS.Core.Data;
 using AllWorkHRIS.Core.Events;
 using AllWorkHRIS.Core.Lookups;
+using AllWorkHRIS.Core.Temporal;
 using AllWorkHRIS.Module.TimeAttendance.Domain;
 using AllWorkHRIS.Module.TimeAttendance.Repositories;
 using Microsoft.Extensions.Logging;
@@ -13,17 +14,20 @@ public sealed class TimeAttendanceEventSubscriber : IEventSubscriber
     private readonly ITimeEntryRepository                   _repository;
     private readonly IConnectionFactory                     _connectionFactory;
     private readonly ILookupCache                           _lookupCache;
+    private readonly ITemporalContext                       _temporal;
     private readonly ILogger<TimeAttendanceEventSubscriber> _logger;
 
     public TimeAttendanceEventSubscriber(
         ITimeEntryRepository                   repository,
         IConnectionFactory                     connectionFactory,
         ILookupCache                           lookupCache,
+        ITemporalContext                       temporal,
         ILogger<TimeAttendanceEventSubscriber> logger)
     {
         _repository        = repository;
         _connectionFactory = connectionFactory;
         _lookupCache       = lookupCache;
+        _temporal          = temporal;
         _logger            = logger;
     }
 
@@ -57,7 +61,7 @@ public sealed class TimeAttendanceEventSubscriber : IEventSubscriber
                            updated_at       = @Now
                     WHERE  time_entry_id    = @TimeEntryId
                     """,
-                    new { StatusId = voidId, Now = DateTimeOffset.UtcNow, TimeEntryId = entry.TimeEntryId });
+                    new { StatusId = voidId, Now = _temporal.GetOperativeNow(), TimeEntryId = entry.TimeEntryId });
             }
             catch (Exception ex)
             {

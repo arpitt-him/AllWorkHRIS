@@ -1,5 +1,6 @@
 using Dapper;
 using AllWorkHRIS.Core.Data;
+using AllWorkHRIS.Core.Temporal;
 using AllWorkHRIS.Host.Hris.Commands;
 using AllWorkHRIS.Host.Hris.Domain;
 using AllWorkHRIS.Host.Hris.Queries;
@@ -233,9 +234,13 @@ public interface IPersonChangeRequestRepository
 public sealed class PersonChangeRequestRepository : IPersonChangeRequestRepository
 {
     private readonly IConnectionFactory _connectionFactory;
+    private readonly ITemporalContext   _temporal;
 
-    public PersonChangeRequestRepository(IConnectionFactory connectionFactory)
-        => _connectionFactory = connectionFactory;
+    public PersonChangeRequestRepository(IConnectionFactory connectionFactory, ITemporalContext temporal)
+    {
+        _connectionFactory = connectionFactory;
+        _temporal          = temporal;
+    }
 
     public async Task<Guid> InsertAsync(PersonChangeRequest request, IUnitOfWork uow)
     {
@@ -283,7 +288,7 @@ public sealed class PersonChangeRequestRepository : IPersonChangeRequestReposito
              WHERE person_change_request_id = @Id
             """;
         await uow.Connection.ExecuteAsync(sql,
-            new { Id = id, ReviewedBy = reviewedBy, ReviewedAt = DateTimeOffset.UtcNow },
+            new { Id = id, ReviewedBy = reviewedBy, ReviewedAt = _temporal.GetOperativeNow() },
             uow.Transaction);
     }
 
@@ -298,7 +303,7 @@ public sealed class PersonChangeRequestRepository : IPersonChangeRequestReposito
              WHERE person_change_request_id = @Id
             """;
         await uow.Connection.ExecuteAsync(sql,
-            new { Id = id, ReviewedBy = reviewedBy, ReviewedAt = DateTimeOffset.UtcNow, Notes = notes },
+            new { Id = id, ReviewedBy = reviewedBy, ReviewedAt = _temporal.GetOperativeNow(), Notes = notes },
             uow.Transaction);
     }
 }
@@ -329,9 +334,13 @@ public interface IEmploymentRepository
 public sealed class EmploymentRepository : IEmploymentRepository
 {
     private readonly IConnectionFactory _connectionFactory;
+    private readonly ITemporalContext   _temporal;
 
-    public EmploymentRepository(IConnectionFactory connectionFactory)
-        => _connectionFactory = connectionFactory;
+    public EmploymentRepository(IConnectionFactory connectionFactory, ITemporalContext temporal)
+    {
+        _connectionFactory = connectionFactory;
+        _temporal          = temporal;
+    }
 
     public async Task<Employment?> GetByIdAsync(Guid employmentId)
     {
@@ -415,7 +424,7 @@ public sealed class EmploymentRepository : IEmploymentRepository
             EmploymentId  = employmentId,
             StatusId      = statusId,
             EffectiveDate = effectiveDate,
-            Now           = DateTimeOffset.UtcNow
+            Now           = _temporal.GetOperativeNow()
         }, uow.Transaction);
     }
 
@@ -434,7 +443,7 @@ public sealed class EmploymentRepository : IEmploymentRepository
             EmploymentId        = employmentId,
             ManagerEmploymentId = newManagerEmploymentId,
             UpdatedBy           = updatedBy.ToString(),
-            Now                 = DateTimeOffset.UtcNow
+            Now                 = _temporal.GetOperativeNow()
         }, uow.Transaction);
     }
 
@@ -455,7 +464,7 @@ public sealed class EmploymentRepository : IEmploymentRepository
             DepartmentId  = departmentId,
             LocationId    = locationId,
             UpdatedBy     = updatedBy.ToString(),
-            Now           = DateTimeOffset.UtcNow
+            Now           = _temporal.GetOperativeNow()
         }, uow.Transaction);
     }
 
@@ -674,9 +683,13 @@ public interface IAssignmentRepository
 public sealed class AssignmentRepository : IAssignmentRepository
 {
     private readonly IConnectionFactory _connectionFactory;
+    private readonly ITemporalContext   _temporal;
 
-    public AssignmentRepository(IConnectionFactory connectionFactory)
-        => _connectionFactory = connectionFactory;
+    public AssignmentRepository(IConnectionFactory connectionFactory, ITemporalContext temporal)
+    {
+        _connectionFactory = connectionFactory;
+        _temporal          = temporal;
+    }
 
     public async Task<Assignment?> GetActiveByEmploymentIdAsync(Guid employmentId)
     {
@@ -735,7 +748,7 @@ public sealed class AssignmentRepository : IAssignmentRepository
         {
             AssignmentId = assignmentId,
             EndDate      = endDate,
-            Now          = DateTimeOffset.UtcNow,
+            Now          = _temporal.GetOperativeNow(),
             UpdatedBy    = Guid.Empty
         }, uow.Transaction);
     }
@@ -757,9 +770,13 @@ public interface ICompensationRepository
 public sealed class CompensationRepository : ICompensationRepository
 {
     private readonly IConnectionFactory _connectionFactory;
+    private readonly ITemporalContext   _temporal;
 
-    public CompensationRepository(IConnectionFactory connectionFactory)
-        => _connectionFactory = connectionFactory;
+    public CompensationRepository(IConnectionFactory connectionFactory, ITemporalContext temporal)
+    {
+        _connectionFactory = connectionFactory;
+        _temporal          = temporal;
+    }
 
     public async Task<CompensationRecord?> GetActiveByEmploymentIdAsync(Guid employmentId, DateOnly asOf)
     {
@@ -843,7 +860,7 @@ public sealed class CompensationRepository : ICompensationRepository
             EmploymentId     = employmentId,
             EndDate          = endDate,
             NewEffectiveDate = newEffectiveDate,
-            Now              = DateTimeOffset.UtcNow,
+            Now              = _temporal.GetOperativeNow(),
             UpdatedBy        = Guid.Empty
         }, uow.Transaction);
     }
@@ -1307,7 +1324,12 @@ public interface IPersonSocialProfileRepository
 public sealed class PersonSocialProfileRepository : IPersonSocialProfileRepository
 {
     private readonly IConnectionFactory _db;
-    public PersonSocialProfileRepository(IConnectionFactory db) => _db = db;
+    private readonly ITemporalContext   _temporal;
+    public PersonSocialProfileRepository(IConnectionFactory db, ITemporalContext temporal)
+    {
+        _db = db;
+        _temporal = temporal;
+    }
 
     public async Task<PersonSocialProfile?> GetAsync(Guid personId)
     {
@@ -1340,7 +1362,7 @@ public sealed class PersonSocialProfileRepository : IPersonSocialProfileReposito
                        updated_at      = @Now
                 WHERE  person_id = @PersonId
                 """,
-                new { PhotoData = photoData, MimeType = mimeType, Now = DateTimeOffset.UtcNow, PersonId = personId });
+                new { PhotoData = photoData, MimeType = mimeType, Now = _temporal.GetOperativeNow(), PersonId = personId });
         }
         else
         {
@@ -1348,7 +1370,7 @@ public sealed class PersonSocialProfileRepository : IPersonSocialProfileReposito
                 INSERT INTO person_social_profile (person_id, photo_data, photo_mime_type, updated_at)
                 VALUES (@PersonId, @PhotoData, @MimeType, @Now)
                 """,
-                new { PersonId = personId, PhotoData = photoData, MimeType = mimeType, Now = DateTimeOffset.UtcNow });
+                new { PersonId = personId, PhotoData = photoData, MimeType = mimeType, Now = _temporal.GetOperativeNow() });
         }
     }
 
@@ -1367,7 +1389,7 @@ public sealed class PersonSocialProfileRepository : IPersonSocialProfileReposito
                        updated_at = @Now
                 WHERE  person_id  = @PersonId
                 """,
-                new { BioText = bioText, Now = DateTimeOffset.UtcNow, PersonId = personId });
+                new { BioText = bioText, Now = _temporal.GetOperativeNow(), PersonId = personId });
         }
         else
         {
@@ -1375,7 +1397,7 @@ public sealed class PersonSocialProfileRepository : IPersonSocialProfileReposito
                 INSERT INTO person_social_profile (person_id, bio_text, updated_at)
                 VALUES (@PersonId, @BioText, @Now)
                 """,
-                new { PersonId = personId, BioText = bioText, Now = DateTimeOffset.UtcNow });
+                new { PersonId = personId, BioText = bioText, Now = _temporal.GetOperativeNow() });
         }
     }
 }

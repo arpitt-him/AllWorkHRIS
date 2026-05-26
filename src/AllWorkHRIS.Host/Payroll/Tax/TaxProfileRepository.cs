@@ -1,4 +1,5 @@
 using AllWorkHRIS.Core.Data;
+using AllWorkHRIS.Core.Temporal;
 using Dapper;
 
 namespace AllWorkHRIS.Host.Payroll.Tax;
@@ -105,8 +106,13 @@ public interface ITaxProfileRepository
 public sealed class TaxProfileRepository : ITaxProfileRepository
 {
     private readonly IConnectionFactory _db;
+    private readonly ITemporalContext   _temporal;
 
-    public TaxProfileRepository(IConnectionFactory db) => _db = db;
+    public TaxProfileRepository(IConnectionFactory db, ITemporalContext temporal)
+    {
+        _db = db;
+        _temporal = temporal;
+    }
 
     public async Task<IReadOnlyList<TaxJurisdictionRow>> GetAllJurisdictionsAsync()
     {
@@ -414,7 +420,7 @@ public sealed class TaxProfileRepository : ITaxProfileRepository
         var newId          = Guid.NewGuid();
         var closeDate      = effectiveFrom.AddDays(-1).ToDateTime(TimeOnly.MinValue);
         var effFrom        = effectiveFrom.ToDateTime(TimeOnly.MinValue);
-        var now            = DateTimeOffset.UtcNow;
+        var now            = _temporal.GetOperativeNow();
 
         using var conn = _db.CreateConnection();
         using var tx = conn.BeginTransaction();

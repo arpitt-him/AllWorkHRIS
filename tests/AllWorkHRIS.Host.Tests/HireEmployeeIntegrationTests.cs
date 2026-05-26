@@ -45,15 +45,15 @@ public class HireEmployeeIntegrationTests : IDisposable
 
         var personRepo        = new PersonRepository(_connectionFactory);
         var personAddressRepo = new PersonAddressRepository(_connectionFactory);
-        var employmentRepo    = new EmploymentRepository(_connectionFactory);
-        var assignmentRepo    = new AssignmentRepository(_connectionFactory);
-        var compensationRepo  = new CompensationRepository(_connectionFactory);
+        var temporalContext   = new SystemTemporalContext();
+        var employmentRepo    = new EmploymentRepository(_connectionFactory, temporalContext);
+        var assignmentRepo    = new AssignmentRepository(_connectionFactory, temporalContext);
+        var compensationRepo  = new CompensationRepository(_connectionFactory, temporalContext);
         var eventRepo         = new EmployeeEventRepository(_connectionFactory);
         var eventPublisher    = new InProcessEventBus();
-        var temporalContext   = new SystemTemporalContext();
 
         var workQueueRepo     = new WorkQueueRepository(_connectionFactory);
-        var workQueueService  = new WorkQueueService(workQueueRepo);
+        var workQueueService  = new WorkQueueService(workQueueRepo, new AllWorkHRIS.Core.Temporal.SystemTemporalContext());
         var onboardingRepo    = new OnboardingRepository(_connectionFactory);
         var onboardingService = new OnboardingService(
             _connectionFactory, onboardingRepo, workQueueService,

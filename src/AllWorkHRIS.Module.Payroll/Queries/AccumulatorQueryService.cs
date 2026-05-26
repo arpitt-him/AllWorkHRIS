@@ -369,7 +369,7 @@ public sealed class AccumulatorQueryService
 
             string type = isReversal   ? "REVERSAL"
                         : isCorrection ? "CORRECTION"
-                        : "CONTRIBUTION";
+                        : "ORIGINAL";
 
             DateOnly runDate = ToDateOnly(r.run_date);
             int periodNum    = (int)r.period_number;

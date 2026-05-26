@@ -472,7 +472,7 @@
         try
         {
             var toEnroll = _filteredEmployees.Where(e => _selectedIds.Contains(e.EmploymentId)).ToList();
-            var now      = DateTimeOffset.UtcNow;
+            var now      = TemporalContext.GetOperativeNow();
 
             foreach (var emp in toEnroll)
             {

@@ -1,4 +1,5 @@
 using AllWorkHRIS.Core.Data;
+using AllWorkHRIS.Core.Temporal;
 using AllWorkHRIS.Module.TimeAttendance.Domain;
 using AllWorkHRIS.Module.TimeAttendance.Repositories;
 using Microsoft.Extensions.Logging;
@@ -9,15 +10,18 @@ public sealed class PayrollHandoffService : IPayrollHandoffService
 {
     private readonly ITimeEntryRepository          _repository;
     private readonly IConnectionFactory            _connectionFactory;
+    private readonly ITemporalContext              _temporal;
     private readonly ILogger<PayrollHandoffService> _logger;
 
     public PayrollHandoffService(
         ITimeEntryRepository           repository,
         IConnectionFactory             connectionFactory,
+        ITemporalContext               temporal,
         ILogger<PayrollHandoffService> logger)
     {
         _repository        = repository;
         _connectionFactory = connectionFactory;
+        _temporal          = temporal;
         _logger            = logger;
     }
 
@@ -28,6 +32,10 @@ public sealed class PayrollHandoffService : IPayrollHandoffService
         int delivered = 0;
         int failed    = 0;
 
+        // TDO-aware lock timestamp (operative date + real time-of-day), computed once so
+        // all entries in this handoff share the same lock instant.
+        var lockedAt = _temporal.GetOperativeNow();
+
         foreach (var entry in entries)
         {
             ct.ThrowIfCancellationRequested();
@@ -35,7 +43,7 @@ public sealed class PayrollHandoffService : IPayrollHandoffService
             using var uow = new UnitOfWork(_connectionFactory);
             try
             {
-                await _repository.LockAsync(entry.TimeEntryId, payrollRunId, uow);
+                await _repository.LockAsync(entry.TimeEntryId, payrollRunId, lockedAt, uow);
                 uow.Commit();
                 delivered++;
             }

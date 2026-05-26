@@ -32,6 +32,7 @@
 @inject IHrisSessionState     SessionState
 @inject ILookupCache          LookupCache
 @inject ITemporalContext      TemporalContext
+@inject IWallClock            Clock
 @inject NavigationManager     Navigation
 @inject IJSRuntime            JSRuntime
 
@@ -2316,7 +2317,7 @@ else
             await SocialProfileRepo.SavePhotoAsync(_person.PersonId, bytes, mimeType);
             _communityHasPhoto   = true;
             _communityShowUpload = false;
-            _communityPhotoStamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            _communityPhotoStamp = Clock.UtcNow.ToUnixTimeSeconds();
             _communitySuccess    = "Photo updated.";
         }
         catch (Exception ex) { _communityError = ex.Message; }

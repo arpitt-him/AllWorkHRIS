@@ -521,7 +521,7 @@
         _saving = true; _formError = null;
         try
         {
-            var now   = DateTimeOffset.UtcNow;
+            var now   = TemporalContext.GetOperativeNow();
             var auth  = await AuthState.GetAuthenticationStateAsync();
             var actor = auth.User.GetDisplayName();
 
@@ -644,7 +644,7 @@
                 EffectiveFrom = _rateFormFrom.Value,
                 EffectiveTo   = _rateFormTo,
                 Description   = string.IsNullOrWhiteSpace(_rateFormDescription) ? null : _rateFormDescription.Trim(),
-                CreatedAt     = DateTimeOffset.UtcNow
+                CreatedAt     = TemporalContext.GetOperativeNow()
             };
             var entries = _rateFormTiers.Select(t => new DeductionRateEntry
             {
@@ -750,7 +750,7 @@
         _matchSaving = true; _matchFormError = null;
         try
         {
-            var now = DateTimeOffset.UtcNow;
+            var now = TemporalContext.GetOperativeNow();
             if (_editMatch is null)
             {
                 var newRule = new DeductionEmployerMatch

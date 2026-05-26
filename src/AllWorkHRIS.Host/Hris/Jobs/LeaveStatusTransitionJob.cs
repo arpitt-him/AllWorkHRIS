@@ -9,6 +9,7 @@ public sealed class LeaveStatusTransitionJob : BackgroundService
 {
     private readonly IServiceScopeFactory              _scopeFactory;
     private readonly ITemporalOverrideService          _overrideService;
+    private readonly IWallClock                        _clock;
     private readonly ILogger<LeaveStatusTransitionJob> _logger;
 
     private DateOnly?     _lastRunDate;
@@ -17,10 +18,12 @@ public sealed class LeaveStatusTransitionJob : BackgroundService
     public LeaveStatusTransitionJob(
         IServiceScopeFactory              scopeFactory,
         ITemporalOverrideService          overrideService,
+        IWallClock                        clock,
         ILogger<LeaveStatusTransitionJob> logger)
     {
         _scopeFactory    = scopeFactory;
         _overrideService = overrideService;
+        _clock           = clock;
         _logger          = logger;
 
         _overrideService.OnChanged += () => _tdo = true;
@@ -41,8 +44,8 @@ public sealed class LeaveStatusTransitionJob : BackgroundService
                 _logger.LogError(ex, "LeaveStatusTransitionJob cycle failed.");
             }
 
-            var deadline = DateTime.UtcNow.AddHours(24);
-            while (!ct.IsCancellationRequested && !_tdo && DateTime.UtcNow < deadline)
+            var deadline = _clock.UtcNow.AddHours(24);
+            while (!ct.IsCancellationRequested && !_tdo && _clock.UtcNow < deadline)
                 await Task.Delay(TimeSpan.FromSeconds(10), ct);
         }
     }

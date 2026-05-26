@@ -2,6 +2,7 @@ using Dapper;
 using AllWorkHRIS.Core.Composition;
 using AllWorkHRIS.Core.Data;
 using AllWorkHRIS.Core.Lookups;
+using AllWorkHRIS.Core.Temporal;
 using AllWorkHRIS.Module.TimeAttendance.Domain;
 using AllWorkHRIS.Module.TimeAttendance.Repositories;
 
@@ -14,19 +15,22 @@ public sealed class OvertimeDetectionService : IOvertimeDetectionService
     private readonly ILookupCache           _lookupCache;
     private readonly ITimeApprovalNotifier  _notifier;
     private readonly IPayrollContextLookup  _payrollContextLookup;
+    private readonly ITemporalContext       _temporal;
 
     public OvertimeDetectionService(
         ITimeEntryRepository  repository,
         IConnectionFactory    connectionFactory,
         ILookupCache          lookupCache,
         ITimeApprovalNotifier notifier,
-        IPayrollContextLookup payrollContextLookup)
+        IPayrollContextLookup payrollContextLookup,
+        ITemporalContext      temporal)
     {
         _repository           = repository;
         _connectionFactory    = connectionFactory;
         _lookupCache          = lookupCache;
         _notifier             = notifier;
         _payrollContextLookup = payrollContextLookup;
+        _temporal             = temporal;
     }
 
     public async Task<OvertimeDetectionResult> DetectAndReclassifyAsync(
@@ -98,7 +102,7 @@ public sealed class OvertimeDetectionService : IOvertimeDetectionService
         await uow.Connection.ExecuteAsync(shrinkSql, new
         {
             Duration    = regularHours,
-            Now         = DateTimeOffset.UtcNow,
+            Now         = _temporal.GetOperativeNow(),
             TimeEntryId = entry.TimeEntryId
         }, uow.Transaction);
 
@@ -132,7 +136,7 @@ public sealed class OvertimeDetectionService : IOvertimeDetectionService
             ApprovedBy      = (object?)entry.ApprovedBy ?? DBNull.Value,
             ApprovedAt      = (object?)entry.ApprovedAt ?? DBNull.Value,
             OriginalId      = entry.TimeEntryId,
-            Now             = DateTimeOffset.UtcNow
+            Now             = _temporal.GetOperativeNow()
         }, uow.Transaction);
     }
 

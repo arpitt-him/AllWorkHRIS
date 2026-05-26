@@ -1,6 +1,7 @@
 using AllWorkHRIS.Core.Composition;
 using AllWorkHRIS.Core.Data;
 using AllWorkHRIS.Core.Lookups;
+using AllWorkHRIS.Core.Temporal;
 using AllWorkHRIS.Module.TimeAttendance.Commands;
 using AllWorkHRIS.Module.TimeAttendance.Domain;
 using AllWorkHRIS.Module.TimeAttendance.Repositories;
@@ -16,6 +17,7 @@ public sealed class TimeEntryService : ITimeEntryService
     private readonly IConnectionFactory        _connectionFactory;
     private readonly ILookupCache              _lookupCache;
     private readonly ITimeApprovalNotifier     _notifier;
+    private readonly ITemporalContext          _temporal;
     private readonly ILogger<TimeEntryService> _logger;
 
     public TimeEntryService(
@@ -25,6 +27,7 @@ public sealed class TimeEntryService : ITimeEntryService
         IConnectionFactory         connectionFactory,
         ILookupCache               lookupCache,
         ITimeApprovalNotifier      notifier,
+        ITemporalContext           temporal,
         ILogger<TimeEntryService>  logger)
     {
         _repository        = repository;
@@ -33,6 +36,7 @@ public sealed class TimeEntryService : ITimeEntryService
         _connectionFactory = connectionFactory;
         _lookupCache       = lookupCache;
         _notifier          = notifier;
+        _temporal          = temporal;
         _logger            = logger;
     }
 
@@ -66,7 +70,7 @@ public sealed class TimeEntryService : ITimeEntryService
         var timeCategoryId    = _lookupCache.GetId(TimeAttendanceLookupTables.TimeCategory, command.TimeCategory);
         var entryMethodId     = _lookupCache.GetId(TimeAttendanceLookupTables.EntryMethod, command.EntryMethod);
 
-        var entry = TimeEntry.Create(command, submittedStatusId, timeCategoryId, entryMethodId);
+        var entry = TimeEntry.Create(command, submittedStatusId, timeCategoryId, entryMethodId, _temporal.GetOperativeNow());
 
         Guid entryId;
         using var uow = new UnitOfWork(_connectionFactory);
@@ -184,7 +188,7 @@ public sealed class TimeEntryService : ITimeEntryService
         var submittedStatusId = _lookupCache.GetId(TimeAttendanceLookupTables.TimeEntryStatus, "SUBMITTED");
         var timeCategoryId    = _lookupCache.GetId(TimeAttendanceLookupTables.TimeCategory, command.TimeCategory);
 
-        var correction = TimeEntry.CreateCorrection(original, command, submittedStatusId, timeCategoryId);
+        var correction = TimeEntry.CreateCorrection(original, command, submittedStatusId, timeCategoryId, _temporal.GetOperativeNow());
 
         using var uow = new UnitOfWork(_connectionFactory);
         try
