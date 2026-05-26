@@ -490,6 +490,11 @@
 
     private async Task SelectNodeAsync(Guid nodeId, string nodeName)
     {
+        // Mutually exclusive with the location employee list — clear it so both panels
+        // don't show at once.
+        _selectedLocationId        = null;
+        _selectedLocationEmployees = [];
+
         _selectedNodeId   = nodeId;
         _selectedNodeName = nodeName;
         _expanded.Add(nodeId);
@@ -559,6 +564,12 @@
             _selectedLocationEmployees = [];
             return;
         }
+
+        // The location employee list and the hierarchy-node workforce panel are mutually
+        // exclusive — clear any selected node so we don't also render a (redundant)
+        // department panel for employees already shown in the location list.
+        _selectedNodeId            = null;
+        _workforce                 = [];
 
         _selectedLocationId        = locationId;
         _selectedLocationEmployees = [];
