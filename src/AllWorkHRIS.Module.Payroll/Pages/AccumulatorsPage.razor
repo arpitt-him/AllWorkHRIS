@@ -185,7 +185,7 @@
                                                 @Fmt(r.YtdBalance)
                                             </Template>
                                         </GridColumn>
-                                        <GridColumn HeaderText="Amount Left to Cap" TextAlign="TextAlign.Right" Width="170">
+                                        <GridColumn HeaderText="Amount Left to Cap" TextAlign="TextAlign.Right" Width="290">
                                             <Template>
                                                 @{ var r = (AccumulatorEmployeeBalanceRow)context; }
                                                 @if (!r.CapAmount.HasValue)
@@ -224,7 +224,13 @@
                                     <GridTemplates>
                                         <DetailTemplate Context="detailCtx">
                                             @{ var row = (AccumulatorEmployeeBalanceRow)detailCtx; }
-                                            @if (_impactCache.TryGetValue(row.EmploymentId, out var cachedImpacts))
+                                            @if (_familyMeta?.RollupType == "DERIVED")
+                                            {
+                                                <div class="detail-loading">
+                                                    <span class="text-muted">No impact trail at this derived scope — line-level detail lives in the source-scope families.</span>
+                                                </div>
+                                            }
+                                            else if (_impactCache.TryGetValue(row.EmploymentId, out var cachedImpacts))
                                             {
                                                 @RenderImpactGrid(cachedImpacts)
                                             }
@@ -390,7 +396,7 @@
                                     @Fmt(r.YtdBalance)
                                 </Template>
                             </GridColumn>
-                            <GridColumn HeaderText="Amount Left to Cap" TextAlign="TextAlign.Right" Width="170">
+                            <GridColumn HeaderText="Amount Left to Cap" TextAlign="TextAlign.Right" Width="290">
                                 <Template>
                                     @{ var r = (AccumulatorEmployeeSummaryRow)context; }
                                     @if (r.CapAmount.HasValue)

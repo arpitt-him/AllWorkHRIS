@@ -7,11 +7,21 @@
    pinned while the page scrolls at the window edge. *@
 <SectionContent SectionName="shell-tabs">
     <div class="payroll-shell__tabs">
-        <a class="payroll-tab @ActiveClass("/payroll/runs")"         href="/payroll/runs">Payroll Runs</a>
-        <a class="payroll-tab @ActiveClass("/payroll/register")"     href="/payroll/register">Pay Register</a>
-        <a class="payroll-tab @ActiveClass("/payroll/accumulators")" href="/payroll/accumulators">Accumulators</a>
-        <a class="payroll-tab @ActiveClass("/payroll/calendar")"     href="/payroll/calendar">Pay Calendars</a>
-        <a class="payroll-tab @ActiveClass("/payroll/profiles")"     href="/payroll/profiles">Payroll Profiles</a>
+        <AuthorizeView Roles="PayrollOperator,PayrollAdmin" Context="_">
+            <a class="payroll-tab @ActiveClass("/payroll/runs")" href="/payroll/runs">Payroll Runs</a>
+        </AuthorizeView>
+        <AuthorizeView Roles="PayrollOperator,PayrollAdmin,HrisAdmin,BenefitsAdmin" Context="_">
+            <a class="payroll-tab @ActiveClass("/payroll/register")" href="/payroll/register">Pay Register</a>
+        </AuthorizeView>
+        <AuthorizeView Roles="PayrollOperator,PayrollAdmin,HrisAdmin" Context="_">
+            <a class="payroll-tab @ActiveClass("/payroll/accumulators")" href="/payroll/accumulators">Accumulators</a>
+        </AuthorizeView>
+        <AuthorizeView Roles="PayrollAdmin" Context="_">
+            <a class="payroll-tab @ActiveClass("/payroll/calendar")" href="/payroll/calendar">Pay Calendars</a>
+        </AuthorizeView>
+        <AuthorizeView Roles="PayrollAdmin" Context="_">
+            <a class="payroll-tab @ActiveClass("/payroll/profiles")" href="/payroll/profiles">Payroll Profiles</a>
+        </AuthorizeView>
     </div>
 </SectionContent>
 

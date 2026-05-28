@@ -5,7 +5,7 @@ namespace AllWorkHRIS.Module.Payroll;
 
 public sealed class PayrollNavContributor : INavContributor
 {
-    private static readonly string[] _roles = ["PayrollOperator", "PayrollAdmin"];
+    private static readonly string[] _roles = ["PayrollOperator", "PayrollAdmin", "HrisAdmin"];
 
     public NavTarget Target => NavTarget.EntityNav;
 
@@ -20,9 +20,9 @@ public sealed class PayrollNavContributor : INavContributor
             AccentColor: "var(--module-payroll)",
             Items:
             [
-                new("Payroll Runs",      "/payroll/runs"),
-                new("Pay Register",      "/payroll/register"),
-                new("Accumulators",      "/payroll/accumulators",  RequiredRole: "PayrollAdmin"),
+                new("Payroll Runs",      "/payroll/runs",          RequiredRole: "PayrollOperator,PayrollAdmin"),
+                new("Pay Register",      "/payroll/register",      RequiredRole: "PayrollOperator,PayrollAdmin,HrisAdmin,BenefitsAdmin"),
+                new("Accumulators",      "/payroll/accumulators",  RequiredRole: "PayrollOperator,PayrollAdmin,HrisAdmin"),
                 new("Pay Calendars",     "/payroll/calendar",      RequiredRole: "PayrollAdmin"),
                 new("Payroll Profiles",  "/payroll/profiles",      RequiredRole: "PayrollAdmin"),
             ]);
