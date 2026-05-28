@@ -45,7 +45,11 @@ public sealed class AccumulatorService : IAccumulatorService
 
         foreach (var line in deductionLines.Where(l => l.AccumulatorImpactFlag))
         {
-            var def = await _accumulatorRepo.GetDefinitionByCodeAsync(line.DeductionCode, asOf);
+            // Resolve the accumulator via the explicit benefit_deduction link, not by
+            // matching the deduction code to an accumulator_code string (the prior fragile
+            // coupling that silently dropped e.g. Roth 401k when the codes differed).
+            // No link => the deduction does not accumulate.
+            var def = await _accumulatorRepo.GetDefinitionForDeductionAsync(line.DeductionCode, asOf);
             if (def is null) continue;
             await ApplyChainAsync(def, line.CalculatedAmount, line.DeductionResultLineId, result, runId, now, uow);
             ct.ThrowIfCancellationRequested();

@@ -3,6 +3,7 @@
 @rendermode InteractiveServer
 @attribute [Authorize(Roles = "TimeAdmin")]
 @using Microsoft.AspNetCore.Authorization
+@using Syncfusion.Blazor.DropDowns
 @using Syncfusion.Blazor.Grids
 @inject IHrisSessionState          SessionState
 @inject TimeAttendanceQueryService QueryService
@@ -43,8 +44,24 @@
             </div>
         }
 
+        @* ── Context filter (only shown when there is more than one) ── *@
+        @if (_contextFilterOptions.Count > 2)  @* > 2 because the list always has "(All contexts)" + at least one real entry *@
+        {
+            <div class="filter-row" style="margin-bottom:1rem;display:flex;align-items:center;gap:.75rem;">
+                <label class="filter-label">Payroll Context</label>
+                <SfDropDownList TValue="Guid" TItem="ContextFilterItem"
+                                DataSource="@_contextFilterOptions"
+                                @bind-Value="_filterContextId"
+                                Width="270px">
+                    <DropDownListFieldSettings Value="Id" Text="Name" />
+                    <DropDownListEvents TValue="Guid" TItem="ContextFilterItem"
+                                        ValueChange="OnFilterContextChangedAsync" />
+                </SfDropDownList>
+            </div>
+        }
+
         <div class="card">
-            <SfGrid DataSource="@_periods" AllowSorting="true" CssClass="e-gridhover">
+            <SfGrid DataSource="@_filteredPeriods" AllowSorting="true" CssClass="e-gridhover">
                 <GridEvents TValue="HandoffPeriodRow" DetailsExpanded="OnRowExpandedAsync" />
                 <GridColumns>
                     <GridColumn HeaderText="Period">
@@ -194,8 +211,15 @@
 
 @code {
 
-    private List<HandoffPeriodRow> _periods = [];
+    private List<HandoffPeriodRow> _periods         = [];
+    private List<HandoffPeriodRow> _filteredPeriods = []; // stable field — don't bind grid to a per-render .ToList()
     private bool _loading = true;
+
+    // Context filter: Guid.Empty sentinel = "(All contexts)".
+    private Guid                      _filterContextId       = Guid.Empty;
+    private List<ContextFilterItem>   _contextFilterOptions  = [];
+
+    private sealed record ContextFilterItem(Guid Id, string Name);
 
     private Guid? _confirmHandoffId;
     private Guid? _runningPeriodId;
@@ -219,6 +243,37 @@
     private async Task LoadAsync(Guid entityId)
     {
         _periods = (await QueryService.GetHandoffSummariesAsync(entityId)).ToList();
+
+        // Build the context filter options from whatever the query returned.
+        _contextFilterOptions = _periods
+            .Select(p => new ContextFilterItem(p.PayrollContextId, p.PayrollContextName))
+            .DistinctBy(c => c.Id)
+            .OrderBy(c => c.Name)
+            .Prepend(new ContextFilterItem(Guid.Empty, "(All contexts)"))
+            .ToList();
+
+        // If the previously-selected context is no longer present, fall back to All.
+        if (_filterContextId != Guid.Empty
+            && !_contextFilterOptions.Any(c => c.Id == _filterContextId))
+        {
+            _filterContextId = Guid.Empty;
+        }
+
+        ApplyContextFilter();
+    }
+
+    private void ApplyContextFilter()
+    {
+        _filteredPeriods = _filterContextId == Guid.Empty
+            ? _periods.ToList()
+            : _periods.Where(p => p.PayrollContextId == _filterContextId).ToList();
+    }
+
+    private Task OnFilterContextChangedAsync(ChangeEventArgs<Guid, ContextFilterItem> args)
+    {
+        _filterContextId = args.Value;
+        ApplyContextFilter();
+        return Task.CompletedTask;
     }
 
     private async Task OnRowExpandedAsync(DetailsExpandedEventArgs<HandoffPeriodRow> args)

@@ -446,6 +446,7 @@ public sealed class BenefitsGateTests : IAsyncLifetime
 
         var importService = new BenefitElectionImportService(
             _electionService, _codeRepo, _connectionFactory,
+            new AllWorkHRIS.Core.Temporal.SystemTemporalContext(),
             NullLogger<BenefitElectionImportService>.Instance);
 
         var csv = $"employee_number,deduction_code,employee_amount,employer_contribution_amount,effective_start_date,effective_end_date\n{ImportEmployeeNumber},TC_BEN_011_PRE,150.00,,2026-01-01,\nEMP-NONEXISTENT,NONEXISTENT,-5.00,,2026-01-01,";
@@ -468,12 +469,14 @@ public sealed class BenefitsGateTests : IAsyncLifetime
 
         var importService = new BenefitElectionImportService(
             _electionService, _codeRepo, _connectionFactory,
+            new AllWorkHRIS.Core.Temporal.SystemTemporalContext(),
             NullLogger<BenefitElectionImportService>.Instance);
 
         var csv = $"employee_number,deduction_code,employee_amount,contribution_pct,coverage_tier,employer_contribution_amount,annual_coverage_amount,effective_start_date,effective_end_date\n{ImportEmployeeNumber},TC_BEN_012_PRE,175.00,,,,,2026-01-01,";
         var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(csv));
 
-        var jobId = await importService.SubmitBatchAsync(stream, "text/csv", CreatorId);
+        var jobId = await importService.SubmitBatchAsync(
+            stream, "text/csv", CreatorId, "Test User", "test.csv", legalEntityId: null);
 
         Assert.NotEqual(Guid.Empty, jobId);
 

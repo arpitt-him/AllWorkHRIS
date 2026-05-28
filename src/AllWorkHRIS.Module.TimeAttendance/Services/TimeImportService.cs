@@ -1,8 +1,10 @@
 using System.Globalization;
 using System.Text;
 using Dapper;
+using Microsoft.Extensions.Logging;
 using AllWorkHRIS.Core.Data;
 using AllWorkHRIS.Core.Lookups;
+using AllWorkHRIS.Core.Temporal;
 using AllWorkHRIS.Module.TimeAttendance.Commands;
 using AllWorkHRIS.Module.TimeAttendance.Domain;
 
@@ -13,19 +15,26 @@ public sealed class TimeImportService : ITimeImportService
     private readonly IConnectionFactory _connectionFactory;
     private readonly ILookupCache       _lookupCache;
     private readonly ITimeEntryService  _timeEntryService;
+    private readonly ITemporalContext   _temporal;
+    private readonly ILogger<TimeImportService> _logger;
 
     public TimeImportService(
         IConnectionFactory connectionFactory,
         ILookupCache       lookupCache,
-        ITimeEntryService  timeEntryService)
+        ITimeEntryService  timeEntryService,
+        ITemporalContext   temporal,
+        ILogger<TimeImportService> logger)
     {
         _connectionFactory = connectionFactory;
         _lookupCache       = lookupCache;
         _timeEntryService  = timeEntryService;
+        _temporal          = temporal;
+        _logger            = logger;
     }
 
     public async Task<TimeImportResult> ImportAsync(
-        Stream csv, Guid importedBy, Guid? scopedEntityId = null, CancellationToken ct = default)
+        Stream csv, Guid importedBy, string importedByName, string fileName,
+        Guid? scopedEntityId = null, CancellationToken ct = default)
     {
         // Resolve the active entity name once upfront for use in error messages
         var entityName = scopedEntityId.HasValue
@@ -132,8 +141,79 @@ public sealed class TimeImportService : ITimeImportService
             }
         }
 
+        // Record the import in history only when something was actually saved to the DB
+        // (≥ 1 entry) and we have a legal-entity scope. Validate-only previews never reach
+        // here. Best-effort: a history-write failure must not fail the (already-committed) import.
+        if (imported >= 1 && scopedEntityId.HasValue)
+        {
+            try
+            {
+                await RecordHistoryAsync(
+                    scopedEntityId.Value, fileName, importedByName,
+                    totalRows: imported + errors.Count,
+                    accepted: imported, rejected: errors.Count);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Time import committed {Imported} entries but recording import history failed.", imported);
+            }
+        }
+
         return new TimeImportResult(imported, errors.Count, errors);
     }
+
+    private async Task RecordHistoryAsync(
+        Guid legalEntityId, string fileName, string importedByName,
+        int totalRows, int accepted, int rejected)
+    {
+        using var conn = _connectionFactory.CreateConnection();
+        await conn.ExecuteAsync(
+            """
+            INSERT INTO time_entry_import_history
+                (time_entry_import_history_id, legal_entity_id, file_name, imported_by,
+                 imported_at, total_rows, accepted_count, rejected_count, status)
+            VALUES
+                (@Id, @LegalEntityId, @FileName, @ImportedBy,
+                 @ImportedAt, @TotalRows, @Accepted, @Rejected, @Status)
+            """,
+            new
+            {
+                Id            = Guid.NewGuid(),
+                LegalEntityId = legalEntityId,
+                FileName      = Truncate(fileName, 260),
+                ImportedBy    = Truncate(importedByName, 200),
+                ImportedAt    = _temporal.GetOperativeNow().UtcDateTime,
+                TotalRows     = totalRows,
+                Accepted      = accepted,
+                Rejected      = rejected,
+                Status        = rejected == 0 ? "SUCCESS" : "PARTIAL"
+            });
+    }
+
+    public async Task<IReadOnlyList<TimeImportHistoryRow>> GetImportHistoryAsync(
+        Guid legalEntityId, CancellationToken ct = default)
+    {
+        using var conn = _connectionFactory.CreateConnection();
+        var rows = await conn.QueryAsync<TimeImportHistoryRow>(
+            """
+            SELECT file_name       AS FileName,
+                   imported_at     AS ImportedAt,
+                   imported_by     AS ImportedBy,
+                   total_rows      AS TotalRows,
+                   accepted_count  AS AcceptedCount,
+                   rejected_count  AS RejectedCount,
+                   status          AS Status
+            FROM   time_entry_import_history
+            WHERE  legal_entity_id = @LegalEntityId
+            ORDER  BY imported_at DESC
+            """,
+            new { LegalEntityId = legalEntityId });
+        return rows.AsList();
+    }
+
+    private static string Truncate(string? s, int max) =>
+        string.IsNullOrEmpty(s) ? "" : (s.Length <= max ? s : s[..max]);
 
     private async Task<string?> ResolveEntityNameAsync(Guid entityId)
     {

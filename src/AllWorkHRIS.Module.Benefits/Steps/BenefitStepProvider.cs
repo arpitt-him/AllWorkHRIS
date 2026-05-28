@@ -1,3 +1,4 @@
+using AllWorkHRIS.Core;
 using AllWorkHRIS.Core.Pipeline;
 using AllWorkHRIS.Module.Benefits.Domain.Codes;
 using AllWorkHRIS.Module.Benefits.Domain.Elections;
@@ -74,9 +75,12 @@ public sealed class BenefitStepProvider : IBenefitStepProvider
             var calculator = _calculatorFactory.GetCalculator(election.CalculationMode);
             var amounts    = calculator.Compute(election, request, rateEntry);
 
-            var eeAmount = Math.Round(amounts.Employee * fraction, 4);
+            // Penny-round the FINAL per-period amounts: the deduction/contribution that hits
+            // net pay, the result line, and the accumulator must be the exact cent. (Calculators
+            // round to 4dp intermediately; this last step is where it becomes real money.)
+            var eeAmount = Money.Round(amounts.Employee * fraction);
             var erAmount = amounts.Employer.HasValue
-                ? Math.Round(amounts.Employer.Value * fraction, 4)
+                ? Money.Round(amounts.Employer.Value * fraction)
                 : (decimal?)null;
 
             if (election.TaxTreatment == TaxTreatment.PreTax)

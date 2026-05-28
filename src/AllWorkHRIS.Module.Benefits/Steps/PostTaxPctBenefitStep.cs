@@ -1,3 +1,4 @@
+using AllWorkHRIS.Core;
 using AllWorkHRIS.Core.Pipeline;
 
 namespace AllWorkHRIS.Module.Benefits.Steps;
@@ -33,7 +34,7 @@ public sealed class PostTaxPctBenefitStep : ICalculationStep
     {
         // IncomeTaxableWages has been reduced by pre-tax deductions; this is the
         // post-deduction gross base for Roth and other post-tax percentage contributions.
-        var amount = Math.Round(ctx.IncomeTaxableWages * _rate * _coverageFraction, 4);
+        var amount = Money.Round(ctx.IncomeTaxableWages * _rate * _coverageFraction);
 
         ctx = ctx with
         {

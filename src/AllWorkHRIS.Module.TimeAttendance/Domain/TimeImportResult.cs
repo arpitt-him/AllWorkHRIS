@@ -9,3 +9,12 @@ public sealed record TimeImportError(
     int    RowNumber,
     string EmployeeNumber,
     string Reason);
+
+public sealed record TimeImportHistoryRow(
+    string   FileName,
+    DateTime ImportedAt,
+    string   ImportedBy,
+    int            TotalRows,
+    int            AcceptedCount,
+    int            RejectedCount,
+    string         Status);

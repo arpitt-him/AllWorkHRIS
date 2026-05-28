@@ -79,33 +79,52 @@ public sealed record CalculationContext
     public CalculationContext WithReducedFicaTaxableWages(decimal reduction)
         => this with { FicaTaxableWages = Math.Max(0, FicaTaxableWages - reduction) };
 
+    // ----------------------------------------------------------------------------
+    // Step-result setters are the single penny-rounding choke point for every tax
+    // step (and any benefit step that routes through them). Rounding `amount` here —
+    // half-up to the cent via Money.Round — guarantees the value stored in
+    // StepResults, accumulated into ComputedTax / NetPay / EmployerCost, and
+    // ultimately persisted on the tax result line (and from there into the
+    // accumulator) is the exact transacted cent. No tax step can drift sub-cent
+    // even if a future step type forgets to round on its own.
+    // ----------------------------------------------------------------------------
+
     public CalculationContext WithStepResult(string stepCode, decimal amount)
-        => this with
+    {
+        var a = Money.Round(amount);
+        return this with
         {
-            StepResults = StepResults.SetItem(stepCode, amount),
-            ComputedTax = ComputedTax + amount,
-            NetPay      = NetPay - amount
+            StepResults = StepResults.SetItem(stepCode, a),
+            ComputedTax = ComputedTax + a,
+            NetPay      = NetPay - a
         };
+    }
 
     public CalculationContext WithEmployerStepResult(string stepCode, decimal amount)
-        => this with
+    {
+        var a = Money.Round(amount);
+        return this with
         {
-            StepResults         = StepResults.SetItem(stepCode, amount),
-            EmployerStepResults = EmployerStepResults.SetItem(stepCode, amount),
-            EmployerCost        = EmployerCost + amount
+            StepResults         = StepResults.SetItem(stepCode, a),
+            EmployerStepResults = EmployerStepResults.SetItem(stepCode, a),
+            EmployerCost        = EmployerCost + a
         };
+    }
 
     // Used for steps that apply to BOTH employee and employer (e.g. Social Security, Medicare).
     // Reduces NetPay (EE withheld) AND increases EmployerCost (ER share), and tracks the code
     // in BothStepCodes so the pipeline includes it in both the EE and ER output dictionaries.
     public CalculationContext WithBothStepResult(string stepCode, decimal amount)
-        => this with
+    {
+        var a = Money.Round(amount);
+        return this with
         {
-            StepResults         = StepResults.SetItem(stepCode, amount),
-            EmployerStepResults = EmployerStepResults.SetItem(stepCode, amount),
+            StepResults         = StepResults.SetItem(stepCode, a),
+            EmployerStepResults = EmployerStepResults.SetItem(stepCode, a),
             BothStepCodes       = BothStepCodes.Add(stepCode),
-            ComputedTax         = ComputedTax + amount,
-            NetPay              = NetPay - amount,
-            EmployerCost        = EmployerCost + amount
+            ComputedTax         = ComputedTax + a,
+            NetPay              = NetPay - a,
+            EmployerCost        = EmployerCost + a
         };
+    }
 }

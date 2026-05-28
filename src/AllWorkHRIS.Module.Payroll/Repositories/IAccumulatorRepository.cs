@@ -6,6 +6,14 @@ namespace AllWorkHRIS.Module.Payroll.Repositories;
 public interface IAccumulatorRepository
 {
     Task<AccumulatorDefinition?> GetDefinitionByCodeAsync(string accumulatorCode, DateOnly asOf);
+
+    /// <summary>
+    /// Resolves the accumulator definition a benefit deduction feeds via the explicit
+    /// <c>benefit_deduction.accumulator_definition_id</c> link (NOT by code-string match).
+    /// Returns null when the deduction has no link (i.e. it does not accumulate).
+    /// </summary>
+    Task<AccumulatorDefinition?> GetDefinitionForDeductionAsync(string deductionCode, DateOnly asOf);
+
     Task<IReadOnlyList<AccumulatorDefinition>> GetAllActiveDefinitionsAsync(DateOnly asOf);
 
     Task<AccumulatorBalance?> GetBalanceAsync(Guid accumulatorDefinitionId, Guid? employmentId,

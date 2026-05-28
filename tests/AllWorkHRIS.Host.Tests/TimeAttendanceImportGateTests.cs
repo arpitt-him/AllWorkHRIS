@@ -83,7 +83,7 @@ public sealed class TimeAttendanceImportGateTests : IAsyncLifetime
         const string csv = "employee_number,work_date,time_category,duration,start_time,end_time,payroll_period_id,project_code,task_code,notes\n";
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(csv));
 
-        var result = await service.ImportAsync(stream, Guid.NewGuid());
+        var result = await service.ImportAsync(stream, Guid.NewGuid(), "Test User", "test.csv");
 
         Assert.Equal(0, result.Imported);
         Assert.Equal(0, result.Failed);
@@ -104,7 +104,7 @@ public sealed class TimeAttendanceImportGateTests : IAsyncLifetime
                   $"EMP-NOTFOUND,2027-12-01,REGULAR,-2.00,,,{Guid.NewGuid()},,," + "\n";
 
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(csv));
-        var result = await service.ImportAsync(stream, Guid.NewGuid());
+        var result = await service.ImportAsync(stream, Guid.NewGuid(), "Test User", "test.csv");
 
         Assert.Equal(0, result.Imported);
         Assert.Equal(1, result.Failed);
@@ -125,7 +125,7 @@ public sealed class TimeAttendanceImportGateTests : IAsyncLifetime
                   $"EMP-NOTFOUND,2027-12-01,DANCE_BREAK,8.00,,,{Guid.NewGuid()},,," + "\n";
 
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(csv));
-        var result = await service.ImportAsync(stream, Guid.NewGuid());
+        var result = await service.ImportAsync(stream, Guid.NewGuid(), "Test User", "test.csv");
 
         Assert.Equal(0, result.Imported);
         Assert.Equal(1, result.Failed);
@@ -148,7 +148,7 @@ public sealed class TimeAttendanceImportGateTests : IAsyncLifetime
                   $"EMP-NOTFOUND,2027-12-01,REGULAR,8.00,,,{Guid.NewGuid()},,," + "\n";
 
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(csv));
-        var result = await service.ImportAsync(stream, Guid.NewGuid());
+        var result = await service.ImportAsync(stream, Guid.NewGuid(), "Test User", "test.csv");
 
         Assert.Equal(0, result.Imported);
         Assert.Equal(1, result.Failed);
@@ -197,7 +197,8 @@ public sealed class TimeAttendanceImportGateTests : IAsyncLifetime
                                  _lookupCache, notifier, new AllWorkHRIS.Core.Composition.NullPayrollContextLookup(), temporal);
         var entryService   = new TimeEntryService(entryRepo, otService, workSchedules, _connectionFactory,
                                  _lookupCache, notifier, temporal, NullLogger<TimeEntryService>.Instance);
-        return new TimeImportService(_connectionFactory, _lookupCache, entryService);
+        return new TimeImportService(_connectionFactory, _lookupCache, entryService,
+            temporal, NullLogger<TimeImportService>.Instance);
     }
 
     private static string CsvHeader() =>

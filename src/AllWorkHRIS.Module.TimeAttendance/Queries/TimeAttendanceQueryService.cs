@@ -45,7 +45,9 @@ public sealed record HandoffPeriodRow(
     long      ApprovedEntries,
     long      LockedEntries,
     decimal   TotalHours,
-    DateTime? FirstLockAt);
+    DateTime? FirstLockAt,
+    Guid      PayrollContextId,
+    string    PayrollContextName);
 
 public sealed record EmploymentOption(Guid EmploymentId, string DisplayName, string EmployeeNumber);
 
@@ -215,6 +217,12 @@ public sealed class TimeAttendanceQueryService
     public async Task<IReadOnlyList<HandoffPeriodRow>> GetHandoffSummariesAsync(Guid legalEntityId)
     {
         using var conn = _connectionFactory.CreateConnection();
+        // Exclude SALARY payroll contexts — exempt/salaried pay groups don't submit time
+        // entries, so their periods would always show 0 entries and pad the handoff list
+        // with permanent "No approved entries" rows. NULL rate_type is left visible
+        // (unclassified context — admin still needs visibility). Other non-time-entry
+        // rate types (COMMISSION, STIPEND) are not filtered yet — add them if/when they
+        // show as noise.
         return (await conn.QueryAsync<HandoffPeriodRow>(
             """
             SELECT
@@ -225,13 +233,19 @@ public sealed class TimeAttendanceQueryService
                 COUNT(CASE WHEN s.code = 'APPROVED' THEN 1 END)                     AS approved_entries,
                 COUNT(CASE WHEN s.code = 'LOCKED'   THEN 1 END)                     AS locked_entries,
                 COALESCE(SUM(CASE WHEN s.code = 'LOCKED' THEN te.duration END), 0)  AS total_hours,
-                MIN(CASE WHEN s.code = 'LOCKED' THEN te.updated_at END)             AS first_lock_at
+                MIN(CASE WHEN s.code = 'LOCKED' THEN te.updated_at END)             AS first_lock_at,
+                pc.payroll_context_id,
+                pc.payroll_context_name
             FROM   payroll_period pp
             JOIN   payroll_context pc ON pc.payroll_context_id = pp.payroll_context_id
             LEFT   JOIN time_entry te ON te.payroll_period_id = pp.period_id
             LEFT   JOIN lkp_time_entry_status s ON s.id = te.status_id
             WHERE  pc.legal_entity_id = @LegalEntityId
-            GROUP  BY pp.period_id, pp.period_year, pp.period_number, pp.pay_date
+              AND  (pc.compensation_rate_type_id IS NULL
+                    OR pc.compensation_rate_type_id NOT IN
+                       (SELECT id FROM lkp_compensation_rate_type WHERE code = 'SALARY'))
+            GROUP  BY pp.period_id, pp.period_year, pp.period_number, pp.pay_date, pp.period_start_date,
+                     pc.payroll_context_id, pc.payroll_context_name
             ORDER  BY pp.period_start_date ASC
             """,
             new { LegalEntityId = legalEntityId })).ToList();

@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using AllWorkHRIS.Core;
 using AllWorkHRIS.Core.Pipeline;
 using AllWorkHRIS.Core.Temporal;
 using AllWorkHRIS.Module.Payroll.Domain.Results;
@@ -301,13 +302,13 @@ public sealed partial class CalculationEngine : ICalculationEngine
                 if (nonExempt.RegHours > 0m)
                     lines.Add(MakeEarningsLine(resultId, input.EmploymentId, "REG", "Regular",
                         nonExempt.RegHours, nonExempt.HourlyRate,
-                        Math.Round(nonExempt.RegHours * nonExempt.HourlyRate, 4, MidpointRounding.AwayFromZero),
+                        Money.Round(nonExempt.RegHours * nonExempt.HourlyRate),
                         now));
 
                 if (nonExempt.OtHours > 0m)
                     lines.Add(MakeEarningsLine(resultId, input.EmploymentId, "OT", "Overtime",
                         nonExempt.OtHours, nonExempt.HourlyRate,
-                        Math.Round(nonExempt.OtHours * nonExempt.HourlyRate, 4, MidpointRounding.AwayFromZero),
+                        Money.Round(nonExempt.OtHours * nonExempt.HourlyRate),
                         now));
             }
         }
@@ -316,8 +317,7 @@ public sealed partial class CalculationEngine : ICalculationEngine
             // SALARY + EXEMPT: fixed period amount; time entries irrelevant
             if (input.AnnualEquivalent is not null and not 0m && input.PeriodsPerYear > 0)
             {
-                var amount = Math.Round(input.AnnualEquivalent.Value / input.PeriodsPerYear, 4,
-                                 MidpointRounding.AwayFromZero);
+                var amount = Money.Round(input.AnnualEquivalent.Value / input.PeriodsPerYear);
                 lines.Add(MakeEarningsLine(resultId, input.EmploymentId, "REG", "Regular Salary",
                     null, input.AnnualEquivalent.Value, amount, now));
             }
@@ -333,8 +333,7 @@ public sealed partial class CalculationEngine : ICalculationEngine
             return Task.FromResult<IReadOnlyList<EarningsResultLine>>([]);
 
         // OT premium: 0.5× rate × OT hours (the extra half-time above straight pay)
-        var premAmount = Math.Round(nonExempt.OtHours * nonExempt.HourlyRate * 0.5m, 4,
-                             MidpointRounding.AwayFromZero);
+        var premAmount = Money.Round(nonExempt.OtHours * nonExempt.HourlyRate * 0.5m);
 
         IReadOnlyList<EarningsResultLine> lines =
         [

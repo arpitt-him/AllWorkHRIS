@@ -7,6 +7,7 @@
 @using System.Security.Claims
 @using System.Text
 @using AllWorkHRIS.Core.Temporal
+@using AllWorkHRIS.Core.Security
 @using AllWorkHRIS.Module.TimeAttendance.Domain
 @inject ITimeImportService        ImportService
 @inject IHrisSessionState         SessionState
@@ -125,6 +126,33 @@
         </div>
     }
 
+    @* ── Import history ───────────────────────────────────────────────── *@
+    @if (_history.Count > 0)
+    {
+        <div class="import-history" style="margin-top:2rem;">
+            <h3 class="form-panel__title">Import History</h3>
+            <SfGrid DataSource="@_history" AllowSorting="true" AllowPaging="true" CssClass="e-gridhover">
+                <GridPageSettings PageSize="10" />
+                <GridColumns>
+                    <GridColumn HeaderText="File" Field="FileName" />
+                    <GridColumn HeaderText="Imported" Width="190">
+                        <Template>@{ var h = (TimeImportHistoryRow)context; }@h.ImportedAt.ToLocalTime().ToString("MMM d, yyyy h:mm tt")</Template>
+                    </GridColumn>
+                    <GridColumn HeaderText="By" Field="ImportedBy" Width="170" />
+                    <GridColumn HeaderText="Rows" Field="TotalRows" TextAlign="TextAlign.Right" Width="80" />
+                    <GridColumn HeaderText="Imported" Field="AcceptedCount" TextAlign="TextAlign.Right" Width="100" />
+                    <GridColumn HeaderText="Failed" Field="RejectedCount" TextAlign="TextAlign.Right" Width="90" />
+                    <GridColumn HeaderText="Status" Width="110">
+                        <Template>
+                            @{ var h = (TimeImportHistoryRow)context; }
+                            <span style="color:@(h.Status == "SUCCESS" ? "#16a34a" : "#92400e");font-weight:600;">@h.Status</span>
+                        </Template>
+                    </GridColumn>
+                </GridColumns>
+            </SfGrid>
+        </div>
+    }
+
 </div>
 
 @code {
@@ -139,6 +167,15 @@
     private TimeImportResult? _result;
     private string?           _fileName;
     private DateTimeOffset?   _importedAt;
+    private IReadOnlyList<TimeImportHistoryRow> _history = [];
+
+    protected override async Task OnInitializedAsync() => await LoadHistoryAsync();
+
+    private async Task LoadHistoryAsync()
+    {
+        if (SessionState.SelectedLegalEntityId is { } entityId)
+            _history = await ImportService.GetImportHistoryAsync(entityId);
+    }
 
     private void OnFileInputChange(ChangeEventArgs e)
     {
@@ -165,11 +202,14 @@
             var empIdStr = auth.User.FindFirstValue("employment_id")
                         ?? auth.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
             Guid.TryParse(empIdStr, out var importedBy);
+            var importedByName = auth.User.GetDisplayName();
 
             using var ms = new MemoryStream(bytes);
-            _result     = await ImportService.ImportAsync(ms, importedBy, SessionState.SelectedLegalEntityId);
+            _result     = await ImportService.ImportAsync(
+                ms, importedBy, importedByName, _fileName ?? "(unknown).csv", SessionState.SelectedLegalEntityId);
             _importedAt = TemporalContext.GetOperativeNow();
             _step       = Step.Done;
+            await LoadHistoryAsync();
         }
         catch (Exception ex) { _fileError = ex.Message; }
         finally { _importing = false; }

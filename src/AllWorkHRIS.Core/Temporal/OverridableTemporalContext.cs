@@ -32,6 +32,32 @@ public sealed class OverridableTemporalContext : ITemporalContext, ITemporalOver
 #pragma warning restore RS0030
     }
 
+    /// <summary>
+    /// Operative "now" as a UTC <see cref="DateTimeOffset"/>. Overrides the default
+    /// (UTC-time-of-day) implementation: when an override date is active we combine the
+    /// TDO date with the real <b>local</b> time-of-day (and local offset), then normalise
+    /// to UTC. Anchoring to local time-of-day keeps the TDO date intact through the
+    /// <c>.ToLocalTime()</c> round-trip every display performs — the UTC-time-of-day default
+    /// rolls the displayed date back a day for negative-offset zones (e.g. US) in the evening.
+    /// </summary>
+    public DateTimeOffset GetOperativeNow()
+    {
+        DateOnly? ov;
+        lock (_lock) ov = _override;
+
+#pragma warning disable RS0030 // Sanctioned: real LOCAL wall clock is intentional here; only the DATE comes from the TDO.
+        var realLocal = DateTimeOffset.Now;
+#pragma warning restore RS0030
+
+        // No override active → behave like production: real "now" in UTC.
+        if (ov is null) return realLocal.ToUniversalTime();
+
+        // TDO date + real local time-of-day, tagged with the local offset (Unspecified-kind
+        // DateTime so the offset ctor is valid), then converted to UTC for storage.
+        var localMoment = ov.Value.ToDateTime(TimeOnly.FromTimeSpan(realLocal.TimeOfDay));
+        return new DateTimeOffset(localMoment, realLocal.Offset).ToUniversalTime();
+    }
+
     public void SetOverride(DateOnly date)
     {
         lock (_lock) _override = date;

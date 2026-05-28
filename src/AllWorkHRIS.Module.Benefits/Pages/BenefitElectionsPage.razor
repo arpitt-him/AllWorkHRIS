@@ -181,7 +181,7 @@
                         <div class="form-group">
                             <label class="form-label">Contribution % <span class="required">*</span></label>
                             <SfNumericTextBox TValue="decimal?" @bind-Value="_addContributionPct"
-                                             Min="0.001m" Max="100" Step="0.001m" Placeholder="e.g. 6" />
+                                             Min="0.001m" Max="100" Step="1m" Placeholder="e.g. 6" />
                             <small class="hint-text">
                                 Enter as a percentage of gross pay — e.g. <strong>6</strong> deducts 6% each period.
                                 @if (_addContributionPct.HasValue && _addContributionPct.Value > 0)
@@ -419,7 +419,7 @@
                     <div class="form-group">
                         <label class="form-label">Contribution %</label>
                         <SfNumericTextBox TValue="decimal?" @bind-Value="_amendContributionPct"
-                                         Min="0.001m" Max="100" Step="0.001m" Placeholder="e.g. 6" />
+                                         Min="0.001m" Max="100" Step="1m" Placeholder="e.g. 6" />
                     </div>
                 }
                 else if (_amendTarget.CalculationMode == CalculationMode.CoverageBased)

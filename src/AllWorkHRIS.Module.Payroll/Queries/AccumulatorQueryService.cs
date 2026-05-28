@@ -60,8 +60,7 @@ public sealed record AccumulatorEmployeeSummaryRow(
     string   ResetType,
     int      CurrentYear,
     decimal  YtdBalance,
-    decimal? CapAmount,
-    Guid     AccumulatorDefinitionId
+    decimal? CapAmount
 );
 
 public sealed record AccumulatorFamilyMeta(
@@ -283,26 +282,31 @@ public sealed class AccumulatorQueryService
             new { LegalEntityId = legalEntityId, Query = $"%{query}%" })).ToList();
     }
 
-    /// Returns all accumulator families with YTD balances for a specific employee.
+    /// Returns one row per accumulator family for an employee, with the YTD balance
+    /// summed across every definition in the family. This is what makes "Gross Wages"
+    /// (family) reconcile to the Pay Register when a family has multiple definitions
+    /// (e.g. GROSS_WAGES = REG + OT + OT_PREM, RETIREMENT = 401K-PRE + 401K-ROTH).
+    /// Drill-in is by family (<see cref="GetEmployeeFamilyImpactAsync"/>), so the
+    /// per-definition breakdown is still reachable via the impact trail.
+    /// ResetType / CapAmount are pulled as MAX — the system assumes members of a
+    /// family share these (they do for every family seeded today).
     public async Task<IReadOnlyList<AccumulatorEmployeeSummaryRow>> GetEmployeeSummaryAsync(
         Guid employmentId, int year)
     {
         const string sql = """
             SELECT af.id                        AS family_id,
                    af.label                     AS family_label,
-                   ad.reset_type,
+                   MAX(ad.reset_type)           AS reset_type,
                    pp.period_year               AS current_year,
                    SUM(ab.current_value)        AS ytd_balance,
-                   ad.cap_amount,
-                   ad.accumulator_definition_id
+                   MAX(ad.cap_amount)           AS cap_amount
             FROM   accumulator_balance ab
             JOIN   accumulator_definition ad ON ad.accumulator_definition_id = ab.accumulator_definition_id
             JOIN   lkp_accumulator_family af ON af.id                        = ab.accumulator_family_id
             JOIN   payroll_period pp          ON pp.period_id                = ab.calendar_context_id
             WHERE  ab.participant_id = @EmploymentId
               AND  pp.period_year    = @Year
-            GROUP BY af.id, af.label, af.sort_order, ad.reset_type, pp.period_year,
-                     ad.accumulator_definition_id
+            GROUP BY af.id, af.label, af.sort_order, pp.period_year
             ORDER BY af.sort_order, af.label
             """;
         using var conn = _connectionFactory.CreateConnection();
@@ -315,8 +319,7 @@ public sealed class AccumulatorQueryService
             (string)r.reset_type,
             (int)r.current_year,
             (decimal)r.ytd_balance,
-            r.cap_amount as decimal?,
-            (Guid)r.accumulator_definition_id
+            r.cap_amount as decimal?
         )).ToList();
     }
 

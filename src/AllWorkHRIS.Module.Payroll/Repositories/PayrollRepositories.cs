@@ -549,6 +549,22 @@ public sealed class AccumulatorRepository : IAccumulatorRepository
             new { AccumulatorCode = accumulatorCode, AsOf = asOf.ToDateTime(TimeOnly.MinValue) });
     }
 
+    public async Task<AccumulatorDefinition?> GetDefinitionForDeductionAsync(string deductionCode, DateOnly asOf)
+    {
+        // Resolve via the explicit benefit_deduction -> accumulator_definition link
+        // (not by code-string match). No link (NULL) => the join yields no row =>
+        // the deduction does not accumulate.
+        const string sql = """
+            SELECT ad.* FROM accumulator_definition ad
+            JOIN   benefit_deduction bd ON bd.accumulator_definition_id = ad.accumulator_definition_id
+            WHERE  bd.code = @DeductionCode
+              AND  (ad.effective_end_date IS NULL OR ad.effective_end_date >= @AsOf)
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        return await conn.QueryFirstOrDefaultAsync<AccumulatorDefinition>(sql,
+            new { DeductionCode = deductionCode, AsOf = asOf.ToDateTime(TimeOnly.MinValue) });
+    }
+
     public async Task<IReadOnlyList<AccumulatorDefinition>> GetAllActiveDefinitionsAsync(DateOnly asOf)
     {
         const string sql = """

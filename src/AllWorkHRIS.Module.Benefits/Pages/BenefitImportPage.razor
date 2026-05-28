@@ -7,7 +7,10 @@
 @using System.Security.Claims
 @inject IBenefitElectionImportService ImportService
 @inject AuthenticationStateProvider   AuthState
+@inject IHrisSessionState             SessionState
 @inject IJSRuntime                    JS
+@using AllWorkHRIS.Core.Security
+@using AllWorkHRIS.Module.Benefits.Queries
 @using Syncfusion.Blazor.Grids
 
 <PageTitle>Import Elections — AllWork HRIS</PageTitle>
@@ -135,6 +138,33 @@
         </div>
     }
 
+    @* ── Import history ───────────────────────────────────────────────── *@
+    @if (_history.Count > 0)
+    {
+        <div class="import-history" style="margin-top:2rem;">
+            <h3 class="form-panel__title">Import History</h3>
+            <SfGrid DataSource="@_history" AllowSorting="true" AllowPaging="true" CssClass="e-gridhover">
+                <GridPageSettings PageSize="10" />
+                <GridColumns>
+                    <GridColumn HeaderText="File" Field="FileName" />
+                    <GridColumn HeaderText="Imported" Width="190">
+                        <Template>@{ var h = (BenefitImportHistoryRow)context; }@h.ImportedAt.ToLocalTime().ToString("MMM d, yyyy h:mm tt")</Template>
+                    </GridColumn>
+                    <GridColumn HeaderText="By" Field="ImportedBy" Width="170" />
+                    <GridColumn HeaderText="Rows" Field="TotalRows" TextAlign="TextAlign.Right" Width="80" />
+                    <GridColumn HeaderText="Created" Field="AcceptedCount" TextAlign="TextAlign.Right" Width="100" />
+                    <GridColumn HeaderText="Rejected" Field="RejectedCount" TextAlign="TextAlign.Right" Width="100" />
+                    <GridColumn HeaderText="Status" Width="110">
+                        <Template>
+                            @{ var h = (BenefitImportHistoryRow)context; }
+                            <span style="color:@(h.Status == "SUCCESS" ? "#16a34a" : "#92400e");font-weight:600;">@h.Status</span>
+                        </Template>
+                    </GridColumn>
+                </GridColumns>
+            </SfGrid>
+        </div>
+    }
+
 </div>
 
 <style>
@@ -183,16 +213,28 @@
     private int                    _fileInputKey;
     private bool                   _fileSelected;
     private byte[]?                _fileBytes;
+    private string?                _fileName;
     private string?                _fileError;
     private bool                   _validating;
     private bool                   _importing;
     private BatchValidationResult? _validationResult;
     private string?                _importError;
     private string?                _importSuccess;
+    private IReadOnlyList<BenefitImportHistoryRow> _history = [];
+
+    protected override async Task OnInitializedAsync() => await LoadHistoryAsync();
+
+    private async Task LoadHistoryAsync()
+    {
+        if (SessionState.SelectedLegalEntityId is { } entityId)
+            _history = await ImportService.GetImportHistoryAsync(entityId);
+    }
 
     private void OnFileInputChange(ChangeEventArgs e)
     {
-        _fileSelected     = !string.IsNullOrEmpty(e.Value?.ToString());
+        var raw           = e.Value?.ToString();
+        _fileSelected     = !string.IsNullOrEmpty(raw);
+        _fileName         = _fileSelected ? Path.GetFileName(raw) : null;
         _fileBytes        = null;
         _fileError        = null;
         _validationResult = null;
@@ -227,10 +269,14 @@
         {
             var auth = await AuthState.GetAuthenticationStateAsync();
             Guid.TryParse(auth.User.FindFirstValue(ClaimTypes.NameIdentifier), out var submittedBy);
+            var importedByName = auth.User.GetDisplayName();
 
             using var ms  = new MemoryStream(_fileBytes);
-            var jobId     = await ImportService.SubmitBatchAsync(ms, "text/csv", submittedBy);
+            var jobId     = await ImportService.SubmitBatchAsync(
+                ms, "text/csv", submittedBy, importedByName,
+                _fileName ?? "(unknown).csv", SessionState.SelectedLegalEntityId);
             _importSuccess = $"Import complete (Job {jobId}). {_validationResult.ValidCount} election(s) created.";
+            await LoadHistoryAsync();
         }
         catch (Exception ex) { _importError = ex.Message; }
         finally { _importing = false; }
@@ -242,6 +288,7 @@
         _fileInputKey++;
         _fileSelected     = false;
         _fileBytes        = null;
+        _fileName         = null;
         _validationResult = null;
         _importError      = null;
         _importSuccess    = null;

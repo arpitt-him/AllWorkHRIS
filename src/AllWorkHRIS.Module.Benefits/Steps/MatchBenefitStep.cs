@@ -1,3 +1,4 @@
+using AllWorkHRIS.Core;
 using AllWorkHRIS.Core.Pipeline;
 
 namespace AllWorkHRIS.Module.Benefits.Steps;
@@ -38,7 +39,7 @@ public sealed class MatchBenefitStep : ICalculationStep
     {
         ctx.StepResults.TryGetValue(_eeStepCode, out var eeContribution);
         var matchable   = Math.Min(eeContribution, _periodCap);
-        var matchAmount = Math.Round(matchable * _matchRate, 4);
+        var matchAmount = Money.Round(matchable * _matchRate);
         ctx = ctx.WithEmployerStepResult(StepCode, matchAmount);
         return Task.FromResult(ctx);
     }

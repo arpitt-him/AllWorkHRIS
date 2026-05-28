@@ -1,4 +1,5 @@
 using AllWorkHRIS.Core.Data;
+using AllWorkHRIS.Core.Temporal;
 using AllWorkHRIS.Module.Benefits.Commands;
 using AllWorkHRIS.Module.Benefits.Domain.Codes;
 using AllWorkHRIS.Module.Benefits.Queries;
@@ -13,6 +14,7 @@ public sealed class BenefitElectionImportService : IBenefitElectionImportService
     private readonly IBenefitElectionService                 _electionService;
     private readonly IDeductionRepository                    _deductionRepository;
     private readonly IConnectionFactory                      _connectionFactory;
+    private readonly ITemporalContext                        _temporal;
     private readonly ILogger<BenefitElectionImportService>   _logger;
 
     private static readonly HashSet<string> ValidCoverageTiers =
@@ -22,11 +24,13 @@ public sealed class BenefitElectionImportService : IBenefitElectionImportService
         IBenefitElectionService                 electionService,
         IDeductionRepository                    deductionRepository,
         IConnectionFactory                      connectionFactory,
+        ITemporalContext                        temporal,
         ILogger<BenefitElectionImportService>   logger)
     {
         _electionService     = electionService;
         _deductionRepository = deductionRepository;
         _connectionFactory   = connectionFactory;
+        _temporal            = temporal;
         _logger              = logger;
     }
 
@@ -131,12 +135,13 @@ public sealed class BenefitElectionImportService : IBenefitElectionImportService
     // ── Submit ───────────────────────────────────────────────────────────
 
     public async Task<Guid> SubmitBatchAsync(
-        Stream fileContent, string fileFormat, Guid submittedBy, CancellationToken ct = default)
+        Stream fileContent, string fileFormat, Guid submittedBy,
+        string importedByName, string fileName, Guid? legalEntityId, CancellationToken ct = default)
     {
         var jobId = Guid.NewGuid();
         _logger.LogInformation("Benefits import job {JobId} started by {SubmittedBy}.", jobId, submittedBy);
 
-        var (records, _, _) = await ParseCsvAsync(fileContent, ct);
+        var (records, totalDataRows, _) = await ParseCsvAsync(fileContent, ct);
 
         var deductionMap = (await _deductionRepository.GetActiveCodesAsync(ct))
             .ToDictionary(d => d.Code, StringComparer.OrdinalIgnoreCase);
@@ -215,8 +220,80 @@ public sealed class BenefitElectionImportService : IBenefitElectionImportService
             "Benefits import job {JobId} complete — accepted={Accepted} rejected={Rejected}.",
             jobId, accepted, rejected);
 
+        // Record in history only when ≥ 1 election was actually created and we have a
+        // legal-entity scope. Best-effort: a history-write failure must not fail the import.
+        if (accepted >= 1 && legalEntityId.HasValue)
+        {
+            try
+            {
+                await RecordHistoryAsync(
+                    legalEntityId.Value, fileName, importedByName,
+                    totalRows: totalDataRows,
+                    accepted: accepted, rejected: totalDataRows - accepted, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Benefits import job {JobId} created {Accepted} elections but recording import history failed.",
+                    jobId, accepted);
+            }
+        }
+
         return jobId;
     }
+
+    private async Task RecordHistoryAsync(
+        Guid legalEntityId, string fileName, string importedByName,
+        int totalRows, int accepted, int rejected, CancellationToken ct)
+    {
+        using var conn = _connectionFactory.CreateConnection();
+        await conn.ExecuteAsync(new CommandDefinition(
+            """
+            INSERT INTO benefit_election_import_history
+                (legal_entity_id, file_name, imported_by, imported_at,
+                 total_rows, accepted_count, rejected_count, status)
+            VALUES
+                (@LegalEntityId, @FileName, @ImportedBy, @ImportedAt,
+                 @TotalRows, @Accepted, @Rejected, @Status)
+            """,
+            new
+            {
+                LegalEntityId = legalEntityId,
+                FileName      = Truncate(fileName, 260),
+                ImportedBy    = Truncate(importedByName, 200),
+                ImportedAt    = _temporal.GetOperativeNow().UtcDateTime,
+                TotalRows     = totalRows,
+                Accepted      = accepted,
+                Rejected      = rejected,
+                Status        = rejected == 0 ? "SUCCESS" : "PARTIAL"
+            },
+            cancellationToken: ct));
+    }
+
+    public async Task<IReadOnlyList<BenefitImportHistoryRow>> GetImportHistoryAsync(
+        Guid legalEntityId, CancellationToken ct = default)
+    {
+        using var conn = _connectionFactory.CreateConnection();
+        var rows = await conn.QueryAsync<BenefitImportHistoryRow>(new CommandDefinition(
+            """
+            SELECT file_name       AS FileName,
+                   imported_at     AS ImportedAt,
+                   imported_by     AS ImportedBy,
+                   total_rows      AS TotalRows,
+                   accepted_count  AS AcceptedCount,
+                   rejected_count  AS RejectedCount,
+                   status          AS Status
+            FROM   benefit_election_import_history
+            WHERE  legal_entity_id = @LegalEntityId
+            ORDER  BY imported_at DESC
+            """,
+            new { LegalEntityId = legalEntityId },
+            cancellationToken: ct));
+        return rows.AsList();
+    }
+
+    private static string Truncate(string? s, int max) =>
+        string.IsNullOrEmpty(s) ? "" : (s.Length <= max ? s : s[..max]);
 
     // ── Helpers ──────────────────────────────────────────────────────────
 
