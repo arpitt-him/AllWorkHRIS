@@ -1,0 +1,66 @@
+@page "/reports/hr"
+@rendermode InteractiveServer
+@* ReportViewer is the base prerequisite to see any Reports surface; the cards
+   inside the hub still filter by per-report AllowedRoles via GetAvailableReportsAsync. *@
+@attribute [Authorize(Roles = "ReportViewer")]
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@inject AuthenticationStateProvider AuthState
+@inject IReportService              ReportService
+@inject NavigationManager           Nav
+
+<PageTitle>HR Reports — AllWork HRIS</PageTitle>
+
+<div class="page-container">
+
+    <div class="page-header">
+        <h2 class="page-title">HR Reports</h2>
+    </div>
+
+    @if (_availableReports is null)
+    {
+        <div class="panel-card"><p class="text-muted">Loading…</p></div>
+    }
+    else if (_availableReports.Count == 0)
+    {
+        <div class="panel-card">
+            <p class="text-muted">No HR reports are available for your role.</p>
+        </div>
+    }
+    else
+    {
+        <div class="report-card-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:var(--space-4)">
+            @foreach (var def in _availableReports)
+            {
+                <div class="panel-card report-card" style="display:flex;flex-direction:column;gap:var(--space-2)">
+                    <div class="report-card__id" style="font-size:0.75rem;color:var(--text-muted);letter-spacing:0.05em">@def.ReportId</div>
+                    <h3 class="report-card__title" style="margin:0;font-size:1.05rem">@def.Title</h3>
+                    <p class="report-card__desc text-muted" style="margin:0;flex:1">@def.Description</p>
+                    <button class="btn-primary" style="align-self:flex-start"
+                            @onclick="() => OpenReport(def.ReportId)">
+                        Run Report
+                    </button>
+                </div>
+            }
+        </div>
+    }
+
+</div>
+
+@code {
+    private IReadOnlyList<ReportDefinition>? _availableReports;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth      = await AuthState.GetAuthenticationStateAsync();
+        var userRoles = auth.User.FindAll(c => c.Type == "roles").Select(c => c.Value).ToList();
+
+        var all = await ReportService.GetAvailableReportsAsync(userRoles);
+        _availableReports = all.Where(d => d.ReportId.StartsWith("HR-RPT-", StringComparison.Ordinal))
+                               .OrderBy(d => d.ReportId)
+                               .ToList();
+    }
+
+    private void OpenReport(string reportId)
+        => Nav.NavigateTo($"/reports/r/{reportId}");
+}

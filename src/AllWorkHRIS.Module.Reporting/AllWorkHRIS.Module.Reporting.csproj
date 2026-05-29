@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AllWorkHRIS.Core\AllWorkHRIS.Core.csproj" />
+    <ProjectReference Include="..\AllWorkHRIS.Host.SharedUI\AllWorkHRIS.Host.SharedUI.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Autofac" Version="9.1.0" />
+    <PackageReference Include="Dapper" Version="2.1.72" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="9.0.0" />
+    <PackageReference Include="Npgsql" Version="10.0.2" />
+    <PackageReference Include="Syncfusion.Blazor" Version="33.1.44" />
+    <PackageReference Include="System.Composition" Version="9.0.0" />
+    <PackageReference Include="ClosedXML" Version="0.104.2" />
+    <PackageReference Include="QuestPDF" Version="2024.12.3" />
+  </ItemGroup>
+
+  <Target Name="CopyToHostModules" AfterTargets="Build">
+    <PropertyGroup>
+      <HostModulesDir>$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)..\AllWorkHRIS.Host\modules'))</HostModulesDir>
+    </PropertyGroup>
+    <MakeDir Directories="$(HostModulesDir)" />
+    <Copy SourceFiles="$(OutputPath)$(AssemblyName).dll"
+          DestinationFolder="$(HostModulesDir)"
+          SkipUnchangedFiles="true" />
+    <Message Text="[Reporting] Copied $(AssemblyName).dll → $(HostModulesDir)" Importance="normal" />
+  </Target>
+
+</Project>

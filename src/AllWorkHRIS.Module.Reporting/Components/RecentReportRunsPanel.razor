@@ -1,0 +1,135 @@
+@using System.Text.Json
+@using AllWorkHRIS.Module.Reporting.Domain
+@using AllWorkHRIS.Module.Reporting.Reports
+@using AllWorkHRIS.Module.Reporting.Services
+@inject IReportService  ReportService
+@inject IReportRegistry Registry
+
+@* Compact "Your recent runs" list — current user's last N executions of
+   THIS report. Each row offers a Re-run that fires OnRerun with the saved
+   execution-history entry; the owning page decides what to do with it
+   (typically deserialise ParametersJson and call RunReportAsync). *@
+
+@if (_loading)
+{
+    @* render nothing while loading — keeps the page quiet on first paint *@
+}
+else if (_runs.Count > 0)
+{
+    <div class="panel-card recent-runs-panel" style="margin-top:var(--space-4)">
+        <div style="display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-2)">
+            <h3 style="margin:0;font-size:1rem">Your recent runs</h3>
+            <span class="text-muted text-sm">last @_runs.Count</span>
+        </div>
+
+        <table class="config-table recent-runs-table" style="border-collapse:separate;border-spacing:0">
+            <thead>
+                <tr>
+                    <th style="padding:var(--space-2) var(--space-3);white-space:nowrap;text-align:left">Run At</th>
+                    <th style="padding:var(--space-2) var(--space-3);white-space:nowrap;text-align:left">Parameters</th>
+                    <th style="padding:var(--space-2) var(--space-3);white-space:nowrap;text-align:right">Rows</th>
+                    <th style="padding:var(--space-2) var(--space-3);white-space:nowrap;text-align:left">Status</th>
+                    <th style="padding:var(--space-2) var(--space-3);white-space:nowrap;text-align:left">Format</th>
+                    <th style="padding:var(--space-2) var(--space-3)"></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var r in _runs)
+                {
+                    <tr>
+                        <td style="padding:var(--space-2) var(--space-3);white-space:nowrap">@r.StartedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
+                        <td style="padding:var(--space-2) var(--space-3);white-space:nowrap">
+                            @(_summaries.TryGetValue(r.ExecutionId, out var s) && !string.IsNullOrWhiteSpace(s)
+                                ? s
+                                : "—")
+                        </td>
+                        <td class="text-right" style="padding:var(--space-2) var(--space-3);white-space:nowrap">@(r.RowCount?.ToString("N0") ?? "—")</td>
+                        <td style="padding:var(--space-2) var(--space-3);white-space:nowrap">@StatusBadge(r.ExecutionStatus)</td>
+                        <td style="padding:var(--space-2) var(--space-3);white-space:nowrap">@(r.ExportFormat ?? "Inline")</td>
+                        <td class="text-right" style="padding:var(--space-2) var(--space-3);white-space:nowrap">
+                            <button class="btn-link" @onclick="() => InvokeRerunAsync(r)">Run again</button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public string ReportId { get; set; } = default!;
+    [Parameter, EditorRequired] public Guid   UserId   { get; set; }
+    [Parameter]                 public int    MaxCount { get; set; } = 5;
+    [Parameter]                 public EventCallback<ReportExecutionHistory> OnRerun { get; set; }
+
+    private bool _loading = true;
+    private IReadOnlyList<ReportExecutionHistory> _runs = [];
+    private Dictionary<Guid, string>              _summaries = new();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (UserId == Guid.Empty || string.IsNullOrEmpty(ReportId))
+        {
+            _loading = false;
+            return;
+        }
+
+        var items = await ReportService.GetRecentForReportAsync(UserId, ReportId, MaxCount);
+        _runs = items.ToList();
+        await BuildSummariesAsync();
+        _loading = false;
+    }
+
+    public async Task RefreshAsync()
+    {
+        var items = await ReportService.GetRecentForReportAsync(UserId, ReportId, MaxCount);
+        _runs = items.ToList();
+        await BuildSummariesAsync();
+        StateHasChanged();
+    }
+
+    private async Task BuildSummariesAsync()
+    {
+        if (_runs.Count == 0 || !Registry.Contains(ReportId))
+        {
+            _summaries = new();
+            return;
+        }
+
+        var query = Registry.Get(ReportId);
+        var next  = new Dictionary<Guid, string>(_runs.Count);
+        foreach (var row in _runs)
+        {
+            try
+            {
+                var p = JsonSerializer.Deserialize<ReportParameters>(row.ParametersJson) ?? new ReportParameters();
+                next[row.ExecutionId] = await query.GetParameterSummaryAsync(p, CancellationToken.None);
+            }
+            catch
+            {
+                next[row.ExecutionId] = string.Empty;
+            }
+        }
+        _summaries = next;
+    }
+
+    private async Task InvokeRerunAsync(ReportExecutionHistory entry)
+    {
+        if (OnRerun.HasDelegate)
+            await OnRerun.InvokeAsync(entry);
+    }
+
+    private static MarkupString StatusBadge(string status)
+    {
+        var (bg, fg, label) = status switch
+        {
+            ReportExecutionStatus.Completed    => ("#D1FAE5", "#065F46", "Completed"),
+            ReportExecutionStatus.Failed       => ("#FEE2E2", "#991B1B", "Failed"),
+            ReportExecutionStatus.Running      => ("#DBEAFE", "#1E40AF", "Running"),
+            ReportExecutionStatus.AsyncPending => ("#FEF3C7", "#92400E", "Queued"),
+            _                                  => ("#E5E7EB", "#374151", status)
+        };
+        return new MarkupString(
+            $"<span style=\"background:{bg};color:{fg};font-size:0.7rem;padding:2px 8px;border-radius:4px;font-weight:600\">{label}</span>");
+    }
+}

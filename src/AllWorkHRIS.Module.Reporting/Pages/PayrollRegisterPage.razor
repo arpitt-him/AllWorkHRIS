@@ -1,0 +1,194 @@
+@page "/reports/payroll/pay-rpt-001"
+@rendermode InteractiveServer
+@* ReportViewer is the base prerequisite. AllowedRoles on PAY-RPT-001's
+   ReportDefinition still gates running the report itself. *@
+@attribute [Authorize(Roles = "ReportViewer")]
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.JSInterop
+@using Syncfusion.Blazor.DropDowns
+@inject AuthenticationStateProvider AuthState
+@inject IHrisSessionState           Session
+@inject IReportService              ReportService
+@inject IReportExportService        ExportService
+@inject IReportRegistry             Registry
+@inject PayrollRunPickerQuery       RunPicker
+@inject IJSRuntime                  JS
+@inject NavigationManager           Nav
+
+<PageTitle>Payroll Register — AllWork HRIS</PageTitle>
+
+<div class="page-container">
+
+    <div class="page-header">
+        <h2 class="page-title">Payroll Register Report <span class="text-muted" style="font-size:0.8rem;font-weight:normal;margin-left:0.5rem">PAY-RPT-001</span></h2>
+        <button class="btn-link" @onclick="BackToHub">← Payroll Reports</button>
+    </div>
+
+    <div class="panel-card" style="margin-bottom:var(--space-4)">
+        <h3 class="panel-title">Parameters</h3>
+        <div class="form-grid" style="display:flex;gap:var(--space-3);align-items:end;flex-wrap:wrap">
+            <div class="form-field">
+                <label class="form-label">Payroll Run</label>
+                <SfDropDownList TValue="Guid?" TItem="PayrollRunPickerRow"
+                                DataSource="@_recentRuns"
+                                @bind-Value="_selectedRunId"
+                                Placeholder="Select a payroll run…"
+                                Width="420px">
+                    <DropDownListFieldSettings Value="RunId" Text="Label" />
+                </SfDropDownList>
+            </div>
+            <div class="form-field" style="margin-left:auto">
+                <button class="btn-primary" disabled="@(_isRunning || !_selectedRunId.HasValue)"
+                        @onclick="RunReportAsync">
+                    @(_isRunning ? "Running…" : "Run Report")
+                </button>
+            </div>
+        </div>
+        @if (!string.IsNullOrEmpty(_errorMessage))
+        {
+            <div class="form-error" style="color:var(--color-danger);margin-top:var(--space-2)">@_errorMessage</div>
+        }
+    </div>
+
+    @if (_reportData is null)
+    {
+        @if (_definition is not null)
+        {
+            <ReportSamplePreview Definition="@_definition" />
+        }
+        <RecentReportRunsPanel @ref="_recentPanel"
+                               ReportId="@ReportId"
+                               UserId="@_userId"
+                               OnRerun="RerunFromHistoryAsync" />
+    }
+    else
+    {
+        <ReportRunner Data="@_reportData" OnExport="ExportAsync" />
+    }
+
+</div>
+
+@code {
+    private const string  ReportId = "PAY-RPT-001";
+
+    private IReadOnlyList<PayrollRunPickerRow> _recentRuns = [];
+    private Guid?              _selectedRunId;
+    private bool               _isRunning;
+    private ReportData?        _reportData;
+    private Guid?              _executionId;
+    private string?            _errorMessage;
+    private Guid               _userId;
+    private IReadOnlyList<string>  _userRoles  = [];
+    private ReportDefinition?      _definition;
+    private RecentReportRunsPanel? _recentPanel;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _userRoles = auth.User.FindAll(c => c.Type == "roles").Select(c => c.Value).ToList();
+
+        var sub = auth.User.FindFirst("sub")?.Value
+               ?? auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (Guid.TryParse(sub, out var uid)) _userId = uid;
+
+        _definition = Registry.Get(ReportId).Definition;
+        _recentRuns = await RunPicker.GetRecentAsync(Session.SelectedLegalEntityId);
+    }
+
+    private async Task RunReportAsync()
+    {
+        if (!_selectedRunId.HasValue) return;
+        _errorMessage = null;
+        _isRunning    = true;
+        StateHasChanged();
+        try
+        {
+            var parameters = new ReportParameters
+            {
+                RunId         = _selectedRunId,
+                LegalEntityId = Session.SelectedLegalEntityId
+            };
+
+            var result = await ReportService.RunReportAsync(ReportId, parameters, _userId, _userRoles);
+            _reportData  = result.Data;
+            _executionId = result.ExecutionId;
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = ex.Message;
+        }
+        finally
+        {
+            _isRunning = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task RerunFromHistoryAsync(ReportExecutionHistory entry)
+    {
+        // Re-run uses the originally-recorded parameters verbatim; that's the
+        // whole point of saving parameters_json. The page's run dropdown is
+        // synced to whatever RunId the historical run targeted, then the
+        // standard run flow takes over.
+        try
+        {
+            var saved = System.Text.Json.JsonSerializer.Deserialize<ReportParameters>(entry.ParametersJson);
+            if (saved is null) return;
+            _selectedRunId = saved.RunId;
+            await RunReportAsync();
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Could not re-run: {ex.Message}";
+        }
+    }
+
+    private async Task ExportAsync(string format)
+    {
+        if (!_selectedRunId.HasValue) return;
+        try
+        {
+            var parameters = new ReportParameters
+            {
+                RunId         = _selectedRunId,
+                LegalEntityId = Session.SelectedLegalEntityId
+            };
+
+            ExportResult result = format switch
+            {
+                "csv"  => await ExportService.ExportCsvAsync(ReportId, parameters, _userId, _userRoles),
+                "xlsx" => await ExportService.ExportXlsxAsync(ReportId, parameters, _userId, _userRoles),
+                "pdf"  => await ExportService.ExportPdfAsync(ReportId, parameters, _userId, _userRoles),
+                _      => throw new ArgumentException($"Unknown export format '{format}'.")
+            };
+
+            byte[] bytes;
+            if (result.Content is MemoryStream ms)
+            {
+                bytes = ms.ToArray();
+            }
+            else
+            {
+                using var copy = new MemoryStream();
+                await result.Content.CopyToAsync(copy);
+                bytes = copy.ToArray();
+            }
+            var base64 = Convert.ToBase64String(bytes);
+
+            try
+            {
+                await JS.InvokeVoidAsync("allworkFiles.downloadBase64",
+                    result.FileName, result.MimeType, base64);
+            }
+            catch (Microsoft.JSInterop.JSDisconnectedException) { /* circuit gone — user navigated away mid-export */ }
+            catch (ObjectDisposedException)                     { /* component disposed before JS callback */ }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = ex.Message;
+        }
+    }
+
+    private void BackToHub() => Nav.NavigateTo("/reports/payroll");
+}

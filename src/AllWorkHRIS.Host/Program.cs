@@ -92,7 +92,14 @@ builder.Host.UseSerilog((ctx, cfg) =>
     cfg.ReadFrom.Configuration(ctx.Configuration)
        .Enrich.FromLogContext()
        .Enrich.WithMachineName()
-       .Enrich.WithEnvironmentUserName());
+       .Enrich.WithEnvironmentUserName()
+       // Suppress the noisy "Cannot access a disposed object … DotNetObjectReference"
+       // events. They fire when a JS-interop callback lands after its component or
+       // circuit has already been disposed — typically navigation-during-render or
+       // Syncfusion-component cleanup. Functionally benign; just log noise.
+       .Filter.ByExcluding(e =>
+           e.Exception is ObjectDisposedException ode &&
+           (ode.ObjectName?.Contains("DotNetObjectReference", StringComparison.Ordinal) ?? false)));
 
 // ---------------------------------------------------------------------------
 // 4. Replace default DI with Autofac

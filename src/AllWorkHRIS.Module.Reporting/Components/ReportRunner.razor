@@ -1,0 +1,103 @@
+@using Syncfusion.Blazor.Grids
+@using AllWorkHRIS.Module.Reporting.Domain
+
+@* Generic results panel. The owning page runs the report and hands the
+   ReportData in; this component renders the grid, the row-count footer,
+   and the three export buttons that fire OnExport(format). *@
+
+<div class="report-runner">
+
+    @if (Data.RowCount == 0)
+    {
+        <div class="panel-card">
+            <p class="text-muted">No rows match the selected parameters.</p>
+        </div>
+    }
+    else
+    {
+        <div class="report-export-toolbar" style="display:flex;gap:var(--space-2);margin-bottom:var(--space-3)">
+            <button class="btn-secondary" disabled="@_busy" @onclick="ExportCsvAsync">Export CSV</button>
+            <button class="btn-secondary" disabled="@_busy" @onclick="ExportXlsxAsync">Export Excel</button>
+            <button class="btn-secondary" disabled="@_busy" @onclick="ExportPdfAsync">Export PDF</button>
+            <span class="text-muted text-sm" style="align-self:center;margin-left:auto">
+                @Data.RowCount rows
+            </span>
+        </div>
+
+        <div class="panel-card no-pad">
+            <SfGrid TValue="IReadOnlyDictionary<string, object>"
+                    DataSource="@Data.Rows"
+                    AllowPaging="true"
+                    AllowSorting="true"
+                    AllowResizing="true">
+                <GridPageSettings PageSize="100" />
+                <GridColumns>
+                    @foreach (var c in Data.Columns)
+                    {
+                        var col = c; // explicit capture for the Template closure
+                        <GridColumn HeaderText="@col.Header"
+                                    TextAlign="@MapAlign(col.Alignment)">
+                            <Template Context="rowObj">
+                                @{
+                                    var row   = (IReadOnlyDictionary<string, object>)rowObj!;
+                                    var value = row.TryGetValue(col.Field, out var v) ? v : null;
+                                }
+                                @RenderCell(value, col.Format)
+                            </Template>
+                        </GridColumn>
+                    }
+                </GridColumns>
+            </SfGrid>
+        </div>
+    }
+
+</div>
+
+@code {
+    // EditorRequired + default! is the standard Blazor pattern for non-nullable
+    // required parameters — sidesteps the CS8669 warning that nullable [Parameter]
+    // types trigger from the Razor source generator's SetParametersAsync output.
+    [Parameter, EditorRequired]
+    public ReportData Data { get; set; } = default!;
+
+    [Parameter] public EventCallback<string> OnExport { get; set; }
+
+    private bool _busy;
+
+    private Task ExportCsvAsync()  => InvokeExportAsync("csv");
+    private Task ExportXlsxAsync() => InvokeExportAsync("xlsx");
+    private Task ExportPdfAsync()  => InvokeExportAsync("pdf");
+
+    private async Task InvokeExportAsync(string format)
+    {
+        if (_busy || !OnExport.HasDelegate) return;
+        try
+        {
+            _busy = true;
+            await OnExport.InvokeAsync(format);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private static TextAlign MapAlign(string a) => a switch
+    {
+        "Right"  => TextAlign.Right,
+        "Center" => TextAlign.Center,
+        _        => TextAlign.Left
+    };
+
+    private static string RenderCell(object? value, string? format) => value switch
+    {
+        null                                  => string.Empty,
+        DateOnly d                            => d.ToString("yyyy-MM-dd"),
+        DateTime dt                           => dt.ToString("yyyy-MM-dd"),
+        decimal dec when format == "currency" => dec.ToString("N2"),
+        decimal dec when format == "number"   => dec.ToString("N0"),
+        double  dbl when format == "currency" => dbl.ToString("N2"),
+        double  dbl                           => dbl.ToString("0.##"),
+        _                                     => value.ToString() ?? string.Empty
+    };
+}

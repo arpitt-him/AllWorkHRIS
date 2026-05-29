@@ -1,0 +1,277 @@
+@page "/reports/r/{ReportId}"
+@rendermode InteractiveServer
+@* ReportViewer is the base prerequisite; the per-report AllowedRoles check
+   below in OnInitializedAsync still gates which specific reports a user can run. *@
+@attribute [Authorize(Roles = "ReportViewer")]
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.JSInterop
+@using Syncfusion.Blazor.Calendars
+@using Syncfusion.Blazor.DropDowns
+@using Syncfusion.Blazor.Inputs
+@inject AuthenticationStateProvider AuthState
+@inject IHrisSessionState           Session
+@inject IReportService              ReportService
+@inject IReportExportService        ExportService
+@inject IReportRegistry             Registry
+@inject PayrollRunPickerQuery       RunPicker
+@inject ITemporalContext            Temporal
+@inject IJSRuntime                  JS
+@inject NavigationManager           Nav
+
+<PageTitle>@(_definition?.Title ?? "Report") — AllWork HRIS</PageTitle>
+
+<div class="page-container">
+
+    @if (_definition is null)
+    {
+        <div class="panel-card"><p class="text-muted">Loading…</p></div>
+    }
+    else if (!_authorized)
+    {
+        <div class="panel-card"><p class="text-muted">You do not have permission to run this report.</p></div>
+    }
+    else
+    {
+        <div class="page-header">
+            <h2 class="page-title">@_definition.Title <span class="text-muted" style="font-size:0.8rem;font-weight:normal;margin-left:0.5rem">@_definition.ReportId</span></h2>
+            <button class="btn-link" @onclick="BackToHub">← @_hubLabel</button>
+        </div>
+
+        <div class="panel-card" style="margin-bottom:var(--space-4)">
+            <h3 class="panel-title">Parameters</h3>
+            <div class="form-grid" style="display:flex;gap:var(--space-3);align-items:end;flex-wrap:wrap">
+                @switch (_definition.ParameterShape)
+                {
+                    case ReportParameterShape.Run:
+                        <div class="form-field">
+                            <label class="form-label">Payroll Run</label>
+                            <SfDropDownList TValue="Guid?" TItem="PayrollRunPickerRow"
+                                            DataSource="@_recentRuns"
+                                            @bind-Value="_selectedRunId"
+                                            Placeholder="Select a payroll run…"
+                                            Width="420px">
+                                <DropDownListFieldSettings Value="RunId" Text="Label" />
+                            </SfDropDownList>
+                        </div>
+                        break;
+
+                    case ReportParameterShape.AsOfDate:
+                        <div class="form-field">
+                            <label class="form-label">As of Date</label>
+                            <SfDatePicker TValue="DateTime?" @bind-Value="_asOfDate" Width="200px" />
+                        </div>
+                        break;
+
+                    case ReportParameterShape.Period:
+                        <div class="form-field">
+                            <label class="form-label">From</label>
+                            <SfDatePicker TValue="DateTime?" @bind-Value="_periodStart" Width="180px" />
+                        </div>
+                        <div class="form-field">
+                            <label class="form-label">To</label>
+                            <SfDatePicker TValue="DateTime?" @bind-Value="_periodEnd" Width="180px" />
+                        </div>
+                        break;
+
+                    case ReportParameterShape.Window:
+                        <div class="form-field">
+                            <label class="form-label">Window (days)</label>
+                            <SfNumericTextBox TValue="int?" @bind-Value="_windowDays" Min="1" Max="3650" Width="160px" />
+                        </div>
+                        break;
+                }
+                <div class="form-field" style="margin-left:auto">
+                    <button class="btn-primary" disabled="@(_isRunning || !ParametersReady)"
+                            @onclick="RunReportAsync">
+                        @(_isRunning ? "Running…" : "Run Report")
+                    </button>
+                </div>
+            </div>
+            @if (!string.IsNullOrEmpty(_errorMessage))
+            {
+                <div class="form-error" style="color:var(--color-danger);margin-top:var(--space-2)">@_errorMessage</div>
+            }
+        </div>
+
+        @if (_reportData is null)
+        {
+            <ReportSamplePreview Definition="@_definition" />
+            <RecentReportRunsPanel @ref="_recentPanel"
+                                   ReportId="@ReportId"
+                                   UserId="@_userId"
+                                   OnRerun="RerunFromHistoryAsync" />
+        }
+        else
+        {
+            <ReportRunner Data="@_reportData" OnExport="ExportAsync" />
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public string ReportId { get; set; } = string.Empty;
+
+    private ReportDefinition?      _definition;
+    private bool                   _authorized;
+    private string                 _hubLabel = "Reports";
+    private string                 _hubRoute = "/reports/payroll";
+
+    private IReadOnlyList<PayrollRunPickerRow> _recentRuns = [];
+    private Guid?                  _selectedRunId;
+    private DateTime?              _asOfDate;
+    private DateTime?              _periodStart;
+    private DateTime?              _periodEnd;
+    private int?                   _windowDays = 90;
+
+    private bool                   _isRunning;
+    private ReportData?            _reportData;
+    private Guid?                  _executionId;
+    private string?                _errorMessage;
+    private Guid                   _userId;
+    private IReadOnlyList<string>  _userRoles = [];
+    private RecentReportRunsPanel? _recentPanel;
+
+    private bool ParametersReady => _definition?.ParameterShape switch
+    {
+        ReportParameterShape.Run        => _selectedRunId.HasValue,
+        ReportParameterShape.AsOfDate   => _asOfDate.HasValue,
+        ReportParameterShape.Period     => _periodStart.HasValue && _periodEnd.HasValue,
+        ReportParameterShape.Window     => _windowDays.HasValue && _windowDays.Value > 0,
+        _                               => false
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        ReportId = ReportId.ToUpperInvariant();
+
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _userRoles = auth.User.FindAll(c => c.Type == "roles").Select(c => c.Value).ToList();
+        var sub = auth.User.FindFirst("sub")?.Value
+               ?? auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (Guid.TryParse(sub, out var uid)) _userId = uid;
+
+        if (!Registry.Contains(ReportId))
+        {
+            _errorMessage = $"Unknown report '{ReportId}'.";
+            return;
+        }
+        _definition = Registry.Get(ReportId).Definition;
+
+        _authorized = _definition.AllowedRoles.Any(r =>
+            _userRoles.Contains(r, StringComparer.OrdinalIgnoreCase));
+
+        // Default the as-of date / period to the operative date so users can
+        // hit Run without futzing with the date inputs.
+        var operative = Temporal.GetOperativeDate();
+        _asOfDate    ??= operative;
+        _periodEnd   ??= operative;
+        _periodStart ??= operative.AddDays(-30);
+
+        // Hub destination — payroll reports return to payroll hub, HR to HR.
+        if (ReportId.StartsWith("HR-RPT-", StringComparison.OrdinalIgnoreCase))
+        {
+            _hubLabel = "HR Reports";
+            _hubRoute = "/reports/hr";
+        }
+        else
+        {
+            _hubLabel = "Payroll Reports";
+            _hubRoute = "/reports/payroll";
+        }
+
+        if (_definition.ParameterShape == ReportParameterShape.Run && _authorized)
+            _recentRuns = await RunPicker.GetRecentAsync(Session.SelectedLegalEntityId);
+    }
+
+    private ReportParameters BuildParameters() => new()
+    {
+        RunId          = _selectedRunId,
+        LegalEntityId  = Session.SelectedLegalEntityId,
+        AsOfDate       = _asOfDate     is { } a  ? DateOnly.FromDateTime(a) : null,
+        PeriodStart    = _periodStart  is { } ps ? DateOnly.FromDateTime(ps) : null,
+        PeriodEnd      = _periodEnd    is { } pe ? DateOnly.FromDateTime(pe) : null,
+        ExpirationDays = _windowDays
+    };
+
+    private async Task RunReportAsync()
+    {
+        if (!ParametersReady) return;
+        _errorMessage = null;
+        _isRunning    = true;
+        StateHasChanged();
+        try
+        {
+            var result = await ReportService.RunReportAsync(ReportId, BuildParameters(), _userId, _userRoles);
+            _reportData  = result.Data;
+            _executionId = result.ExecutionId;
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = ex.Message;
+        }
+        finally
+        {
+            _isRunning = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task RerunFromHistoryAsync(ReportExecutionHistory entry)
+    {
+        try
+        {
+            var saved = System.Text.Json.JsonSerializer.Deserialize<ReportParameters>(entry.ParametersJson);
+            if (saved is null) return;
+            _selectedRunId = saved.RunId;
+            _asOfDate      = saved.AsOfDate?.ToDateTime(TimeOnly.MinValue);
+            _periodStart   = saved.PeriodStart?.ToDateTime(TimeOnly.MinValue);
+            _periodEnd     = saved.PeriodEnd?.ToDateTime(TimeOnly.MinValue);
+            _windowDays    = saved.ExpirationDays;
+            await RunReportAsync();
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Could not re-run: {ex.Message}";
+        }
+    }
+
+    private async Task ExportAsync(string format)
+    {
+        if (!ParametersReady) return;
+        try
+        {
+            var parameters = BuildParameters();
+            ExportResult result = format switch
+            {
+                "csv"  => await ExportService.ExportCsvAsync(ReportId, parameters, _userId, _userRoles),
+                "xlsx" => await ExportService.ExportXlsxAsync(ReportId, parameters, _userId, _userRoles),
+                "pdf"  => await ExportService.ExportPdfAsync(ReportId, parameters, _userId, _userRoles),
+                _      => throw new ArgumentException($"Unknown export format '{format}'.")
+            };
+
+            byte[] bytes;
+            if (result.Content is MemoryStream ms) { bytes = ms.ToArray(); }
+            else
+            {
+                using var copy = new MemoryStream();
+                await result.Content.CopyToAsync(copy);
+                bytes = copy.ToArray();
+            }
+            var base64 = Convert.ToBase64String(bytes);
+            try
+            {
+                await JS.InvokeVoidAsync("allworkFiles.downloadBase64",
+                    result.FileName, result.MimeType, base64);
+            }
+            catch (Microsoft.JSInterop.JSDisconnectedException) { /* circuit gone — user navigated away mid-export */ }
+            catch (ObjectDisposedException)                     { /* component disposed before JS callback */ }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = ex.Message;
+        }
+    }
+
+    private void BackToHub() => Nav.NavigateTo(_hubRoute);
+}

@@ -1,0 +1,63 @@
+@using Syncfusion.Blazor.Grids
+@using AllWorkHRIS.Module.Reporting.Domain
+
+@* Muted "structure preview" shown before the user runs the report.
+   Renders the same columns as the real report with em-dash placeholder
+   rows — auto-derived from ReportDefinition.Columns so it can never drift
+   from what the report actually produces. *@
+
+<div class="panel-card report-sample-preview"
+     style="margin-top:var(--space-6); border:1px dashed #CBD5E1; background:#F8FAFC">
+    <div style="opacity:0.55;filter:saturate(0.5)">
+        <div style="display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-2)">
+            <h3 style="margin:0;font-size:1rem;color:#6B7280">Sample @Definition.Title</h3>
+            <span style="background:#E5E7EB;color:#374151;font-size:0.7rem;padding:2px 8px;border-radius:4px;font-weight:600;letter-spacing:0.05em">PREVIEW</span>
+        </div>
+        <p class="text-muted text-sm" style="margin:0 0 var(--space-3) 0">
+            This is what the report will look like. Click <strong>Run Report</strong> above to fill it with your data.
+        </p>
+
+        <SfGrid TValue="IReadOnlyDictionary<string, object>"
+                DataSource="@_placeholderRows"
+                AllowPaging="false"
+                AllowSorting="false"
+                AllowResizing="false">
+            <GridColumns>
+                @foreach (var c in Definition.Columns)
+                {
+                    var col = c;
+                    <GridColumn HeaderText="@col.Header"
+                                TextAlign="@MapAlign(col.Alignment)">
+                        <Template>
+                            <span style="color:#9CA3AF">—</span>
+                        </Template>
+                    </GridColumn>
+                }
+            </GridColumns>
+        </SfGrid>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public ReportDefinition Definition { get; set; } = default!;
+
+    private IReadOnlyList<IReadOnlyDictionary<string, object>> _placeholderRows = [];
+
+    protected override void OnParametersSet()
+    {
+        // Three distinct dictionaries — SfGrid iterates by identity in some
+        // code paths, so distinct instances are safer than reusing one.
+        _placeholderRows = Enumerable.Range(0, 3)
+            .Select(_ => (IReadOnlyDictionary<string, object>)
+                Definition.Columns.ToDictionary(c => c.Field, _ => (object)"—"))
+            .ToList();
+    }
+
+    private static TextAlign MapAlign(string a) => a switch
+    {
+        "Right"  => TextAlign.Right,
+        "Center" => TextAlign.Center,
+        _        => TextAlign.Left
+    };
+}
