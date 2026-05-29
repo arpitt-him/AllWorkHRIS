@@ -66,8 +66,9 @@ public sealed class PdfExporter
 
                     // Data rows
                     bool alternate = false;
-                    foreach (var row in data.Rows)
+                    foreach (var expandoRow in data.Rows)
                     {
+                        var row = (IDictionary<string, object?>)expandoRow;
                         string bg = alternate ? "#F7F9FC" : "#FFFFFF";
                         foreach (var col in data.Columns)
                         {
@@ -82,6 +83,38 @@ public sealed class PdfExporter
                                 cell.Text(formatted).FontSize(7.5f);
                         }
                         alternate = !alternate;
+                    }
+
+                    // Totals row — same per-column rule as XLSX: SUM for any
+                    // currency/number column, "Total" label in the first
+                    // non-numeric cell, blank elsewhere. Bold + top border so
+                    // it reads as a summary stripe rather than another data row.
+                    if (definition.ShowTotals)
+                    {
+                        var totals = ComputeColumnTotals(data);
+                        bool labeled = false;
+                        foreach (var col in data.Columns)
+                        {
+                            var cell = table.Cell()
+                                            .Background("#E8EDF2")
+                                            .BorderTop(0.75f)
+                                            .BorderColor(Colors.Grey.Darken1)
+                                            .Padding(3);
+                            if (col.Format is "currency" or "number" && totals.TryGetValue(col.Field, out var t))
+                            {
+                                var formatted = col.Format == "currency" ? t.ToString("N2") : t.ToString("N0");
+                                cell.AlignRight().Text(formatted).Bold().FontSize(7.5f);
+                            }
+                            else if (!labeled)
+                            {
+                                cell.Text("Total").Bold().FontSize(7.5f);
+                                labeled = true;
+                            }
+                            else
+                            {
+                                cell.Text(string.Empty);
+                            }
+                        }
                     }
                 });
 
@@ -103,6 +136,25 @@ public sealed class PdfExporter
 
         stream.Position = 0;
         return stream;
+    }
+
+    private static Dictionary<string, decimal> ComputeColumnTotals(ReportData data)
+    {
+        var totals = new Dictionary<string, decimal>();
+        foreach (var col in data.Columns)
+        {
+            if (col.Format is not ("currency" or "number")) continue;
+            decimal sum = 0m;
+            foreach (var expandoRow in data.Rows)
+            {
+                var row = (IDictionary<string, object?>)expandoRow;
+                if (!row.TryGetValue(col.Field, out var v) || v is null) continue;
+                try { sum += Convert.ToDecimal(v, System.Globalization.CultureInfo.InvariantCulture); }
+                catch { /* non-numeric — skip */ }
+            }
+            totals[col.Field] = sum;
+        }
+        return totals;
     }
 
     private static string FormatValue(object? value, string? format) => value switch

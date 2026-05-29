@@ -64,7 +64,9 @@
     }
     else
     {
-        <ReportRunner Data="@_reportData" OnExport="ExportAsync" />
+        <ReportRunner Data="@_reportData"
+                      OnExport="ExportAsync"
+                      ShowTotals="@(_definition?.ShowTotals ?? false)" />
     }
 
 </div>

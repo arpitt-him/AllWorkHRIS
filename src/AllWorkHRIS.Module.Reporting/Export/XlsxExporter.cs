@@ -54,7 +54,7 @@ public sealed class XlsxExporter
         // Data rows — starting row 4
         for (int r = 0; r < data.Rows.Count; r++)
         {
-            var row = data.Rows[r];
+            var row = (IDictionary<string, object?>)data.Rows[r];
             for (int c = 0; c < colCount; c++)
             {
                 var col   = data.Columns[c];

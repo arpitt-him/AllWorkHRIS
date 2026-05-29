@@ -18,9 +18,10 @@ public sealed class CsvExporter
                 data.Columns.Select(c => Quote(c.Header))));
 
             // Data rows
-            foreach (var row in data.Rows)
+            foreach (var expandoRow in data.Rows)
             {
                 ct.ThrowIfCancellationRequested();
+                var row = (IDictionary<string, object?>)expandoRow;
                 await writer.WriteLineAsync(string.Join(",",
                     data.Columns.Select(c => Quote(FormatValue(row.TryGetValue(c.Field, out var v) ? v : null)))));
             }

@@ -1,3 +1,4 @@
+@using System.Dynamic
 @using Syncfusion.Blazor.Grids
 @using AllWorkHRIS.Module.Reporting.Domain
 
@@ -25,7 +26,7 @@
         </div>
 
         <div class="panel-card no-pad">
-            <SfGrid TValue="IReadOnlyDictionary<string, object>"
+            <SfGrid TValue="ExpandoObject"
                     DataSource="@Data.Rows"
                     AllowPaging="true"
                     AllowSorting="true"
@@ -34,12 +35,13 @@
                 <GridColumns>
                     @foreach (var c in Data.Columns)
                     {
-                        var col = c; // explicit capture for the Template closure
-                        <GridColumn HeaderText="@col.Header"
+                        var col = c;
+                        <GridColumn Field="@col.Field"
+                                    HeaderText="@col.Header"
                                     TextAlign="@MapAlign(col.Alignment)">
                             <Template Context="rowObj">
                                 @{
-                                    var row   = (IReadOnlyDictionary<string, object>)rowObj!;
+                                    var row   = (IDictionary<string, object?>)rowObj!;
                                     var value = row.TryGetValue(col.Field, out var v) ? v : null;
                                 }
                                 @RenderCell(value, col.Format)
@@ -47,6 +49,30 @@
                         </GridColumn>
                     }
                 </GridColumns>
+                @if (ShowTotals)
+                {
+                    <GridAggregates>
+                        <GridAggregate>
+                            <GridAggregateColumns>
+                                @foreach (var c in Data.Columns)
+                                {
+                                    var col = c;
+                                    if (col.Format is "currency" or "number")
+                                    {
+                                        <GridAggregateColumn Field="@col.Field"
+                                                             Type="AggregateType.Sum"
+                                                             Format="@(col.Format == "currency" ? "C2" : "N0")">
+                                            <FooterTemplate>
+                                                @{ var ctx = (AggregateTemplateContext)context; }
+                                                <strong>@ctx.Sum</strong>
+                                            </FooterTemplate>
+                                        </GridAggregateColumn>
+                                    }
+                                }
+                            </GridAggregateColumns>
+                        </GridAggregate>
+                    </GridAggregates>
+                }
             </SfGrid>
         </div>
     }
@@ -61,6 +87,14 @@
     public ReportData Data { get; set; } = default!;
 
     [Parameter] public EventCallback<string> OnExport { get; set; }
+
+    /// <summary>
+    /// When true, render an aggregate footer row with SUMs for every
+    /// currency / number column. CSV exports never include totals
+    /// (handled outside this component — CSV is a data-only contract).
+    /// SfGrid computes the SUMs natively from the ExpandoObject rows.
+    /// </summary>
+    [Parameter] public bool ShowTotals { get; set; }
 
     private bool _busy;
 
