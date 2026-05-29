@@ -613,6 +613,10 @@ public sealed class AccumulatorRepository : IAccumulatorRepository
 
     public async Task UpsertBalanceAsync(AccumulatorBalance balance)
     {
+        // ON CONFLICT targets the natural-key UNIQUE supplied by
+        // schemas/ddl/postgres/post-dbml/001_accumulator_balance_unique_natural_key.sql
+        // so concurrent inserts collapse to UPDATE rather than producing duplicate
+        // balance rows. Requires accumulator_balance_natural_key_uq present.
         const string sql = """
             INSERT INTO accumulator_balance (
                 accumulator_id, accumulator_definition_id, accumulator_family_id,
@@ -627,7 +631,7 @@ public sealed class AccumulatorRepository : IAccumulatorRepository
                 @BalanceStatusId, @LastUpdatedRunId, @LastUpdatedResultSetId,
                 @LastUpdateTimestamp
             )
-            ON CONFLICT (accumulator_id) DO UPDATE SET
+            ON CONFLICT (accumulator_definition_id, participant_id, employer_id, calendar_context_id) DO UPDATE SET
                 current_value              = EXCLUDED.current_value,
                 balance_status_id          = EXCLUDED.balance_status_id,
                 last_updated_run_id        = EXCLUDED.last_updated_run_id,
@@ -858,13 +862,17 @@ public sealed class AccumulatorRepository : IAccumulatorRepository
                 @BalanceStatusId, @LastUpdatedRunId, @LastUpdatedResultSetId,
                 @LastUpdateTimestamp
             )
-            ON CONFLICT (accumulator_id) DO UPDATE SET
+            ON CONFLICT (accumulator_definition_id, participant_id, employer_id, calendar_context_id) DO UPDATE SET
                 current_value              = EXCLUDED.current_value,
                 balance_status_id          = EXCLUDED.balance_status_id,
                 last_updated_run_id        = EXCLUDED.last_updated_run_id,
                 last_updated_result_set_id = EXCLUDED.last_updated_result_set_id,
                 last_update_timestamp      = EXCLUDED.last_update_timestamp
             """;
+        // ON CONFLICT targets the natural-key UNIQUE supplied by
+        // schemas/ddl/postgres/post-dbml/001_accumulator_balance_unique_natural_key.sql
+        // so concurrent inserts collapse to UPDATE rather than producing duplicate
+        // balance rows. Requires accumulator_balance_natural_key_uq present.
 
         await uow.Connection.ExecuteAsync(impactSql,       impact,       uow.Transaction);
         await uow.Connection.ExecuteAsync(contributionSql, contribution, uow.Transaction);
