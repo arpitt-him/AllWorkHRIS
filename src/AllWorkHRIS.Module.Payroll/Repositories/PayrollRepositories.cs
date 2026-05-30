@@ -610,6 +610,23 @@ public sealed class AccumulatorRepository : IAccumulatorRepository
             new { DeductionCode = deductionCode, AsOf = asOf.ToDateTime(TimeOnly.MinValue) });
     }
 
+    public async Task<AccumulatorDefinition?> GetDefinitionForEarningsAsync(string earningsCode, DateOnly asOf)
+    {
+        // Resolve via the explicit earnings_code -> accumulator_definition link
+        // (not by code-string match). No link (NULL) => the join yields no row =>
+        // the earnings code does not accumulate. Earnings-side twin of the
+        // deduction resolver above (Phase 12.5.4).
+        const string sql = """
+            SELECT ad.* FROM accumulator_definition ad
+            JOIN   earnings_code ec ON ec.accumulator_definition_id = ad.accumulator_definition_id
+            WHERE  ec.code = @EarningsCode
+              AND  (ad.effective_end_date IS NULL OR ad.effective_end_date >= @AsOf)
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        return await conn.QueryFirstOrDefaultAsync<AccumulatorDefinition>(sql,
+            new { EarningsCode = earningsCode, AsOf = asOf.ToDateTime(TimeOnly.MinValue) });
+    }
+
     public async Task<IReadOnlyList<AccumulatorDefinition>> GetAllActiveDefinitionsAsync(DateOnly asOf)
     {
         const string sql = """

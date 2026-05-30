@@ -37,7 +37,11 @@ public sealed class AccumulatorService : IAccumulatorService
 
         foreach (var line in earningsLines.Where(l => l.AccumulatorImpactFlag))
         {
-            var def = await _accumulatorRepo.GetDefinitionByCodeAsync(line.EarningsCode, asOf);
+            // Resolve the accumulator via the explicit earnings_code link, not by
+            // matching the earnings code to an accumulator_code string (the prior
+            // fragile coupling — same silent-skip class 029 closed for deductions).
+            // No link => the earnings code does not accumulate (Phase 12.5.4).
+            var def = await _accumulatorRepo.GetDefinitionForEarningsAsync(line.EarningsCode, asOf);
             if (def is null) continue;
             await ApplyChainAsync(def, line.CalculatedAmount, line.EarningsResultLineId, result, runId, now, uow);
             ct.ThrowIfCancellationRequested();

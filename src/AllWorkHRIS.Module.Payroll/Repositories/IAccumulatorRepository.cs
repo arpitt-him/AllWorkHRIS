@@ -14,6 +14,14 @@ public interface IAccumulatorRepository
     /// </summary>
     Task<AccumulatorDefinition?> GetDefinitionForDeductionAsync(string deductionCode, DateOnly asOf);
 
+    /// <summary>
+    /// Resolves the accumulator definition an earnings code feeds via the explicit
+    /// <c>earnings_code.accumulator_definition_id</c> link (NOT by code-string match).
+    /// Returns null when the earnings code has no link (i.e. it does not accumulate).
+    /// The earnings-side twin of <see cref="GetDefinitionForDeductionAsync"/> (Phase 12.5.4).
+    /// </summary>
+    Task<AccumulatorDefinition?> GetDefinitionForEarningsAsync(string earningsCode, DateOnly asOf);
+
     Task<IReadOnlyList<AccumulatorDefinition>> GetAllActiveDefinitionsAsync(DateOnly asOf);
 
     Task<AccumulatorBalance?> GetBalanceAsync(Guid accumulatorDefinitionId, Guid? employmentId,

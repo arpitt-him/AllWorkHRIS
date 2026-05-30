@@ -46,6 +46,9 @@ public sealed class PayrollModule : IPlatformModule
         builder.RegisterType<AccumulatorRepository>()
                .As<IAccumulatorRepository>()
                .InstancePerLifetimeScope();
+        builder.RegisterType<EarningsCodeRepository>()
+               .As<IEarningsCodeRepository>()
+               .InstancePerLifetimeScope();
         builder.RegisterType<PayrollContextRepository>()
                .As<IPayrollContextRepository>()
                .InstancePerLifetimeScope();

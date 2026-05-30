@@ -501,6 +501,7 @@ public sealed class PayrollGateTests : IDisposable
         builder.RegisterType<PayrollCompensationSnapshotRepository>() .As<IPayrollCompensationSnapshotRepository>() .InstancePerLifetimeScope();
         builder.RegisterType<ResultLineRepository>()                  .As<IResultLineRepository>()                  .InstancePerLifetimeScope();
         builder.RegisterType<AccumulatorRepository>()                 .As<IAccumulatorRepository>()                 .InstancePerLifetimeScope();
+        builder.RegisterType<EarningsCodeRepository>()                .As<IEarningsCodeRepository>()                .InstancePerLifetimeScope();
         builder.RegisterType<CalculationEngine>()                     .As<ICalculationEngine>()                     .InstancePerLifetimeScope();
         builder.RegisterType<AccumulatorService>()                    .As<IAccumulatorService>()                    .InstancePerLifetimeScope();
 

@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using AllWorkHRIS.Core;
 using AllWorkHRIS.Core.Pipeline;
 using AllWorkHRIS.Core.Temporal;
+using AllWorkHRIS.Module.Payroll.Domain.Earnings;
 using AllWorkHRIS.Module.Payroll.Domain.Results;
 using AllWorkHRIS.Module.Payroll.Repositories;
 
@@ -14,9 +15,14 @@ public sealed partial class CalculationEngine : ICalculationEngine
     private readonly IEmploymentJurisdictionLookup _jurisdictionLookup;
     private readonly IBenefitStepProvider          _benefitStepProvider;
     private readonly IAccumulatorService           _accumulatorService;
+    private readonly IEarningsCodeRepository        _earningsCodeRepo;
     private readonly IPayrollHoursSource           _hoursSource;
     private readonly ITemporalContext              _temporal;
     private readonly ILogger<CalculationEngine>    _logger;
+
+    // Active earnings_code config, loaded once per run (the engine is resolved per-run
+    // scope and CalculateAsync runs sequentially over the population). Phase 12.5.4.
+    private IReadOnlyDictionary<string, EarningsCode>? _earningsCodes;
 
     public CalculationEngine(
         IResultLineRepository         resultLineRepo,
@@ -24,6 +30,7 @@ public sealed partial class CalculationEngine : ICalculationEngine
         IEmploymentJurisdictionLookup jurisdictionLookup,
         IBenefitStepProvider          benefitStepProvider,
         IAccumulatorService           accumulatorService,
+        IEarningsCodeRepository       earningsCodeRepo,
         IPayrollHoursSource           hoursSource,
         ITemporalContext              temporal,
         ILogger<CalculationEngine>    logger)
@@ -33,10 +40,17 @@ public sealed partial class CalculationEngine : ICalculationEngine
         _jurisdictionLookup  = jurisdictionLookup;
         _benefitStepProvider = benefitStepProvider;
         _accumulatorService  = accumulatorService;
+        _earningsCodeRepo    = earningsCodeRepo;
         _hoursSource         = hoursSource;
         _temporal            = temporal;
         _logger              = logger;
     }
+
+    // Lazy per-run load of the active earnings-code map (operative date is constant
+    // within a run, so the first call's asOf governs). Keyed case-insensitively.
+    private async Task<IReadOnlyDictionary<string, EarningsCode>> GetEarningsCodesAsync(DateOnly asOf)
+        => _earningsCodes ??= (await _earningsCodeRepo.GetAllActiveAsync(asOf))
+            .ToDictionary(e => e.Code, StringComparer.OrdinalIgnoreCase);
 
     // Carries hours and rate for NON_EXEMPT employees through both earnings steps.
     private sealed record NonExemptPayData(decimal RegHours, decimal OtHours, decimal HourlyRate);
@@ -64,18 +78,22 @@ public sealed partial class CalculationEngine : ICalculationEngine
             // calculation produces shares the same "created at" instant (it is one atomic calc).
             var now = _temporal.GetOperativeNow();
 
+            // Active earnings-code config for this run — validates every code the engine
+            // emits and supplies each line's taxable / accumulator-impact flags (Phase 12.5.4).
+            var earningsCodes = await GetEarningsCodesAsync(input.PayDate);
+
             // Resolve non-exempt pay data once — shared by Steps 1 and 2.
             var nonExemptData = await ResolveNonExemptDataAsync(input, ct);
 
             // Step 1 — Base earnings (regular/salary)
-            var baseEarnings = await StepBaseEarningsAsync(input, employeePayrollResultId, nonExemptData, now, ct);
+            var baseEarnings = await StepBaseEarningsAsync(input, employeePayrollResultId, nonExemptData, earningsCodes, now, ct);
             foreach (var line in baseEarnings)
                 await _resultLineRepo.InsertEarningsLineAsync(line);
 
             ct.ThrowIfCancellationRequested();
 
             // Step 2 — Premium earnings (overtime premium at 0.5× rate for NON_EXEMPT)
-            var premiumEarnings = await StepPremiumEarningsAsync(input, employeePayrollResultId, nonExemptData, now, ct);
+            var premiumEarnings = await StepPremiumEarningsAsync(input, employeePayrollResultId, nonExemptData, earningsCodes, now, ct);
             foreach (var line in premiumEarnings)
                 await _resultLineRepo.InsertEarningsLineAsync(line);
 
@@ -290,7 +308,8 @@ public sealed partial class CalculationEngine : ICalculationEngine
     }
 
     private Task<IReadOnlyList<EarningsResultLine>> StepBaseEarningsAsync(
-        CalculationInput input, Guid resultId, NonExemptPayData? nonExempt, DateTimeOffset now, CancellationToken ct)
+        CalculationInput input, Guid resultId, NonExemptPayData? nonExempt,
+        IReadOnlyDictionary<string, EarningsCode> earningsCodes, DateTimeOffset now, CancellationToken ct)
     {
         var lines = new List<EarningsResultLine>();
 
@@ -300,13 +319,13 @@ public sealed partial class CalculationEngine : ICalculationEngine
             if (nonExempt.HourlyRate > 0m && (nonExempt.RegHours > 0m || nonExempt.OtHours > 0m))
             {
                 if (nonExempt.RegHours > 0m)
-                    lines.Add(MakeEarningsLine(resultId, input.EmploymentId, "REG", "Regular",
+                    lines.Add(MakeEarningsLine(earningsCodes, resultId, input.EmploymentId, "REG", "Regular",
                         nonExempt.RegHours, nonExempt.HourlyRate,
                         Money.Round(nonExempt.RegHours * nonExempt.HourlyRate),
                         now));
 
                 if (nonExempt.OtHours > 0m)
-                    lines.Add(MakeEarningsLine(resultId, input.EmploymentId, "OT", "Overtime",
+                    lines.Add(MakeEarningsLine(earningsCodes, resultId, input.EmploymentId, "OT", "Overtime",
                         nonExempt.OtHours, nonExempt.HourlyRate,
                         Money.Round(nonExempt.OtHours * nonExempt.HourlyRate),
                         now));
@@ -318,7 +337,7 @@ public sealed partial class CalculationEngine : ICalculationEngine
             if (input.AnnualEquivalent is not null and not 0m && input.PeriodsPerYear > 0)
             {
                 var amount = Money.Round(input.AnnualEquivalent.Value / input.PeriodsPerYear);
-                lines.Add(MakeEarningsLine(resultId, input.EmploymentId, "REG", "Regular Salary",
+                lines.Add(MakeEarningsLine(earningsCodes, resultId, input.EmploymentId, "REG", "Regular Salary",
                     null, input.AnnualEquivalent.Value, amount, now));
             }
         }
@@ -327,7 +346,8 @@ public sealed partial class CalculationEngine : ICalculationEngine
     }
 
     private Task<IReadOnlyList<EarningsResultLine>> StepPremiumEarningsAsync(
-        CalculationInput input, Guid resultId, NonExemptPayData? nonExempt, DateTimeOffset now, CancellationToken ct)
+        CalculationInput input, Guid resultId, NonExemptPayData? nonExempt,
+        IReadOnlyDictionary<string, EarningsCode> earningsCodes, DateTimeOffset now, CancellationToken ct)
     {
         if (nonExempt is null || nonExempt.OtHours <= 0m || nonExempt.HourlyRate <= 0m)
             return Task.FromResult<IReadOnlyList<EarningsResultLine>>([]);
@@ -337,32 +357,47 @@ public sealed partial class CalculationEngine : ICalculationEngine
 
         IReadOnlyList<EarningsResultLine> lines =
         [
-            MakeEarningsLine(resultId, input.EmploymentId, "OT_PREM", "Overtime Premium",
+            MakeEarningsLine(earningsCodes, resultId, input.EmploymentId, "OT_PREM", "Overtime Premium",
                 nonExempt.OtHours, nonExempt.HourlyRate * 0.5m, premAmount, now)
         ];
         return Task.FromResult(lines);
     }
 
+    // Builds an earnings line, resolving taxable / accumulator-impact flags from the
+    // earnings_code config (Phase 12.5.4). An emitted code absent from the active set
+    // is a configuration error: throw UNKNOWN_EARNINGS_CODE so CalculateAsync fails this
+    // employee's result with a clear reason rather than silently guessing flags or
+    // dropping the line from YTD. The contextual description (e.g. "Regular Salary")
+    // is preserved on the line; only the flags come from config.
     private static EarningsResultLine MakeEarningsLine(
+        IReadOnlyDictionary<string, EarningsCode> earningsCodes,
         Guid resultId, Guid employmentId, string code, string description,
-        decimal? quantity, decimal rate, decimal amount, DateTimeOffset now) => new()
+        decimal? quantity, decimal rate, decimal amount, DateTimeOffset now)
     {
-        EarningsResultLineId    = Guid.NewGuid(),
-        EmployeePayrollResultId = resultId,
-        EmploymentId            = employmentId,
-        EarningsCode            = code,
-        EarningsDescription     = description,
-        Quantity                = quantity,
-        Rate                    = rate,
-        CalculatedAmount        = amount,
-        JurisdictionSplitFlag   = false,
-        TaxableFlag             = true,
-        AccumulatorImpactFlag   = true,
-        SourceRuleVersionId     = null,
-        CorrectionFlag          = false,
-        CorrectsLineId          = null,
-        CreationTimestamp       = now
-    };
+        if (!earningsCodes.TryGetValue(code, out var ec))
+            throw new InvalidOperationException(
+                $"UNKNOWN_EARNINGS_CODE: '{code}' is not defined in active earnings_code config. " +
+                "Add it (with its taxable / accumulator settings) before the engine can emit it.");
+
+        return new EarningsResultLine
+        {
+            EarningsResultLineId    = Guid.NewGuid(),
+            EmployeePayrollResultId = resultId,
+            EmploymentId            = employmentId,
+            EarningsCode            = code,
+            EarningsDescription     = description,
+            Quantity                = quantity,
+            Rate                    = rate,
+            CalculatedAmount        = amount,
+            JurisdictionSplitFlag   = false,
+            TaxableFlag             = ec.TaxableFlag,
+            AccumulatorImpactFlag   = ec.AccumulatorImpactFlag,
+            SourceRuleVersionId     = null,
+            CorrectionFlag          = false,
+            CorrectsLineId          = null,
+            CreationTimestamp       = now
+        };
+    }
 
     private Task<IReadOnlyList<EarningsResultLine>> StepImputedIncomeAsync(
         CalculationInput input, Guid resultId, CancellationToken ct)
