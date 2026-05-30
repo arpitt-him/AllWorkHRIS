@@ -524,6 +524,13 @@ public sealed class PayrollRunJob : BackgroundService
             });
             _logger.LogInformation("Run {RunId}: approved — {Posted} posted, {Skipped} skipped (idempotent)",
                 run.RunId, posted, skipped);
+
+            // Period Reset Audit (ADR-020 / Phase 12.9): this run has now committed in its
+            // reset boundary, so materialize any just-closed prior-boundary resets for the
+            // context (audit-only, idempotent). The service swallows its own errors — it
+            // must never undo a completed approval.
+            var resetService = scope.Resolve<IAccumulatorResetService>();
+            await resetService.DetectAndRecordResetsAsync(run.PayrollContextId, run.PayDate, ct);
         }
         catch (OperationCanceledException)
         {

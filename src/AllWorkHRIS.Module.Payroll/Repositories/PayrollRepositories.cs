@@ -843,6 +843,76 @@ public sealed class AccumulatorRepository : IAccumulatorRepository
         });
     }
 
+    // ── Period Reset Audit (ADR-020 / Phase 12.9) ──────────────────────────────
+
+    public async Task<bool> ResetAuditExistsAsync(Guid accumulatorDefinitionId, Guid? participantId, int resetBoundaryYear)
+    {
+        const string sql = """
+            SELECT COUNT(*) FROM accumulator_reset_audit
+            WHERE accumulator_definition_id = @DefinitionId
+              AND ((@ParticipantId IS NULL AND participant_id IS NULL) OR participant_id = @ParticipantId)
+              AND reset_boundary_year = @BoundaryYear
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        var count = await conn.ExecuteScalarAsync<int>(sql, new
+        {
+            DefinitionId  = accumulatorDefinitionId,
+            ParticipantId = participantId,
+            BoundaryYear  = resetBoundaryYear
+        });
+        return count > 0;
+    }
+
+    public async Task InsertResetAuditAsync(AccumulatorResetAudit a)
+    {
+        const string sql = """
+            INSERT INTO accumulator_reset_audit (
+                accumulator_reset_audit_id, accumulator_definition_id, accumulator_family_id,
+                participant_id, legal_entity_id, scope_type_id, reset_type, reset_boundary_year,
+                reset_date, closing_balance, opened_by, reset_source, notes,
+                created_by, creation_timestamp
+            ) VALUES (
+                @AccumulatorResetAuditId, @AccumulatorDefinitionId, @AccumulatorFamilyId,
+                @ParticipantId, @LegalEntityId, @ScopeTypeId, @ResetType, @ResetBoundaryYear,
+                @ResetDate, @ClosingBalance, @OpenedBy, @ResetSource, @Notes,
+                @CreatedBy, @CreationTimestamp)
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        await conn.ExecuteAsync(sql, a);
+    }
+
+    public async Task<IReadOnlyList<ResetClosingBalance>> GetClosingBalancesForBoundaryAsync(
+        Guid accumulatorDefinitionId, Guid payrollContextId, DateOnly boundaryStart, DateOnly boundaryEnd)
+    {
+        // Sum the boundary's period balances per participant enrolled in the context.
+        // Period containment ([start,end]) buckets each period into the boundary it
+        // belongs to; participants with a net-zero/absent balance are skipped.
+        const string sql = """
+            SELECT ab.participant_id     AS ParticipantId,
+                   e.legal_entity_id     AS LegalEntityId,
+                   SUM(ab.current_value) AS ClosingBalance
+            FROM   accumulator_balance ab
+            JOIN   payroll_period   pp   ON pp.period_id        = ab.calendar_context_id
+            JOIN   payroll_profile  prof ON prof.employment_id  = ab.participant_id
+            JOIN   employment       e    ON e.employment_id     = ab.participant_id
+            WHERE  ab.accumulator_definition_id = @DefinitionId
+              AND  prof.payroll_context_id      = @PayrollContextId
+              AND  ab.participant_id IS NOT NULL
+              AND  pp.period_start_date >= @BoundaryStart
+              AND  pp.period_end_date   <= @BoundaryEnd
+            GROUP BY ab.participant_id, e.legal_entity_id
+            HAVING SUM(ab.current_value) <> 0
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        return (await conn.QueryAsync<ResetClosingBalance>(sql, new
+        {
+            DefinitionId     = accumulatorDefinitionId,
+            PayrollContextId = payrollContextId,
+            BoundaryStart    = boundaryStart,
+            BoundaryEnd      = boundaryEnd
+        })).ToList();
+    }
+
     public async Task<IReadOnlyDictionary<string, decimal>> GetYtdBalancesAsync(Guid employmentId, DateOnly asOf)
     {
         const string sql = """

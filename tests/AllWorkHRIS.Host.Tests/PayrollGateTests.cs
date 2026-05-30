@@ -48,6 +48,10 @@ public sealed class PayrollGateTests : IDisposable
     static readonly Guid PeriodId3 = Guid.Parse("7cc2deee-3fcf-4b86-a090-03f70a9df9ac"); // TC-PAY-011
     static readonly Guid PeriodId4 = Guid.Parse("3f73bfc0-e016-462a-8460-8891914ff5ad"); // TC-PAY-022 run 1
     static readonly Guid PeriodId5 = Guid.Parse("812e483f-5415-4ad1-9cd9-7a54978b4eab"); // TC-PAY-022 run 2
+    // TC-ACUM-011 cross-year reset: a 2025 period + two 2026 periods (see payroll_gate_test_fixture.sql)
+    static readonly Guid AcumPeriod2025  = Guid.Parse("a0c12025-0000-4000-8000-000000000001");
+    static readonly Guid AcumPeriod2026A = Guid.Parse("a0c12026-0000-4000-8000-00000000000a");
+    static readonly Guid AcumPeriod2026B = Guid.Parse("a0c12026-0000-4000-8000-00000000000b");
 
     // HR seed references shared with HireEmployeeIntegrationTests
     static readonly Guid LegalEntityId = Guid.Parse("10000000-0000-0000-0000-000000000001");
@@ -421,8 +425,63 @@ public sealed class PayrollGateTests : IDisposable
     }
 
     // ---------------------------------------------------------------------------
+    // TC-ACUM-011: Period Reset Audit — a cross-year approval records a SYSTEM reset
+    // for the just-closed boundary, with the correct closing balance; idempotent.
+    // (ADR-020 / Phase 12.9. Requires migration 034.)
+    // ---------------------------------------------------------------------------
+
+    [Fact]
+    public async Task PeriodResetAudit_CrossYearApproval_RecordsSystemReset_Idempotently()
+    {
+        var employmentId = await HireAndEnrollAsync("ACUM011", blockingCleared: true);
+        var userId       = Guid.NewGuid();
+
+        // 2025 run: calculate + approve → posts 2025 accumulator balances (no prior-year reset).
+        await CalculateAndApproveAsync(AcumPeriod2025, userId);
+
+        // 2026 run: approval commits in the new boundary → detection materializes the 2025 reset.
+        await CalculateAndApproveAsync(AcumPeriod2026A, userId);
+
+        using var conn = _connectionFactory.CreateConnection();
+        var rows = (await conn.QueryAsync(
+            """
+            SELECT closing_balance, opened_by, reset_source, reset_date
+            FROM   accumulator_reset_audit
+            WHERE  participant_id = @Emp AND reset_boundary_year = 2025
+            """,
+            new { Emp = employmentId })).ToList();
+
+        Assert.Single(rows);
+        Assert.Equal("SYSTEM",    (string)rows[0].opened_by);
+        Assert.Equal("AUTOMATIC", (string)rows[0].reset_source);
+        Assert.True((decimal)rows[0].closing_balance > 0m, "Closing balance should be the posted 2025 total");
+
+        // Idempotency: a second 2026 cross-boundary approval must not duplicate the 2025 reset.
+        await CalculateAndApproveAsync(AcumPeriod2026B, userId);
+        var count = await conn.ExecuteScalarAsync<int>(
+            "SELECT COUNT(*) FROM accumulator_reset_audit WHERE participant_id = @Emp AND reset_boundary_year = 2025",
+            new { Emp = employmentId });
+        Assert.Equal(1, count);
+    }
+
+    // ---------------------------------------------------------------------------
     // Helpers
     // ---------------------------------------------------------------------------
+
+    // Drives a run DRAFT → CALCULATED → APPROVED (the approve pass posts accumulators
+    // and triggers reset detection). RunJobAsync processes whatever status the run is in.
+    private async Task CalculateAndApproveAsync(Guid periodId, Guid userId)
+    {
+        var runId = await _runService.InitiateRunAsync(new InitiatePayrollRunCommand
+        {
+            PayrollContextId = ContextId, PeriodId = periodId, RunTypeId = 1, InitiatedBy = userId
+        });
+        _runIds.Add(runId);
+
+        await RunJobAsync(runId);                                   // DRAFT → CALCULATED
+        await _runService.ApproveRunAsync(new ApprovePayrollRunCommand { RunId = runId, ApprovedBy = userId });
+        await RunJobAsync(runId);                                   // APPROVING → APPROVED (+ reset detection)
+    }
 
     private async Task<Guid> HireAndEnrollAsync(string tag, bool blockingCleared)
     {
@@ -573,6 +632,8 @@ public sealed class PayrollGateTests : IDisposable
 
         foreach (var id in _employmentIds)
         {
+            conn.Execute("DELETE FROM accumulator_reset_audit WHERE participant_id = @Id", new { Id = id });
+            conn.Execute("DELETE FROM accumulator_balance     WHERE participant_id = @Id", new { Id = id });
             conn.Execute("DELETE FROM payroll_profile     WHERE employment_id = @Id", new { Id = id });
             conn.Execute("DELETE FROM employee_event      WHERE employment_id = @Id", new { Id = id });
             conn.Execute("DELETE FROM compensation_record WHERE employment_id = @Id", new { Id = id });

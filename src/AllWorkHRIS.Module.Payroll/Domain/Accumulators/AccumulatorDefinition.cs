@@ -9,6 +9,8 @@ public sealed record AccumulatorDefinition
     public int         ScopeTypeId             { get; init; }
     public int         PeriodContextId         { get; init; }
     public string      ResetType               { get; init; } = default!;
+    public int?        PlanYearStartMonth      { get; init; } // set when ResetType = PLAN_YEAR (migration 025)
+    public int?        PlanYearStartDay        { get; init; }
     public bool        CarryForwardFlag        { get; init; }
     public bool        ReportingFlag           { get; init; }
     public bool        RemittanceFlag          { get; init; }

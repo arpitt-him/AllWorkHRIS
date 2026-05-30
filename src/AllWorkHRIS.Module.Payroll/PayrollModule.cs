@@ -64,6 +64,7 @@ public sealed class PayrollModule : IPlatformModule
         builder.RegisterType<PayrollRunService>().As<IPayrollRunService>().InstancePerLifetimeScope();
         builder.RegisterType<CalculationEngine>().As<ICalculationEngine>().InstancePerLifetimeScope();
         builder.RegisterType<AccumulatorService>().As<IAccumulatorService>().InstancePerLifetimeScope();
+        builder.RegisterType<AccumulatorResetService>().As<IAccumulatorResetService>().InstancePerLifetimeScope();
         builder.RegisterType<PayrollContextLookup>().As<IPayrollContextLookup>().InstancePerLifetimeScope();
 
         // Background job — singleton; resolves scoped services via ILifetimeScope child scope

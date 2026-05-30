@@ -64,4 +64,27 @@ public interface IAccumulatorRepository
     /// </summary>
     Task RevertBalanceAsync(Guid accumulatorDefinitionId, Guid employmentId,
         Guid periodId, decimal targetValue, Guid runId, DateTimeOffset now);
+
+    // ── Period Reset Audit (ADR-020 / Phase 12.9) ──────────────────────────────
+
+    /// <summary>
+    /// Idempotency guard for reset materialization: true if a reset row already
+    /// exists for this (definition, participant, boundary year).
+    /// </summary>
+    Task<bool> ResetAuditExistsAsync(Guid accumulatorDefinitionId, Guid? participantId, int resetBoundaryYear);
+
+    /// <summary>Inserts one audit-only accumulator reset record.</summary>
+    Task InsertResetAuditAsync(AccumulatorResetAudit audit);
+
+    /// <summary>
+    /// Closing balances for one reset-eligible definition at a boundary, per participant
+    /// enrolled in the given payroll context: SUM(accumulator_balance.current_value) over
+    /// the periods whose dates fall within [boundaryStart, boundaryEnd]. Drives the
+    /// automatic reset snapshot; participants with a zero/absent balance are omitted.
+    /// </summary>
+    Task<IReadOnlyList<ResetClosingBalance>> GetClosingBalancesForBoundaryAsync(
+        Guid accumulatorDefinitionId, Guid payrollContextId, DateOnly boundaryStart, DateOnly boundaryEnd);
 }
+
+/// <summary>Per-participant closing balance for a reset boundary (ADR-020 / Phase 12.9).</summary>
+public sealed record ResetClosingBalance(Guid ParticipantId, Guid? LegalEntityId, decimal ClosingBalance);

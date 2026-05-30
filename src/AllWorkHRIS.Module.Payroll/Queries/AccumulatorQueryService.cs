@@ -42,10 +42,14 @@ public sealed record AccumulatorImpactRow(
     string?  Notes
 );
 
+// Reset History row (spec §7), read from accumulator_reset_audit (ADR-020 / Phase 12.9):
+// Period (boundary that closed) · Reset Date · Closing Balance · Opened By · Notes.
 public sealed record AccumulatorResetHistoryRow(
-    int      PeriodYear,
+    int      BoundaryYear,
+    DateOnly ResetDate,
     decimal  ClosingBalance,
-    DateOnly LastUpdatedDate
+    string   OpenedBy,
+    string?  Notes
 );
 
 public sealed record AccumulatorEmployeeSearchResult(
@@ -237,27 +241,32 @@ public sealed class AccumulatorQueryService
     /// Returns closing balance per year for reset history display.
     public async Task<IReadOnlyList<AccumulatorResetHistoryRow>> GetResetHistoryAsync(int familyId, Guid legalEntityId)
     {
+        // Reads the persisted reset audit (ADR-020 / Phase 12.9), one panel row per
+        // reset boundary for the family in the legal entity. Closing balance sums the
+        // per-(definition, participant) snapshots; opened_by/notes collapse to the
+        // common case (all SYSTEM, no notes) and surface a manual actor/notes when present.
         const string sql = """
-            SELECT pp.period_year,
-                   SUM(ab.current_value)         AS closing_balance,
-                   MAX(ab.last_update_timestamp)  AS last_updated
-            FROM   accumulator_balance ab
-            JOIN   payroll_period pp ON pp.period_id  = ab.calendar_context_id
-            JOIN   employment e      ON e.employment_id = ab.participant_id
-            WHERE  ab.accumulator_family_id = @FamilyId
-              AND  e.legal_entity_id        = @LegalEntityId
-              AND  ab.participant_id IS NOT NULL
-            GROUP BY pp.period_year
-            ORDER BY pp.period_year DESC
+            SELECT reset_boundary_year  AS boundary_year,
+                   MIN(reset_date)      AS reset_date,
+                   SUM(closing_balance) AS closing_balance,
+                   MIN(opened_by)       AS opened_by,
+                   MAX(notes)           AS notes
+            FROM   accumulator_reset_audit
+            WHERE  accumulator_family_id = @FamilyId
+              AND  legal_entity_id       = @LegalEntityId
+            GROUP BY reset_boundary_year
+            ORDER BY reset_boundary_year DESC
             """;
         using var conn = _connectionFactory.CreateConnection();
         var raws = (await conn.QueryAsync(sql,
             new { FamilyId = familyId, LegalEntityId = legalEntityId })).ToList();
 
         return raws.Select(r => new AccumulatorResetHistoryRow(
-            (int)r.period_year,
+            (int)r.boundary_year,
+            ToDateOnly(r.reset_date),
             (decimal)r.closing_balance,
-            ToDateOnly(r.last_updated)
+            (string)r.opened_by,
+            (string?)r.notes
         )).ToList();
     }
 

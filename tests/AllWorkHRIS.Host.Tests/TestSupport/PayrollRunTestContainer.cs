@@ -43,6 +43,7 @@ internal static class PayrollRunTestContainer
         builder.RegisterInstance((ITemporalContext)new SystemTemporalContext()).As<ITemporalContext>().SingleInstance();
         builder.RegisterType<WallClock>().As<IWallClock>().SingleInstance();
         builder.RegisterInstance(NullLogger<CalculationEngine>.Instance).As<ILogger<CalculationEngine>>().SingleInstance();
+        builder.RegisterInstance(NullLogger<AccumulatorResetService>.Instance).As<ILogger<AccumulatorResetService>>().SingleInstance();
 
         // Cross-module collaborators — test doubles (see class summary)
         builder.RegisterInstance(new NullPayrollPipelineService()).As<IPayrollPipelineService>().SingleInstance();
@@ -64,6 +65,7 @@ internal static class PayrollRunTestContainer
         // Services
         builder.RegisterType<CalculationEngine>().As<ICalculationEngine>().InstancePerLifetimeScope();
         builder.RegisterType<AccumulatorService>().As<IAccumulatorService>().InstancePerLifetimeScope();
+        builder.RegisterType<AccumulatorResetService>().As<IAccumulatorResetService>().InstancePerLifetimeScope();
 
         return builder.Build();
     }

@@ -271,23 +271,27 @@
                         {
                             <div class="panel-card">
                                 <div class="section-subheader">
-                                    <span>Period Closing Balances</span>
+                                    <span>Reset History</span>
                                 </div>
                                 <table class="config-table">
                                     <thead>
                                         <tr>
                                             <th>Period</th>
-                                            <th class="text-right">Entity Closing Balance</th>
-                                            <th>Last Updated</th>
+                                            <th>Reset Date</th>
+                                            <th class="text-right">Closing Balance</th>
+                                            <th>Opened By</th>
+                                            <th>Notes</th>
                                         </tr>
                                     </thead>
                                     <tbody>
                                         @foreach (var h in _resetHistory)
                                         {
                                             <tr>
-                                                <td>@h.PeriodYear</td>
+                                                <td>@h.BoundaryYear</td>
+                                                <td>@h.ResetDate.ToString("MMM d, yyyy")</td>
                                                 <td class="text-right">@Fmt(h.ClosingBalance)</td>
-                                                <td>@h.LastUpdatedDate.ToString("MMM d, yyyy")</td>
+                                                <td>@h.OpenedBy</td>
+                                                <td>@(string.IsNullOrWhiteSpace(h.Notes) ? "—" : h.Notes)</td>
                                             </tr>
                                         }
                                     </tbody>
@@ -920,10 +924,10 @@
     {
         if (_selectedFamily is null) return;
         var sb = new StringBuilder();
-        sb.AppendLine("Period,Closing Balance,Last Updated");
+        sb.AppendLine("Period,Reset Date,Closing Balance,Opened By,Notes");
         foreach (var h in _resetHistory)
-            sb.AppendLine($"{h.PeriodYear},{h.ClosingBalance:F2},{h.LastUpdatedDate:yyyy-MM-dd}");
-        await DownloadCsvAsync($"accumulators-period-closing-balances-{_selectedFamily.Code}.csv", sb.ToString());
+            sb.AppendLine($"{h.BoundaryYear},{h.ResetDate:yyyy-MM-dd},{h.ClosingBalance:F2},{h.OpenedBy},{(h.Notes ?? "").Replace(',', ';')}");
+        await DownloadCsvAsync($"accumulators-reset-history-{_selectedFamily.Code}.csv", sb.ToString());
     }
 
     private async Task ExportEmployeeSummaryCsvAsync()
@@ -1000,9 +1004,9 @@
     {
         if (_selectedFamily is null) return;
         var sb = new StringBuilder();
-        sb.AppendLine("Period\tClosing Balance\tLast Updated");
+        sb.AppendLine("Period\tReset Date\tClosing Balance\tOpened By\tNotes");
         foreach (var h in _resetHistory)
-            sb.AppendLine($"{h.PeriodYear}\t{h.ClosingBalance:F2}\t{h.LastUpdatedDate:yyyy-MM-dd}");
+            sb.AppendLine($"{h.BoundaryYear}\t{h.ResetDate:yyyy-MM-dd}\t{h.ClosingBalance:F2}\t{h.OpenedBy}\t{h.Notes ?? ""}");
         await JS.InvokeVoidAsync("allworkClipboard.copy", sb.ToString());
         _resetHistoryCopiedRecent = true;
         StateHasChanged();

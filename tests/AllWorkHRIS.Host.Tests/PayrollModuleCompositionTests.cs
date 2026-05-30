@@ -74,6 +74,7 @@ public sealed class PayrollModuleCompositionTests
         Assert.True(container.IsRegistered<IPayrollContextRepository>(),      "IPayrollContextRepository");
         Assert.True(container.IsRegistered<ICalculationEngine>(),             "ICalculationEngine");
         Assert.True(container.IsRegistered<IAccumulatorService>(),            "IAccumulatorService");
+        Assert.True(container.IsRegistered<IAccumulatorResetService>(),       "IAccumulatorResetService");
         Assert.True(container.IsRegistered<IPayrollEventSubscriber>(),        "IPayrollEventSubscriber");
     }
 
