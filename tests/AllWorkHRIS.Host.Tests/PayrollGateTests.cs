@@ -114,15 +114,16 @@ public sealed class PayrollGateTests : IDisposable
         var contextRepo = new PayrollContextRepository(_connectionFactory, auditService);
         var queue       = Channel.CreateUnbounded<Guid>();
 
-        var resultRepo      = new EmployeePayrollResultRepository(_connectionFactory);
-        var accumulatorRepo = new AccumulatorRepository(_connectionFactory);
-        var resultLineRepo  = new ResultLineRepository(_connectionFactory);
-        var accumulatorSvc  = new AccumulatorService(accumulatorRepo, resultLineRepo,
-                                  temporalCtx, _connectionFactory);
+        // resultRepo / accumulatorRepo / resultLineRepo / accumulatorSvc no longer
+        // wired into PayrollRunService (ADR-017 removed the cancel-time reversal
+        // path). Retained as local vars in case future tests need them.
+        _ = new EmployeePayrollResultRepository(_connectionFactory);
+        _ = new AccumulatorRepository(_connectionFactory);
+        _ = new ResultLineRepository(_connectionFactory);
 
         _runService = new PayrollRunService(
-            _runRepo, contextRepo, resultRepo, accumulatorSvc, queue,
-            temporalCtx, NullLogger<PayrollRunService>.Instance, auditService);
+            _runRepo, contextRepo, queue,
+            temporalCtx, NullLogger<PayrollRunService>.Instance, auditService, _lookupCache);
     }
 
     // ---------------------------------------------------------------------------
@@ -149,7 +150,7 @@ public sealed class PayrollGateTests : IDisposable
         Assert.NotNull(run);
         Assert.Equal(ContextId,                        run.PayrollContextId);
         Assert.Equal(PeriodId1,                        run.PeriodId);
-        Assert.Equal((int)PayrollRunStatus.Draft,      run.RunStatusId);
+        Assert.Equal(_lookupCache.GetId(LookupTables.RunStatus, "DRAFT"), run.RunStatusId);
         Assert.Equal(userId,                           run.InitiatedBy);
     }
 
@@ -204,7 +205,7 @@ public sealed class PayrollGateTests : IDisposable
         // TC-PAY-003: run status must be CALCULATED
         var run = await _runRepo.GetByIdAsync(runId);
         Assert.NotNull(run);
-        Assert.Equal((int)PayrollRunStatus.Calculated, run.RunStatusId);
+        Assert.Equal(_lookupCache.GetId(LookupTables.RunStatus, "CALCULATED"), run.RunStatusId);
 
         // TC-PAY-004: our hired employee has a result row with a REG earnings line
         using var conn = _connectionFactory.CreateConnection();

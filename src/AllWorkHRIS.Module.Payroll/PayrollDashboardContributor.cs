@@ -151,7 +151,7 @@ public sealed class PayrollDashboardContributor : IDashboardContributor
                     JOIN   payroll_context  pc ON pc.payroll_context_id = r.payroll_context_id
                     JOIN   org_unit         ou ON ou.org_unit_id = pc.legal_entity_id
                     WHERE  r.pay_date >= @Today
-                      AND  rs.code NOT IN ('RELEASED','CLOSED','CANCELLED','FAILED')
+                      AND  rs.code NOT IN ('RELEASED','CANCELLED','FAILED')
                       AND  (@EntityId IS NULL OR pc.legal_entity_id = @EntityId)
                     GROUP BY r.payroll_context_id, pc.payroll_context_name, pc.cutoff_offset_days,
                              ou.org_unit_id, ou.org_unit_name

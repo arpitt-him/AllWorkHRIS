@@ -39,7 +39,7 @@ public sealed class PayrollRunPickerQuery
             JOIN   payroll_context pc ON pc.payroll_context_id = pr.payroll_context_id
             JOIN   lkp_run_status   rs ON rs.id = pr.run_status_id
             WHERE  (@LegalEntityId IS NULL OR pc.legal_entity_id = @LegalEntityId)
-              AND  rs.code IN ('CALCULATED','UNDER_REVIEW','APPROVED','RELEASING','RELEASED','CLOSED')
+              AND  rs.code IN ('CALCULATED','UNDER_REVIEW','APPROVED','RELEASING','RELEASED')
             ORDER BY pr.pay_date DESC
             FETCH FIRST @Limit ROWS ONLY
             """;

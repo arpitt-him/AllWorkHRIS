@@ -48,7 +48,7 @@ public sealed class PAY_RPT_006_PayrollVariance : IReportQuery
                 JOIN   this_run tr ON tr.payroll_context_id = pr.payroll_context_id
                 JOIN   lkp_run_status rs ON rs.id = pr.run_status_id
                 WHERE  pr.pay_date < tr.pay_date
-                  AND  rs.code IN ('CALCULATED','UNDER_REVIEW','APPROVED','RELEASING','RELEASED','CLOSED')
+                  AND  rs.code IN ('CALCULATED','UNDER_REVIEW','APPROVED','RELEASING','RELEASED')
                 ORDER BY pr.pay_date DESC
                 FETCH FIRST 1 ROWS ONLY
             ),

@@ -40,20 +40,48 @@ public sealed class PayrollRunRepository : IPayrollRunRepository
         return (await conn.QueryAsync<PayrollRun>(sql, new { PayrollContextId = payrollContextId })).ToList();
     }
 
-    public async Task<bool> HasOpenRunForPeriodAsync(Guid payrollContextId, Guid periodId)
+    public async Task<PayrollRun?> GetInFlightRunForContextAsync(Guid payrollContextId)
     {
-        // An "open" run is any run not in a terminal state (CLOSED, CANCELLED, FAILED)
+        // ADR-017 §5: "in flight" = un-approved run still moving through the
+        // lifecycle. Status IN (DRAFT, CALCULATING, CALCULATED, APPROVING).
+        // Status comparison is by code (the stable contract), not by id —
+        // resilient to seed re-ordering. Scoped per payroll context, not per
+        // period, so a supplemental run for a period that already has an
+        // approved run is permitted (per ADR-017 §4b/§4d).
         const string sql = """
-            SELECT COUNT(1) FROM payroll_run
-            WHERE payroll_context_id = @PayrollContextId
-              AND period_id           = @PeriodId
-              AND run_status_id NOT IN (
-                  SELECT id FROM lkp_run_status WHERE code IN ('CLOSED', 'CANCELLED', 'FAILED')
+            SELECT r.* FROM payroll_run r
+            WHERE r.payroll_context_id = @PayrollContextId
+              AND r.run_status_id IN (
+                  SELECT id FROM lkp_run_status
+                  WHERE  code IN ('DRAFT', 'CALCULATING', 'CALCULATED', 'APPROVING')
               )
+            ORDER BY r.creation_timestamp DESC
+            FETCH FIRST 1 ROWS ONLY
             """;
         using var conn = _connectionFactory.CreateConnection();
-        return await conn.ExecuteScalarAsync<int>(sql,
-            new { PayrollContextId = payrollContextId, PeriodId = periodId }) > 0;
+        return await conn.QueryFirstOrDefaultAsync<PayrollRun>(sql,
+            new { PayrollContextId = payrollContextId });
+    }
+
+    public async Task<PayrollRun?> GetActiveRegularRunForPeriodAsync(Guid periodId)
+    {
+        // ADR-017 §4b: one Regular run per period. Match a REGULAR-type run for
+        // this period in any status except CANCELLED/FAILED (a cancelled or
+        // failed regular run leaves the period open for a fresh one). Type and
+        // status are matched by code — resilient to seed re-ordering.
+        const string sql = """
+            SELECT r.* FROM payroll_run r
+            WHERE r.period_id = @PeriodId
+              AND r.run_type_id = (SELECT id FROM lkp_run_type WHERE code = 'REGULAR')
+              AND r.run_status_id NOT IN (
+                  SELECT id FROM lkp_run_status WHERE code IN ('CANCELLED', 'FAILED')
+              )
+            ORDER BY r.creation_timestamp DESC
+            FETCH FIRST 1 ROWS ONLY
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        return await conn.QueryFirstOrDefaultAsync<PayrollRun>(sql,
+            new { PeriodId = periodId });
     }
 
     public async Task<Guid> InsertAsync(PayrollRun run)
@@ -731,6 +759,19 @@ public sealed class AccumulatorRepository : IAccumulatorRepository
             """;
         using var conn = _connectionFactory.CreateConnection();
         return (await conn.QueryAsync<AccumulatorImpact>(sql, new { ResultId = employeePayrollResultId })).ToList();
+    }
+
+    public async Task<bool> AnyImpactsForResultAsync(Guid employeePayrollResultId)
+    {
+        // Idempotency guard for the approve-time post (ADR-017 §2). Cheap
+        // existence probe — avoids materializing the full impact row list
+        // when all we need is "has this result already been posted?".
+        const string sql = """
+            SELECT COUNT(1) FROM accumulator_impact
+            WHERE employee_payroll_result_id = @ResultId
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        return await conn.ExecuteScalarAsync<int>(sql, new { ResultId = employeePayrollResultId }) > 0;
     }
 
     public async Task<IReadOnlyList<AccumulatorContribution>> GetContributionsByResultIdAsync(Guid employeePayrollResultId)

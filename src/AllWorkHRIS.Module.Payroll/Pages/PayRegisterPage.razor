@@ -13,6 +13,7 @@
 @using Syncfusion.Blazor.Grids
 @inject IHrisSessionState       SessionState
 @inject PayRegisterQueryService QueryService
+@inject ILookupCache            LookupCache
 @inject IJSRuntime              JS
 @inject AuthenticationStateProvider AuthStateProvider
 @inject IWebHostEnvironment     Env
@@ -91,7 +92,7 @@
                                     <button class="nav-run @(_selectedRunId == run.RunId ? "nav-run--active" : "")"
                                             @onclick="() => SelectRunAsync(run.RunId)">
                                         @run.Label
-                                        <span class="nav-run__status">@run.StatusLabel</span>
+                                        <span class="nav-run__status">@GetStatusLabel(run.RunStatusId)</span>
                                     </button>
                                 }
                             </div>
@@ -653,6 +654,9 @@
 
 @code {
     private IReadOnlyList<PayRegisterRunOption> _runs        = [];
+    // Run-status labels resolved by id, code-keyed (ADR-017 / Phase 12.5.3) so
+    // they survive seed re-ordering — mirrors PayrollRuns/PayrollRunDetail pages.
+    private Dictionary<int, LookupEntry> _statusById = new();
     private bool                                _loading     = true;
     private bool                                _isBenefitsAdmin;
 
@@ -720,6 +724,8 @@
 
     protected override async Task OnInitializedAsync()
     {
+        _statusById = LookupCache.GetAll(LookupTables.RunStatus).ToDictionary(e => e.Id);
+
         var auth  = await AuthStateProvider.GetAuthenticationStateAsync();
         _isBenefitsAdmin = auth.User.IsInRole("BenefitsAdmin") &&
                            !auth.User.IsInRole("PayrollOperator") &&
@@ -741,6 +747,9 @@
     }
 
     // ── Navigator ─────────────────────────────────────────────────────────────
+
+    private string GetStatusLabel(int id)
+        => _statusById.TryGetValue(id, out var e) ? e.Label : "—";
 
     private void ToggleYear(int year)
     {

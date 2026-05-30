@@ -1,6 +1,7 @@
 using System.Threading.Channels;
 using Autofac;
 using AllWorkHRIS.Core.Events;
+using AllWorkHRIS.Core.Lookups;
 using AllWorkHRIS.Core.Temporal;
 using AllWorkHRIS.Module.Payroll.Domain.Results;
 using AllWorkHRIS.Module.Payroll.Domain.ResultSet;
@@ -13,10 +14,15 @@ using Microsoft.Extensions.Logging;
 namespace AllWorkHRIS.Module.Payroll.Jobs;
 
 /// <summary>
-/// Long-running background service that dequeues payroll run IDs and
-/// drives each through the full calculation lifecycle.
+/// Long-running background service that dequeues payroll run IDs and drives
+/// each through the relevant lifecycle phase (calculation, approval, release).
 /// A child lifetime scope is created per run so scoped services
 /// (repositories, engine) resolve correctly from a singleton.
+///
+/// Status ids are resolved through ILookupCache against the seeded code
+/// strings — never hard-coded as integer literals. The seed in
+/// payroll_lookups_seed_data.sql is the single source of truth; the
+/// auto-incremented ids are an internal detail.
 /// </summary>
 public sealed class PayrollRunJob : BackgroundService
 {
@@ -67,13 +73,32 @@ public sealed class PayrollRunJob : BackgroundService
         var contextRepo   = scope.Resolve<IPayrollContextRepository>();
         var compSnapshot  = scope.Resolve<IPayrollCompensationSnapshotRepository>();
         var engine        = scope.Resolve<ICalculationEngine>();
-        var accumulator   = scope.Resolve<IAccumulatorService>();
         var temporal      = scope.Resolve<ITemporalContext>();
         var wallClock     = scope.Resolve<IWallClock>();
+        var lookup        = scope.Resolve<ILookupCache>();
+        // IAccumulatorService and IAccumulatorRepository are resolved by
+        // ProcessApproveAsync — the calc loop no longer touches the ledger
+        // (ADR-017, Phase 12.5.3).
 
         // Audit-style timestamp: TDO operative date + real time-of-day (so a run's
         // duration is visible), stored at UTC offset. Centralised in GetOperativeNow().
         DateTimeOffset TdoNow() => temporal.GetOperativeNow();
+
+        // Resolve status ids once per run rather than on every iteration.
+        int RunStatusId(string code) => lookup.GetId(LookupTables.RunStatus, code);
+        int ResultStatusId(string code) => lookup.GetId(LookupTables.EmployeeResultStatus, code);
+
+        var releasingStatus   = RunStatusId("RELEASING");
+        var releasedStatus    = RunStatusId("RELEASED");
+        var approvingStatus   = RunStatusId("APPROVING");
+        var calculatingStatus = RunStatusId("CALCULATING");
+        var calculatedStatus  = RunStatusId("CALCULATED");
+        var failedStatus      = RunStatusId("FAILED");
+        var cancelledStatus   = RunStatusId("CANCELLED");
+
+        var inProgressResultStatus = ResultStatusId("IN_PROGRESS");
+        var calculatedResultStatus = ResultStatusId("CALCULATED");
+        var failedResultStatus     = ResultStatusId("FAILED");
 
         var run = await runRepo.GetByIdAsync(runId);
         if (run is null)
@@ -83,17 +108,26 @@ public sealed class PayrollRunJob : BackgroundService
         }
 
         // Release path — no calculation needed, just finalise
-        if (run.RunStatusId == (int)PayrollRunStatus.Releasing)
+        if (run.RunStatusId == releasingStatus)
         {
-            await runRepo.UpdateStatusAsync(runId, (int)PayrollRunStatus.Released, run.InitiatedBy);
+            await runRepo.UpdateStatusAsync(runId, releasedStatus, run.InitiatedBy);
             await contextRepo.UpdatePeriodStatusAsync(run.PeriodId, "CLOSED", run.InitiatedBy);
             _logger.LogInformation("Run {RunId} released; period {PeriodId} closed", runId, run.PeriodId);
             return;
         }
 
+        // Approval path — post accumulator impacts for each succeeded result,
+        // then transition to Approved. ADR-017 (Phase 12.5.3): approval is the
+        // YTD-commit point; calculation produces no ledger writes.
+        if (run.RunStatusId == approvingStatus)
+        {
+            await ProcessApproveAsync(scope, run, lookup, ct);
+            return;
+        }
+
         // Transition to CALCULATING
         var startTime = TdoNow();
-        await runRepo.UpdateStatusAsync(runId, (int)PayrollRunStatus.Calculating, run.InitiatedBy);
+        await runRepo.UpdateStatusAsync(runId, calculatingStatus, run.InitiatedBy);
         await runRepo.SetRunTimestampsAsync(runId, startTime, null, run.InitiatedBy);
 
         try
@@ -195,7 +229,7 @@ public sealed class PayrollRunJob : BackgroundService
                     RootEmployeePayrollResultId       = null,
                     ResultLineageSequence             = 1,
                     CorrectionReferenceId             = null,
-                    ResultStatusId                    = 1,   // CALCULATING
+                    ResultStatusId                    = inProgressResultStatus,
                     PayPeriodStartDate                = period.PeriodStartDate,
                     PayPeriodEndDate                  = period.PeriodEndDate,
                     PayDate                           = run.PayDate,
@@ -243,7 +277,7 @@ public sealed class PayrollRunJob : BackgroundService
                         output.TotalEmployeeTaxAmount,
                         output.TotalEmployerContribAmount,
                         output.NetPay);
-                    await resultRepo.UpdateStatusAsync(resultId, 2); // CALCULATED
+                    await resultRepo.UpdateStatusAsync(resultId, calculatedResultStatus);
 
                     if (output.NetPayFloorApplied)
                     {
@@ -258,23 +292,15 @@ public sealed class PayrollRunJob : BackgroundService
                         });
                     }
 
-                    await accumulator.ApplyAsync(
-                        employeeResult with
-                        {
-                            GrossPayAmount                  = output.GrossPay,
-                            TotalDeductionsAmount           = output.TotalDeductionsAmount,
-                            TotalEmployeeTaxAmount          = output.TotalEmployeeTaxAmount,
-                            TotalEmployerContributionAmount = output.TotalEmployerContribAmount,
-                            NetPayAmount                    = output.NetPay,
-                            ResultStatusId                  = 2   // CALCULATED
-                        },
-                        runId, ct);
+                    // ADR-017 (Phase 12.5.3): calculation no longer touches the
+                    // accumulator ledger. The YTD post happens at approval time
+                    // in ProcessApproveAsync below.
 
                     processed++;
                 }
                 else
                 {
-                    await resultRepo.UpdateStatusAsync(resultId, 10); // FAILED
+                    await resultRepo.UpdateStatusAsync(resultId, failedResultStatus);
                     _logger.LogWarning(
                         "Run {RunId} employee {EmploymentId} failed: {Reason}",
                         runId, employmentId, output.FailureReason);
@@ -297,11 +323,11 @@ public sealed class PayrollRunJob : BackgroundService
                 }
             }
 
-            var finalStatus = total > 0 && failed == total
-                ? (int)PayrollRunStatus.Failed
-                : (int)PayrollRunStatus.Calculated;
+            var finalRunStatus = total > 0 && failed == total
+                ? failedStatus
+                : calculatedStatus;
 
-            await runRepo.UpdateStatusAsync(runId, finalStatus, run.InitiatedBy);
+            await runRepo.UpdateStatusAsync(runId, finalRunStatus, run.InitiatedBy);
             await runRepo.SetRunTimestampsAsync(runId, startTime, TdoNow(), run.InitiatedBy);
             await resultSetRepo.UpdateStatusAsync(resultSet.PayrollRunResultSetId, (int)ResultSetStatus.Calculated);
 
@@ -320,17 +346,134 @@ public sealed class PayrollRunJob : BackgroundService
         }
         catch (OperationCanceledException)
         {
-            await runRepo.UpdateStatusAsync(runId, (int)PayrollRunStatus.Cancelled, run.InitiatedBy);
+            await runRepo.UpdateStatusAsync(runId, cancelledStatus, run.InitiatedBy);
             throw;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Run {RunId} failed", runId);
-            await runRepo.UpdateStatusAsync(runId, (int)PayrollRunStatus.Failed, run.InitiatedBy);
+            await runRepo.UpdateStatusAsync(runId, failedStatus, run.InitiatedBy);
         }
     }
 
     private static Task<IReadOnlyList<Guid>> ResolvePopulationAsync(
         PayrollRun run, IPayrollProfileRepository profileRepo, CancellationToken ct)
         => profileRepo.GetActiveEmploymentIdsByContextAsync(run.PayrollContextId);
+
+    // -------------------------------------------------------------
+    // Approval path — ADR-017 (Phase 12.5.3)
+    // -------------------------------------------------------------
+    // Posts accumulator impacts for every succeeded employee result on the
+    // run, then transitions the run to Approved. Mirrors the existing
+    // Releasing → Released backgrounding pattern. Idempotent on two levels:
+    //   - Run level: refetch and confirm status is still Approving; bail if
+    //     a concurrent fire has already advanced past it.
+    //   - Per-result level: skip any result whose impacts already exist
+    //     (handles partial-post + retry).
+    // -------------------------------------------------------------
+    private async Task ProcessApproveAsync(ILifetimeScope scope, PayrollRun run, ILookupCache lookup, CancellationToken ct)
+    {
+        var runRepo         = scope.Resolve<IPayrollRunRepository>();
+        var resultRepo      = scope.Resolve<IEmployeePayrollResultRepository>();
+        var accumulatorRepo = scope.Resolve<IAccumulatorRepository>();
+        var accumulator     = scope.Resolve<IAccumulatorService>();
+        var wallClock       = scope.Resolve<IWallClock>();
+
+        var approvingStatus        = lookup.GetId(LookupTables.RunStatus, "APPROVING");
+        var approvedStatus         = lookup.GetId(LookupTables.RunStatus, "APPROVED");
+        var calculatedResultStatus = lookup.GetId(LookupTables.EmployeeResultStatus, "CALCULATED");
+        var approvedResultStatus   = lookup.GetId(LookupTables.EmployeeResultStatus, "APPROVED");
+
+        // Run-level idempotency: a second concurrent dequeue of the same
+        // run id finds the status already past Approving and exits silently.
+        var fresh = await runRepo.GetByIdAsync(run.RunId);
+        if (fresh is null || fresh.RunStatusId != approvingStatus)
+        {
+            _logger.LogInformation(
+                "Run {RunId} not in Approving (status {Status}) — approval job exiting silently",
+                run.RunId, fresh?.RunStatusId);
+            return;
+        }
+
+        // Succeeded employee results only — failed/excluded leave no ledger
+        // entry per ADR-017 §4d.
+        var allResults = await resultRepo.GetByRunIdAsync(run.RunId);
+        var succeeded  = allResults.Where(r => r.ResultStatusId == calculatedResultStatus).ToList();
+        var total      = succeeded.Count;
+
+        _logger.LogInformation("Run {RunId}: approving — posting accumulators for {Total} result(s)",
+            run.RunId, total);
+
+        await _progress.UpdateAsync(new RunProgress
+        {
+            RunId = run.RunId, PercentComplete = 0, Processed = 0, Total = total,
+            Failed = 0, StatusMessage = $"Posting accumulators for {total} result(s)…",
+            RunStatus = "APPROVING", UpdatedAt = wallClock.UtcNow
+        });
+
+        int posted  = 0;
+        int skipped = 0;
+
+        try
+        {
+            foreach (var result in succeeded)
+            {
+                ct.ThrowIfCancellationRequested();
+
+                // Per-result idempotency: skip if impacts already exist.
+                if (await accumulatorRepo.AnyImpactsForResultAsync(result.EmployeePayrollResultId))
+                {
+                    skipped++;
+                }
+                else
+                {
+                    await accumulator.ApplyAsync(result, run.RunId, ct);
+                    // Result-level status mirrors the run.
+                    await resultRepo.UpdateStatusAsync(result.EmployeePayrollResultId, approvedResultStatus);
+                    posted++;
+                }
+
+                if (total > 0 && (posted + skipped) % 10 == 0)
+                {
+                    var pct = (int)((posted + skipped) * 100.0 / total);
+                    await _progress.UpdateAsync(new RunProgress
+                    {
+                        RunId = run.RunId, PercentComplete = pct, Processed = posted,
+                        Total = total, Failed = 0,
+                        StatusMessage = $"Posted {posted} of {total}…",
+                        RunStatus = "APPROVING", UpdatedAt = wallClock.UtcNow
+                    });
+                }
+            }
+
+            await runRepo.UpdateStatusAsync(run.RunId, approvedStatus, fresh.LastUpdatedBy);
+
+            await _progress.UpdateAsync(new RunProgress
+            {
+                RunId = run.RunId, PercentComplete = 100, Processed = posted,
+                Total = total, Failed = 0,
+                StatusMessage = $"Approved — {posted} posted, {skipped} skipped (already posted)",
+                RunStatus = "APPROVED", UpdatedAt = wallClock.UtcNow
+            });
+            _logger.LogInformation("Run {RunId}: approved — {Posted} posted, {Skipped} skipped (idempotent)",
+                run.RunId, posted, skipped);
+        }
+        catch (OperationCanceledException)
+        {
+            // On cancellation, leave the run in Approving — re-enqueue or
+            // manual recovery will pick it up where it left off (idempotency
+            // guard handles the partial-post case).
+            _logger.LogWarning("Run {RunId}: approval cancelled mid-post — {Posted} posted, run remains in Approving",
+                run.RunId, posted);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Run {RunId}: approval failed mid-post — {Posted} posted, run remains in Approving",
+                run.RunId, posted);
+            // Leave the run in Approving so the operator can investigate; do
+            // not flip to Failed (calc succeeded; only the post is broken).
+            throw;
+        }
+    }
 }

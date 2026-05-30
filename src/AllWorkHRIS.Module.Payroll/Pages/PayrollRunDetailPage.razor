@@ -6,6 +6,7 @@
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Components.Authorization
 @using Syncfusion.Blazor.Grids
+@using AllWorkHRIS.Core.Lookups
 @inject IPayrollRunService              RunService
 @inject IPayrollContextRepository       ContextRepo
 @inject IEmployeePayrollResultRepository ResultRepo
@@ -13,6 +14,7 @@
 @inject IRunProgressNotifier            ProgressNotifier
 @inject NavigationManager               Nav
 @inject AuthenticationStateProvider     AuthState
+@inject ILookupCache                    LookupCache
 
 <PageTitle>Payroll Run Detail — AllWork HRIS</PageTitle>
 
@@ -89,12 +91,15 @@
                 </div>
             </div>
 
-            @* Progress panel — only when calculating *@
-            @if (_run.RunStatusId == 3)
+            @* Progress panel — visible while a background job is running (CALCULATING or APPROVING) *@
+            @if (IsInBackgroundJob(_run.RunStatusId))
             {
                 var progress = ProgressNotifier.GetProgress(_run.RunId);
+                var progressTitle = _run.RunStatusId == _approvingStatus
+                    ? "Approval Progress"
+                    : "Calculation Progress";
                 <div class="panel-card" style="margin-bottom:1.5rem;">
-                    <h3 class="panel-title">Calculation Progress</h3>
+                    <h3 class="panel-title">@progressTitle</h3>
                     @if (progress is not null)
                     {
                         <div style="margin-bottom:var(--space-3)">
@@ -118,7 +123,7 @@
             }
 
             @* Totals summary — only when calculated or later *@
-            @if (_run.RunStatusId >= 4 && _results.Count > 0)
+            @if (HasResultsToShow(_run.RunStatusId) && _results.Count > 0)
             {
                 <div class="panel-card" style="margin-bottom:1.5rem;">
                     <h3 class="panel-title">Run Totals</h3>
@@ -157,26 +162,28 @@
                     <div class="panel-card">
                         <h3 class="panel-title">Actions</h3>
                         <div class="form-actions">
-                            @if (_run.RunStatusId == 4)
+                            @if (_run.RunStatusId == _calculatedStatus)
                             {
                                 <button class="btn-primary" @onclick="ApproveAsync" disabled="@_submitting">
                                     @(_submitting ? "Working…" : "Approve")
                                 </button>
                             }
-                            @if (_run.RunStatusId == 6)
+                            @if (_run.RunStatusId == _approvedStatus)
                             {
                                 <button class="btn-primary" @onclick="ReleaseAsync" disabled="@_submitting">
                                     @(_submitting ? "Working…" : "Release")
                                 </button>
                             }
-                            @if (_run.RunStatusId is 1 or 4)
+                            @if (_run.RunStatusId == _draftStatus || _run.RunStatusId == _calculatedStatus)
                             {
                                 <button class="btn-danger" style="border:1px solid var(--color-danger);border-radius:var(--radius-md);padding:var(--space-2) var(--space-4);"
                                         @onclick="CancelAsync" disabled="@_submitting">
                                     Cancel Run
                                 </button>
                             }
-                            @if (_run.RunStatusId is not (1 or 4 or 6))
+                            @if (_run.RunStatusId != _draftStatus
+                                 && _run.RunStatusId != _calculatedStatus
+                                 && _run.RunStatusId != _approvedStatus)
                             {
                                 <span style="font-size:var(--font-size-sm);color:#6B7280;">No actions available for this status.</span>
                             }
@@ -300,8 +307,38 @@
     private PeriodicTimer?           _pollTimer;
     private CancellationTokenSource? _pollCts;
 
+    // Run-status ids resolved once via ILookupCache (ADR-017 / Phase 12.5.3).
+    // Codes are the stable contract; the auto-incremented ids are an internal
+    // detail of the seed and must not be hard-coded in conditionals.
+    private int _draftStatus, _calculatingStatus, _calculatedStatus,
+                _approvingStatus, _approvedStatus, _releasingStatus;
+
+    // Label/badge resolution by id, code-keyed so it survives seed reordering
+    // (ADR-017 / Phase 12.5.3). ids are an auto-incremented internal detail.
+    private Dictionary<int, LookupEntry> _statusById       = new();
+    private Dictionary<int, LookupEntry> _resultStatusById = new();
+
+    private bool IsInBackgroundJob(int? statusId)
+        => statusId == _calculatingStatus || statusId == _approvingStatus;
+
+    // Results exist (and are viewable) once the run has moved past CALCULATING.
+    private bool HasResultsToShow(int? statusId)
+        => statusId is not null
+           && statusId != _draftStatus
+           && statusId != _calculatingStatus;
+
     protected override async Task OnInitializedAsync()
     {
+        int Status(string code) => LookupCache.GetId(LookupTables.RunStatus, code);
+        _draftStatus       = Status("DRAFT");
+        _calculatingStatus = Status("CALCULATING");
+        _calculatedStatus  = Status("CALCULATED");
+        _approvingStatus   = Status("APPROVING");
+        _approvedStatus    = Status("APPROVED");
+        _releasingStatus   = Status("RELEASING");
+        _statusById        = LookupCache.GetAll(LookupTables.RunStatus).ToDictionary(e => e.Id);
+        _resultStatusById  = LookupCache.GetAll(LookupTables.EmployeeResultStatus).ToDictionary(e => e.Id);
+
         var auth = await AuthState.GetAuthenticationStateAsync();
         var sub  = auth.User.FindFirst("sub")?.Value;
         _currentUserId = Guid.TryParse(sub, out var g) ? g : Guid.Empty;
@@ -318,10 +355,10 @@
             _context = await ContextRepo.GetByIdAsync(_run.PayrollContextId);
             _period  = await ContextRepo.GetPeriodByIdAsync(_run.PeriodId);
 
-            if (_run.RunStatusId >= 4)
+            if (HasResultsToShow(_run.RunStatusId))
                 await LoadResultsAsync();
 
-            if (_run.RunStatusId == 3)
+            if (IsInBackgroundJob(_run.RunStatusId))
                 StartPolling();
         }
         _loading = false;
@@ -342,7 +379,7 @@
     private async Task SwitchToRegisterAsync()
     {
         _activeTab = "register";
-        if (_results.Count == 0 && _run?.RunStatusId >= 4)
+        if (_results.Count == 0 && HasResultsToShow(_run?.RunStatusId))
         {
             _registerLoading = true;
             await LoadResultsAsync();
@@ -408,9 +445,9 @@
             {
                 _run = await RunService.GetRunByIdAsync(RunId);
                 await InvokeAsync(StateHasChanged);
-                if (_run?.RunStatusId != 3)
+                if (!IsInBackgroundJob(_run?.RunStatusId))
                 {
-                    if (_run?.RunStatusId >= 4)
+                    if (HasResultsToShow(_run?.RunStatusId))
                         await LoadResultsAsync();
                     _pollCts?.Cancel();
                     break;
@@ -442,35 +479,34 @@
         _ => id.ToString()
     };
 
-    private static string GetStatusLabel(int id) => id switch
-    {
-        1 => "Draft",       2 => "Open",         3 => "Calculating",
-        4 => "Calculated",  5 => "Under Review",  6 => "Approved",
-        7 => "Releasing",   8 => "Released",      9 => "Closed",
-        10 => "Failed",     11 => "Cancelled",
-        _  => id.ToString()
-    };
+    private string GetStatusLabel(int id)
+        => _statusById.TryGetValue(id, out var e) ? e.Label : id.ToString();
 
-    private static string GetStatusBadgeClass(int id) => id switch
+    private string GetStatusBadgeClass(int id)
     {
-        3 or 7  => "badge-info",
-        4 or 6  => "badge-teal",
-        8       => "badge-success",
-        5       => "badge-warning",
-        10      => "badge-error",
-        _       => "badge-neutral"
-    };
+        if (!_statusById.TryGetValue(id, out var e)) return "badge-neutral";
+        return e.Code switch
+        {
+            "CALCULATING" or "RELEASING" or "APPROVING" => "badge-info",
+            "CALCULATED" or "APPROVED"                  => "badge-teal",
+            "RELEASED"                                  => "badge-success",
+            "UNDER_REVIEW"                              => "badge-warning",
+            "FAILED"                                    => "badge-error",
+            _                                           => "badge-neutral"
+        };
+    }
 
-    private static string GetResultStatusLabel(int id) => id switch
-    {
-        1  => "Calculating", 2 => "Calculated",
-        10 => "Failed",      _ => id.ToString()
-    };
+    private string GetResultStatusLabel(int id)
+        => _resultStatusById.TryGetValue(id, out var e) ? e.Label : id.ToString();
 
-    private static string GetResultStatusClass(int id) => id switch
+    private string GetResultStatusClass(int id)
     {
-        1  => "badge-info",
-        10 => "badge-error",
-        _  => "badge-neutral"
-    };
+        if (!_resultStatusById.TryGetValue(id, out var e)) return "badge-neutral";
+        return e.Code switch
+        {
+            "IN_PROGRESS" => "badge-info",
+            "FAILED"      => "badge-error",
+            _             => "badge-neutral"
+        };
+    }
 }

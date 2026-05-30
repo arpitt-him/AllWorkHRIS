@@ -18,10 +18,6 @@ public sealed record PayRegisterRunOption(
     public string Label => RunDescription is { Length: > 0 } d
         ? $"{d} ({PayDate:MMM d})"
         : $"P{PeriodNumber} — {PayDate:MMM d, yyyy}";
-    public string StatusLabel => RunStatusId switch
-    {
-        6 => "Approved", 7 => "Releasing", 8 => "Released", 9 => "Closed", _ => "—"
-    };
 }
 
 public sealed record PayRegisterRunHeader(
@@ -140,7 +136,10 @@ public sealed class PayRegisterQueryService
             JOIN   payroll_context pc ON pc.payroll_context_id = pr.payroll_context_id
             JOIN   payroll_period  pp ON pp.period_id          = pr.period_id
             WHERE  pc.legal_entity_id = @LegalEntityId
-              AND  pr.run_status_id IN (6, 7, 8, 9)
+              AND  pr.run_status_id IN (
+                       SELECT id FROM lkp_run_status
+                       WHERE  code IN ('APPROVED', 'RELEASING', 'RELEASED')
+                   )
             ORDER  BY pr.pay_date DESC
             """,
             new { LegalEntityId = legalEntityId })).ToList();

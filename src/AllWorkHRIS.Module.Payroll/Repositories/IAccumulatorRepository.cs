@@ -42,6 +42,14 @@ public interface IAccumulatorRepository
     Task<IReadOnlyList<AccumulatorContribution>> GetContributionsByResultIdAsync(Guid employeePayrollResultId);
 
     /// <summary>
+    /// Slim existence check for the approval-time idempotency guard (ADR-017 §2).
+    /// Returns true if any accumulator_impact row exists for the given result —
+    /// indicating the result has already been posted to the ledger and the
+    /// approve-time post should skip it.
+    /// </summary>
+    Task<bool> AnyImpactsForResultAsync(Guid employeePayrollResultId);
+
+    /// <summary>
     /// Sets current_value on the accumulator_balance row identified by
     /// (definition, participant, period) back to <paramref name="targetValue"/>.
     /// Used exclusively by the reversal path.
