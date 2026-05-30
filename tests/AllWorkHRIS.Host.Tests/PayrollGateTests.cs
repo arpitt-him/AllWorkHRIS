@@ -293,6 +293,7 @@ public sealed class PayrollGateTests : IDisposable
         var builder      = new ContainerBuilder();
         builder.RegisterInstance(_connectionFactory).As<IConnectionFactory>().SingleInstance();
         builder.RegisterInstance((IAuditService)auditService).As<IAuditService>().SingleInstance();
+        builder.RegisterInstance((ITemporalContext)new SystemTemporalContext()).As<ITemporalContext>().SingleInstance();
         builder.RegisterType<PayrollProfileRepository>().As<IPayrollProfileRepository>().InstancePerLifetimeScope();
         await using var container = builder.Build();
 
@@ -385,6 +386,14 @@ public sealed class PayrollGateTests : IDisposable
             new { RunId = runId1, EmpId = hired.EmploymentId });
 
         Assert.Equal(0, resultCount1);
+
+        // Run 1 is CALCULATED — still in-flight for the context. Discard it so a new run
+        // can be initiated for the same context (ADR-017 Addendum A per-context in-flight
+        // guard). Cancel-from-Calculated is a clean discard: no ledger was posted.
+        await _runService.CancelRunAsync(new CancelPayrollRunCommand
+        {
+            RunId = runId1, CancelledBy = userId, Reason = "Gate test: discard run 1 before run 2"
+        });
 
         // -------- Clear the onboarding gate --------
         await _profileRepo.SetBlockingTasksClearedAsync(hired.EmploymentId, userId);
