@@ -225,7 +225,7 @@ public sealed class AccumulatorQueryService
             WHERE  ai.accumulator_definition_id = @DefinitionId
               AND  ai.employment_id             = @EmploymentId
               AND  pp.period_year               = @Year
-            ORDER BY ai.impact_timestamp ASC
+            ORDER BY ai.impact_timestamp ASC, ai.apply_sequence ASC, ai.accumulator_impact_id ASC
             """;
         using var conn = _connectionFactory.CreateConnection();
         var raws = (await conn.QueryAsync(sql,
@@ -346,7 +346,7 @@ public sealed class AccumulatorQueryService
             WHERE  ai.employment_id         = @EmploymentId
               AND  ad.accumulator_family_id = @FamilyId
               AND  pp.period_year           = @Year
-            ORDER BY ai.impact_timestamp ASC
+            ORDER BY ai.impact_timestamp ASC, ai.apply_sequence ASC, ai.accumulator_impact_id ASC
             """;
         using var conn = _connectionFactory.CreateConnection();
         var raws = (await conn.QueryAsync(sql,

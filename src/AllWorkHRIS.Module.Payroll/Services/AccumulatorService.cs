@@ -35,6 +35,11 @@ public sealed class AccumulatorService : IAccumulatorService
         // Single transaction for the entire employee — any mid-chain failure rolls back all layers.
         using var uow = new UnitOfWork(_connectionFactory);
 
+        // 0-based ordinal across every impact this apply posts (earnings → deductions →
+        // taxes → contributions). All share `now`, so this is the impact-trail tiebreaker
+        // for a stable running balance (Phase 12.5.5).
+        var sequence = 0;
+
         foreach (var line in earningsLines.Where(l => l.AccumulatorImpactFlag))
         {
             // Resolve the accumulator via the explicit earnings_code link, not by
@@ -43,7 +48,7 @@ public sealed class AccumulatorService : IAccumulatorService
             // No link => the earnings code does not accumulate (Phase 12.5.4).
             var def = await _accumulatorRepo.GetDefinitionForEarningsAsync(line.EarningsCode, asOf);
             if (def is null) continue;
-            await ApplyChainAsync(def, line.CalculatedAmount, line.EarningsResultLineId, result, runId, now, uow);
+            await ApplyChainAsync(def, line.CalculatedAmount, line.EarningsResultLineId, result, runId, now, sequence++, uow);
             ct.ThrowIfCancellationRequested();
         }
 
@@ -55,7 +60,7 @@ public sealed class AccumulatorService : IAccumulatorService
             // No link => the deduction does not accumulate.
             var def = await _accumulatorRepo.GetDefinitionForDeductionAsync(line.DeductionCode, asOf);
             if (def is null) continue;
-            await ApplyChainAsync(def, line.CalculatedAmount, line.DeductionResultLineId, result, runId, now, uow);
+            await ApplyChainAsync(def, line.CalculatedAmount, line.DeductionResultLineId, result, runId, now, sequence++, uow);
             ct.ThrowIfCancellationRequested();
         }
 
@@ -63,7 +68,7 @@ public sealed class AccumulatorService : IAccumulatorService
         {
             var def = await _accumulatorRepo.GetDefinitionByCodeAsync(line.TaxCode, asOf);
             if (def is null) continue;
-            await ApplyChainAsync(def, line.CalculatedAmount, line.TaxResultLineId, result, runId, now, uow);
+            await ApplyChainAsync(def, line.CalculatedAmount, line.TaxResultLineId, result, runId, now, sequence++, uow);
             ct.ThrowIfCancellationRequested();
         }
 
@@ -71,7 +76,7 @@ public sealed class AccumulatorService : IAccumulatorService
         {
             var def = await _accumulatorRepo.GetDefinitionByCodeAsync(line.ContributionCode, asOf);
             if (def is null) continue;
-            await ApplyChainAsync(def, line.CalculatedAmount, line.EmployerContributionResultLineId, result, runId, now, uow);
+            await ApplyChainAsync(def, line.CalculatedAmount, line.EmployerContributionResultLineId, result, runId, now, sequence++, uow);
             ct.ThrowIfCancellationRequested();
         }
 
@@ -167,7 +172,7 @@ public sealed class AccumulatorService : IAccumulatorService
 
     private async Task ApplyChainAsync(
         AccumulatorDefinition def, decimal delta, Guid sourceLineId,
-        EmployeePayrollResult result, Guid runId, DateTimeOffset now, IUnitOfWork uow)
+        EmployeePayrollResult result, Guid runId, DateTimeOffset now, int sequence, IUnitOfWork uow)
     {
         // Read current balance — if absent this is the first contribution for this scope/period
         var existingBalance = await _accumulatorRepo.GetBalanceAsync(
@@ -204,6 +209,7 @@ public sealed class AccumulatorService : IAccumulatorService
             CorrectionFlag           = false,
             PriorAccumulatorImpactId = null,
             Notes                    = null,
+            ApplySequence            = sequence,
             ImpactTimestamp          = now,
             CreatedTimestamp         = now,
             UpdatedTimestamp         = now

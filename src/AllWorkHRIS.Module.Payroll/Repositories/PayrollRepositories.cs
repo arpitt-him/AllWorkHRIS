@@ -716,7 +716,7 @@ public sealed class AccumulatorRepository : IAccumulatorRepository
                 posting_direction_id, scope_type_id, scope_object_id,
                 jurisdiction_id, rule_pack_id, rule_version_id,
                 retroactive_flag, reversal_flag, correction_flag,
-                prior_accumulator_impact_id, notes,
+                prior_accumulator_impact_id, notes, apply_sequence,
                 impact_timestamp, created_timestamp, updated_timestamp
             ) VALUES (
                 @AccumulatorImpactId, @AccumulatorDefinitionId,
@@ -727,7 +727,7 @@ public sealed class AccumulatorRepository : IAccumulatorRepository
                 @PostingDirectionId, @ScopeTypeId, @ScopeObjectId,
                 @JurisdictionId, @RulePackId, @RuleVersionId,
                 @RetroactiveFlag, @ReversalFlag, @CorrectionFlag,
-                @PriorAccumulatorImpactId, @Notes,
+                @PriorAccumulatorImpactId, @Notes, @ApplySequence,
                 @ImpactTimestamp, @CreatedTimestamp, @UpdatedTimestamp
             )
             """;
@@ -885,7 +885,7 @@ public sealed class AccumulatorRepository : IAccumulatorRepository
                 posting_direction_id, scope_type_id, scope_object_id,
                 jurisdiction_id, rule_pack_id, rule_version_id,
                 retroactive_flag, reversal_flag, correction_flag,
-                prior_accumulator_impact_id, notes,
+                prior_accumulator_impact_id, notes, apply_sequence,
                 impact_timestamp, created_timestamp, updated_timestamp
             ) VALUES (
                 @AccumulatorImpactId, @AccumulatorDefinitionId,
@@ -896,7 +896,7 @@ public sealed class AccumulatorRepository : IAccumulatorRepository
                 @PostingDirectionId, @ScopeTypeId, @ScopeObjectId,
                 @JurisdictionId, @RulePackId, @RuleVersionId,
                 @RetroactiveFlag, @ReversalFlag, @CorrectionFlag,
-                @PriorAccumulatorImpactId, @Notes,
+                @PriorAccumulatorImpactId, @Notes, @ApplySequence,
                 @ImpactTimestamp, @CreatedTimestamp, @UpdatedTimestamp
             )
             """;

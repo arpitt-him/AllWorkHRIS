@@ -26,6 +26,7 @@ public sealed record AccumulatorImpact
     public bool        CorrectionFlag              { get; init; }
     public Guid?       PriorAccumulatorImpactId    { get; init; }
     public string?     Notes                       { get; init; }
+    public int         ApplySequence               { get; init; } // 0-based position within one ApplyAsync (impact-trail tiebreaker; Phase 12.5.5)
     public DateTimeOffset ImpactTimestamp          { get; init; }
     public DateTimeOffset CreatedTimestamp         { get; init; }
     public DateTimeOffset UpdatedTimestamp         { get; init; }
