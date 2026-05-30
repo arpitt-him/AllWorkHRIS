@@ -84,6 +84,23 @@ public sealed class PayrollRunRepository : IPayrollRunRepository
             new { PeriodId = periodId });
     }
 
+    public async Task<IReadOnlyList<PayrollRun>> GetRunsInTransientStatesAsync()
+    {
+        // Host-startup recovery (ADR-017 / Phase 12.5.3). Transient states matched
+        // by code so a seed re-order can't break recovery. Oldest first so a
+        // recovered backlog is processed in creation order.
+        const string sql = """
+            SELECT r.* FROM payroll_run r
+            WHERE r.run_status_id IN (
+                SELECT id FROM lkp_run_status
+                WHERE  code IN ('CALCULATING', 'APPROVING', 'RELEASING')
+            )
+            ORDER BY r.creation_timestamp
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        return (await conn.QueryAsync<PayrollRun>(sql)).AsList();
+    }
+
     public async Task<Guid> InsertAsync(PayrollRun run)
     {
         const string sql = """

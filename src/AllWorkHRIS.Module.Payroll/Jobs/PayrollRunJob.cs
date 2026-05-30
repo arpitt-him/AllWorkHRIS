@@ -45,6 +45,11 @@ public sealed class PayrollRunJob : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // ADR-017 / Phase 12.5.3: recover runs orphaned in a transient state by a
+        // host restart (their in-memory queue entry was lost) before resuming
+        // normal queue processing — closes the "Releasing/Approving limbo" class.
+        await RecoverOrphanedRunsAsync(stoppingToken);
+
         await foreach (var runId in _queue.Reader.ReadAllAsync(stoppingToken))
         {
             try
@@ -59,6 +64,68 @@ public sealed class PayrollRunJob : BackgroundService
             {
                 _logger.LogError(ex, "Unhandled error processing payroll run {RunId}", runId);
             }
+        }
+    }
+
+    /// <summary>
+    /// Host-startup recovery (ADR-017 / Phase 12.5.3). A hard restart loses the
+    /// in-memory queue, leaving runs stuck in a transient state:
+    ///   • APPROVING / RELEASING are idempotent (ProcessApproveAsync skips
+    ///     already-posted results; release is a plain status flip), so we
+    ///     re-enqueue them and they finish on this boot.
+    ///   • CALCULATING is NOT idempotent — the calc loop creates a fresh result
+    ///     set each pass and there is no physical result-discard (cancel is a
+    ///     logical status flip). Re-running would orphan a partial result set and
+    ///     risk double-posting at approval, so we fail it instead. FAILED does not
+    ///     block a new Regular run for the period, so the operator re-initiates.
+    /// Wrapped so a recovery failure never stops normal queue processing.
+    /// </summary>
+    private async Task RecoverOrphanedRunsAsync(CancellationToken ct)
+    {
+        try
+        {
+            await using var scope = _rootScope.BeginLifetimeScope();
+            var runRepo = scope.Resolve<IPayrollRunRepository>();
+            var lookup  = scope.Resolve<ILookupCache>();
+
+            var orphans = await runRepo.GetRunsInTransientStatesAsync();
+            if (orphans.Count == 0) return;
+
+            var approvingStatus = lookup.GetId(LookupTables.RunStatus, "APPROVING");
+            var releasingStatus = lookup.GetId(LookupTables.RunStatus, "RELEASING");
+            var failedStatus    = lookup.GetId(LookupTables.RunStatus, "FAILED");
+
+            int requeued = 0, failedCalc = 0;
+            foreach (var run in orphans)
+            {
+                ct.ThrowIfCancellationRequested();
+
+                if (run.RunStatusId == approvingStatus || run.RunStatusId == releasingStatus)
+                {
+                    _queue.Writer.TryWrite(run.RunId);
+                    requeued++;
+                    _logger.LogInformation(
+                        "Recovery: re-enqueued {Status} run {RunId} after host restart.",
+                        lookup.GetCode(LookupTables.RunStatus, run.RunStatusId), run.RunId);
+                }
+                else // CALCULATING — see method remarks; cannot be safely resumed.
+                {
+                    await runRepo.UpdateStatusAsync(run.RunId, failedStatus, run.InitiatedBy);
+                    failedCalc++;
+                    _logger.LogWarning(
+                        "Recovery: run {RunId} was mid-CALCULATING at restart and cannot be safely "
+                        + "resumed; marked FAILED — re-initiate the run for this period.", run.RunId);
+                }
+            }
+
+            _logger.LogInformation(
+                "Host-startup payroll recovery: {Requeued} run(s) re-enqueued, {FailedCalc} interrupted calc run(s) failed.",
+                requeued, failedCalc);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Host-startup payroll run recovery failed; continuing to normal queue processing.");
         }
     }
 

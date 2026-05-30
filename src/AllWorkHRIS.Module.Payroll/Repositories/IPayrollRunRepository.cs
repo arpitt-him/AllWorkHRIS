@@ -30,6 +30,15 @@ public interface IPayrollRunRepository
     /// period that already has an approved Regular run.
     /// </summary>
     Task<PayrollRun?> GetActiveRegularRunForPeriodAsync(Guid periodId);
+
+    /// <summary>
+    /// Host-startup recovery (ADR-017 / Phase 12.5.3): runs left in a transient
+    /// state (CALCULATING / APPROVING / RELEASING) by a hard restart, whose
+    /// in-memory queue entry was lost. The background job re-enqueues the
+    /// idempotent ones (APPROVING / RELEASING) and fails an interrupted
+    /// CALCULATING run. Matched by status code, not id.
+    /// </summary>
+    Task<IReadOnlyList<PayrollRun>> GetRunsInTransientStatesAsync();
     Task<Guid> InsertAsync(PayrollRun run);
     Task UpdateStatusAsync(Guid runId, int statusId, Guid updatedBy);
     Task SetRunTimestampsAsync(Guid runId, DateTimeOffset startTimestamp, DateTimeOffset? endTimestamp, Guid updatedBy);
