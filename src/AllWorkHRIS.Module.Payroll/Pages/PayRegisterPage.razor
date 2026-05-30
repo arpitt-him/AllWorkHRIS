@@ -7,6 +7,7 @@
 @using Microsoft.AspNetCore.Hosting
 @using Microsoft.Extensions.Hosting
 @using AllWorkHRIS.Module.Payroll.Queries
+@using AllWorkHRIS.Core.Security
 @using System.Text
 @using Microsoft.JSInterop
 @using Syncfusion.Blazor.Inputs
@@ -727,10 +728,10 @@
         _statusById = LookupCache.GetAll(LookupTables.RunStatus).ToDictionary(e => e.Id);
 
         var auth  = await AuthStateProvider.GetAuthenticationStateAsync();
-        _isBenefitsAdmin = auth.User.IsInRole("BenefitsAdmin") &&
-                           !auth.User.IsInRole("PayrollOperator") &&
-                           !auth.User.IsInRole("PayrollAdmin") &&
-                           !auth.User.IsInRole("HrisAdmin");
+        // HasAnyRole (direct claim inspection) instead of IsInRole(), which is unreliable
+        // with Keycloak realm roles when MapInboundClaims = false (Phase 12.5.7 / ToDo #1).
+        _isBenefitsAdmin = auth.User.HasAnyRole("BenefitsAdmin") &&
+                           !auth.User.HasAnyRole("PayrollOperator", "PayrollAdmin", "HrisAdmin");
 
         var entityId = SessionState.SelectedLegalEntityId;
         if (entityId.HasValue)
