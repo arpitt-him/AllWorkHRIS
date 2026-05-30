@@ -15,6 +15,13 @@ public interface IPayrollRunService
     Task ReleaseRunAsync(ReleasePayrollRunCommand command);
     Task CancelRunAsync(CancelPayrollRunCommand command);
 
+    /// <summary>
+    /// Re-enqueue a run stuck in an idempotent transient state (APPROVING or
+    /// RELEASING) so the background job picks it up again without a host
+    /// restart. The on-demand twin of PayrollRunJob's startup recovery.
+    /// </summary>
+    Task ResumeRunAsync(ResumePayrollRunCommand command);
+
     Task<PayrollRun?> GetRunByIdAsync(Guid runId);
     Task<IReadOnlyList<PayrollRun>> GetRunsByContextAsync(Guid payrollContextId);
 }

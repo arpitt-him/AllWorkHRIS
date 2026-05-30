@@ -181,9 +181,22 @@
                                     Cancel Run
                                 </button>
                             }
+                            @* Recovery affordance: a run parked in an idempotent transient state
+                               (APPROVING / RELEASING) can be re-enqueued on demand — the in-UI twin
+                               of host-startup recovery, so an operator isn't stuck waiting for a restart. *@
+                            @if (IsResumable(_run.RunStatusId))
+                            {
+                                <button class="btn-primary" @onclick="ResumeAsync" disabled="@_submitting">
+                                    @(_submitting ? "Working…" : "Resume")
+                                </button>
+                                <span style="font-size:var(--font-size-sm);color:#6B7280;align-self:center;">
+                                    Re-runs the background job for a run stuck in this state.
+                                </span>
+                            }
                             @if (_run.RunStatusId != _draftStatus
                                  && _run.RunStatusId != _calculatedStatus
-                                 && _run.RunStatusId != _approvedStatus)
+                                 && _run.RunStatusId != _approvedStatus
+                                 && !IsResumable(_run.RunStatusId))
                             {
                                 <span style="font-size:var(--font-size-sm);color:#6B7280;">No actions available for this status.</span>
                             }
@@ -318,8 +331,25 @@
     private Dictionary<int, LookupEntry> _statusById       = new();
     private Dictionary<int, LookupEntry> _resultStatusById = new();
 
+    // Drives the progress panel — only CALCULATING and APPROVING emit progress
+    // frames worth charting. RELEASING is a fast status flip with no frames.
     private bool IsInBackgroundJob(int? statusId)
         => statusId == _calculatingStatus || statusId == _approvingStatus;
+
+    // Drives auto-refresh polling: any transient state the background job will
+    // move off of. RELEASING is included here (but not above) so the page
+    // self-advances to RELEASED instead of stalling on a stale "Releasing"
+    // frame the way it did before Phase 12.5.x.
+    private bool IsTransient(int? statusId)
+        => statusId == _calculatingStatus
+           || statusId == _approvingStatus
+           || statusId == _releasingStatus;
+
+    // A run parked in an idempotent transient state can be re-enqueued from the
+    // UI (Phase 12.5.x). CALCULATING is excluded — it is not idempotent and a
+    // re-run would orphan a partial result set (matches recovery's fail-it rule).
+    private bool IsResumable(int? statusId)
+        => statusId == _approvingStatus || statusId == _releasingStatus;
 
     // Results exist (and are viewable) once the run has moved past CALCULATING.
     private bool HasResultsToShow(int? statusId)
@@ -358,7 +388,7 @@
             if (HasResultsToShow(_run.RunStatusId))
                 await LoadResultsAsync();
 
-            if (IsInBackgroundJob(_run.RunStatusId))
+            if (IsTransient(_run.RunStatusId))
                 StartPolling();
         }
         _loading = false;
@@ -415,6 +445,20 @@
         finally { _submitting = false; }
     }
 
+    private async Task ResumeAsync()
+    {
+        _submitting   = true;
+        _errorMessage = null;
+        try
+        {
+            await RunService.ResumeRunAsync(new ResumePayrollRunCommand
+                { RunId = RunId, ResumedBy = _currentUserId });
+            await LoadRunAsync();
+        }
+        catch (Exception ex) { _errorMessage = ex.Message; }
+        finally { _submitting = false; }
+    }
+
     private async Task CancelAsync()
     {
         _submitting   = true;
@@ -445,7 +489,7 @@
             {
                 _run = await RunService.GetRunByIdAsync(RunId);
                 await InvokeAsync(StateHasChanged);
-                if (!IsInBackgroundJob(_run?.RunStatusId))
+                if (!IsTransient(_run?.RunStatusId))
                 {
                     if (HasResultsToShow(_run?.RunStatusId))
                         await LoadResultsAsync();

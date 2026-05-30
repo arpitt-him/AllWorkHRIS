@@ -168,6 +168,49 @@ public sealed class PayrollRunService : IPayrollRunService
         _logger.LogInformation("Run {RunId} release initiated by {UserId}", command.RunId, command.ReleasedBy);
     }
 
+    public async Task ResumeRunAsync(ResumePayrollRunCommand command)
+    {
+        // ADR-017 / Phase 12.5.x: in-UI counterpart to PayrollRunJob's
+        // host-startup recovery. Only the idempotent transient states are
+        // resumable — APPROVING (per-result post is skip-if-already-posted)
+        // and RELEASING (a plain status flip). CALCULATING is deliberately
+        // excluded: the calc pass is not idempotent and re-running would
+        // orphan a partial result set (same reasoning that makes recovery
+        // FAIL an interrupted calc rather than resume it).
+        //
+        // No status change here — the run is already in the transient state;
+        // we just re-enqueue. The queue has a single consumer, so a re-enqueue
+        // is serialized behind any genuinely-running job and the job's own
+        // idempotency guards make the second pass a no-op.
+        var run = await RequireRunAsync(command.RunId);
+
+        var approvingId = StatusId("APPROVING");
+        var releasingId = StatusId("RELEASING");
+        if (run.RunStatusId != approvingId && run.RunStatusId != releasingId)
+        {
+            var currentCode = _lookup.GetCode(LookupTables.RunStatus, run.RunStatusId);
+            throw new InvalidOperationException(
+                $"Run {command.RunId} can only be resumed from APPROVING or RELEASING. Current: {currentCode}");
+        }
+
+        _queue.Writer.TryWrite(command.RunId);
+
+        var statusCode = _lookup.GetCode(LookupTables.RunStatus, run.RunStatusId);
+        _logger.LogInformation("Run {RunId} resumed (re-enqueued from {Status}) by {UserId}",
+            command.RunId, statusCode, command.ResumedBy);
+
+        await _auditService.LogAsync(new AuditEventRecord(
+            EventType:       "STATUS_CHANGE",
+            EntityType:      "PayrollRun",
+            EntityId:        command.RunId,
+            ModuleName:      "PAYROLL",
+            ChangeSummary:   $"Payroll run manually resumed (re-enqueued from {statusCode})",
+            ParentEntityType: "PayrollContext",
+            ParentEntityId:  run.PayrollContextId,
+            AfterJson:       JsonSerializer.Serialize(new { run_status = statusCode, resumed = true })
+        ));
+    }
+
     public async Task CancelRunAsync(CancelPayrollRunCommand command)
     {
         // ADR-017 (Phase 12.5.3): cancel-from-Calculated is now a clean
