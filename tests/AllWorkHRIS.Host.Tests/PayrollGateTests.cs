@@ -17,6 +17,7 @@ using AllWorkHRIS.Module.Payroll.Domain.Run;
 using AllWorkHRIS.Module.Payroll.Jobs;
 using AllWorkHRIS.Module.Payroll.Repositories;
 using AllWorkHRIS.Module.Payroll.Services;
+using AllWorkHRIS.Host.Tests.TestSupport;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -485,27 +486,10 @@ public sealed class PayrollGateTests : IDisposable
 
         var progress = new TestRunProgressNotifier();
 
-        var builder = new ContainerBuilder();
-        builder.RegisterInstance(_connectionFactory).As<IConnectionFactory>().SingleInstance();
-        builder.RegisterInstance((IAuditService)new NullAuditService()).As<IAuditService>().SingleInstance();
-        builder.RegisterInstance((ITemporalContext)new SystemTemporalContext()).As<ITemporalContext>().SingleInstance();
-        builder.RegisterInstance(NullLogger<CalculationEngine>.Instance).As<ILogger<CalculationEngine>>().SingleInstance();
-        builder.RegisterInstance(new NullPayrollPipelineService()).As<IPayrollPipelineService>().SingleInstance();
-        builder.RegisterInstance(new NullEmploymentJurisdictionLookup()).As<IEmploymentJurisdictionLookup>().SingleInstance();
-
-        builder.RegisterType<PayrollRunRepository>()                  .As<IPayrollRunRepository>()                  .InstancePerLifetimeScope();
-        builder.RegisterType<PayrollRunResultSetRepository>()         .As<IPayrollRunResultSetRepository>()         .InstancePerLifetimeScope();
-        builder.RegisterType<EmployeePayrollResultRepository>()       .As<IEmployeePayrollResultRepository>()       .InstancePerLifetimeScope();
-        builder.RegisterType<PayrollProfileRepository>()              .As<IPayrollProfileRepository>()              .InstancePerLifetimeScope();
-        builder.RegisterType<PayrollContextRepository>()              .As<IPayrollContextRepository>()              .InstancePerLifetimeScope();
-        builder.RegisterType<PayrollCompensationSnapshotRepository>() .As<IPayrollCompensationSnapshotRepository>() .InstancePerLifetimeScope();
-        builder.RegisterType<ResultLineRepository>()                  .As<IResultLineRepository>()                  .InstancePerLifetimeScope();
-        builder.RegisterType<AccumulatorRepository>()                 .As<IAccumulatorRepository>()                 .InstancePerLifetimeScope();
-        builder.RegisterType<EarningsCodeRepository>()                .As<IEarningsCodeRepository>()                .InstancePerLifetimeScope();
-        builder.RegisterType<CalculationEngine>()                     .As<ICalculationEngine>()                     .InstancePerLifetimeScope();
-        builder.RegisterType<AccumulatorService>()                    .As<IAccumulatorService>()                    .InstancePerLifetimeScope();
-
-        await using var container = builder.Build();
+        // Shared composition (TestSupport/PayrollRunTestContainer) registers every
+        // dependency PayrollRunJob/CalculationEngine pull, including the cross-module
+        // collaborators stubbed for a payroll-only test. See ToDo #36.
+        await using var container = PayrollRunTestContainer.Build(_connectionFactory, _lookupCache);
 
         var job = new PayrollRunJob(
             channel,
