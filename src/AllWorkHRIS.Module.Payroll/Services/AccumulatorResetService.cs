@@ -28,49 +28,19 @@ public sealed class AccumulatorResetService : IAccumulatorResetService
 
     public async Task DetectAndRecordResetsAsync(Guid payrollContextId, DateOnly payDate, CancellationToken ct = default)
     {
-        // Audit materialization must never block the run that triggered it.
+        // Automatic, run-adjacent trigger (ADR-022 §D3): when a run's pay date crosses a
+        // tax-year boundary, close the prior boundary ENTITY-WIDE — every participant in
+        // the run's legal entity, not just its pay group — so the close is definitive in a
+        // single pass (no per-context running total). Must never block the triggering run.
         try
         {
-            var defs = await _accumulatorRepo.GetAllActiveDefinitionsAsync(payDate);
-            var now  = _wallClock.UtcNow;
-
-            foreach (var def in defs.Where(d => d.ResetType is "CALENDAR_YEAR" or "PLAN_YEAR"))
+            var legalEntityId = await _accumulatorRepo.GetLegalEntityIdForContextAsync(payrollContextId);
+            if (legalEntityId is null)
             {
-                ct.ThrowIfCancellationRequested();
-
-                var b = ResetBoundary.Prior(def.ResetType, def.PlanYearStartMonth, def.PlanYearStartDay, payDate);
-                var closings = await _accumulatorRepo.GetClosingBalancesForBoundaryAsync(
-                    def.AccumulatorDefinitionId, payrollContextId, b.Start, b.End);
-
-                foreach (var c in closings)
-                {
-                    if (await _accumulatorRepo.ResetAuditExistsAsync(def.AccumulatorDefinitionId, c.ParticipantId, b.Year))
-                        continue;
-
-                    await _accumulatorRepo.InsertResetAuditAsync(new AccumulatorResetAudit
-                    {
-                        AccumulatorResetAuditId = Guid.NewGuid(),
-                        AccumulatorDefinitionId = def.AccumulatorDefinitionId,
-                        AccumulatorFamilyId     = def.AccumulatorFamilyId,
-                        ParticipantId           = c.ParticipantId,
-                        LegalEntityId           = c.LegalEntityId,
-                        ScopeTypeId             = def.ScopeTypeId,
-                        ResetType               = def.ResetType,
-                        ResetBoundaryYear       = b.Year,
-                        ResetDate               = b.ResetDate,
-                        ClosingBalance          = c.ClosingBalance,
-                        OpenedBy                = "SYSTEM",
-                        ResetSource             = "AUTOMATIC",
-                        Notes                   = null,
-                        CreatedBy               = SystemActor,
-                        CreationTimestamp       = now
-                    });
-
-                    _logger.LogInformation(
-                        "Reset audit recorded: {Code} participant {Participant} boundary {Year} closing {Balance:F2}",
-                        def.AccumulatorCode, c.ParticipantId, b.Year, c.ClosingBalance);
-                }
+                _logger.LogWarning("Reset detection: no legal entity for context {Context}; skipping.", payrollContextId);
+                return;
             }
+            await CloseBoundaryAsync(legalEntityId.Value, payDate, "SYSTEM", "AUTOMATIC", ct);
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex)
@@ -78,6 +48,64 @@ public sealed class AccumulatorResetService : IAccumulatorResetService
             _logger.LogError(ex,
                 "Reset detection failed for context {Context} payDate {PayDate}; continuing.",
                 payrollContextId, payDate);
+        }
+    }
+
+    public async Task CloseEntityYearAsync(Guid legalEntityId, int boundaryYear, Guid actor, CancellationToken ct = default)
+    {
+        // Manual, operator-triggered entity-wide close (ADR-022 §D3, dual-trigger): records
+        // the entity's closing snapshot for boundaryYear (opened_by = actor, MANUAL).
+        // Idempotent — boundaries already closed (e.g. by the automatic trigger) are skipped.
+        // A pay date at the start of the FOLLOWING year selects boundaryYear as the prior boundary.
+        var justAfterBoundary = new DateOnly(boundaryYear + 1, 1, 1);
+        await CloseBoundaryAsync(legalEntityId, justAfterBoundary, actor.ToString(), "MANUAL", ct);
+    }
+
+    // Shared entity-wide close: for each reset-eligible accumulator, materialize the
+    // just-closed boundary's per-participant closing snapshots across the whole legal
+    // entity, idempotent per (definition, participant, boundary).
+    private async Task CloseBoundaryAsync(
+        Guid legalEntityId, DateOnly payDate, string openedBy, string source, CancellationToken ct)
+    {
+        var defs = await _accumulatorRepo.GetAllActiveDefinitionsAsync(payDate);
+        var now  = _wallClock.UtcNow;
+
+        foreach (var def in defs.Where(d => d.ResetType is "CALENDAR_YEAR" or "PLAN_YEAR"))
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var b = ResetBoundary.Prior(def.ResetType, def.PlanYearStartMonth, def.PlanYearStartDay, payDate);
+            var closings = await _accumulatorRepo.GetClosingBalancesForBoundaryAsync(
+                def.AccumulatorDefinitionId, legalEntityId, b.Start, b.End);
+
+            foreach (var c in closings)
+            {
+                if (await _accumulatorRepo.ResetAuditExistsAsync(def.AccumulatorDefinitionId, c.ParticipantId, b.Year))
+                    continue;
+
+                await _accumulatorRepo.InsertResetAuditAsync(new AccumulatorResetAudit
+                {
+                    AccumulatorResetAuditId = Guid.NewGuid(),
+                    AccumulatorDefinitionId = def.AccumulatorDefinitionId,
+                    AccumulatorFamilyId     = def.AccumulatorFamilyId,
+                    ParticipantId           = c.ParticipantId,
+                    LegalEntityId           = c.LegalEntityId,
+                    ScopeTypeId             = def.ScopeTypeId,
+                    ResetType               = def.ResetType,
+                    ResetBoundaryYear       = b.Year,
+                    ResetDate               = b.ResetDate,
+                    ClosingBalance          = c.ClosingBalance,
+                    OpenedBy                = openedBy,
+                    ResetSource             = source,
+                    Notes                   = null,
+                    CreatedBy               = SystemActor,
+                    CreationTimestamp       = now
+                });
+
+                _logger.LogInformation(
+                    "Reset audit recorded ({Source}): {Code} participant {Participant} boundary {Year} closing {Balance:F2}",
+                    source, def.AccumulatorCode, c.ParticipantId, b.Year, c.ClosingBalance);
+            }
         }
     }
 

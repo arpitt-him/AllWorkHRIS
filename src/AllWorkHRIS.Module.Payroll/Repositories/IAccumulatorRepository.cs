@@ -78,12 +78,18 @@ public interface IAccumulatorRepository
 
     /// <summary>
     /// Closing balances for one reset-eligible definition at a boundary, per participant
-    /// enrolled in the given payroll context: SUM(accumulator_balance.current_value) over
-    /// the periods whose dates fall within [boundaryStart, boundaryEnd]. Drives the
-    /// automatic reset snapshot; participants with a zero/absent balance are omitted.
+    /// across the whole <b>legal entity</b> (ADR-022 / Phase 12.10.2 — entity-wide, not
+    /// per-context): SUM(accumulator_balance.current_value) over the periods that fall in
+    /// [boundaryStart, boundaryEnd] — by <c>pay_date</c> for PAY_DATE accumulators
+    /// (constructive receipt), by period dates for WORK_PERIOD. Participants with a
+    /// zero/absent balance are omitted.
     /// </summary>
     Task<IReadOnlyList<ResetClosingBalance>> GetClosingBalancesForBoundaryAsync(
-        Guid accumulatorDefinitionId, Guid payrollContextId, DateOnly boundaryStart, DateOnly boundaryEnd);
+        Guid accumulatorDefinitionId, Guid legalEntityId, DateOnly boundaryStart, DateOnly boundaryEnd);
+
+    /// Resolves the legal entity that owns a payroll context (used to scope the
+    /// entity-wide year-close from the run that triggered it).
+    Task<Guid?> GetLegalEntityIdForContextAsync(Guid payrollContextId);
 }
 
 /// <summary>Per-participant closing balance for a reset boundary (ADR-020 / Phase 12.9).</summary>

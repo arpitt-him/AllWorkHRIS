@@ -909,35 +909,49 @@ public sealed class AccumulatorRepository : IAccumulatorRepository
     }
 
     public async Task<IReadOnlyList<ResetClosingBalance>> GetClosingBalancesForBoundaryAsync(
-        Guid accumulatorDefinitionId, Guid payrollContextId, DateOnly boundaryStart, DateOnly boundaryEnd)
+        Guid accumulatorDefinitionId, Guid legalEntityId, DateOnly boundaryStart, DateOnly boundaryEnd)
     {
-        // Sum the boundary's period balances per participant enrolled in the context.
-        // Period containment ([start,end]) buckets each period into the boundary it
-        // belongs to; participants with a net-zero/absent balance are skipped.
+        // ADR-022 / Phase 12.10.2: ENTITY-WIDE close on a PAY-DATE basis. Sums each
+        // participant's per-period balances that fall in the boundary window — for
+        // PAY_DATE accumulators by pay_date (constructive receipt), for WORK_PERIOD by
+        // period dates. Scoped to the whole legal entity (all pay groups), so the close
+        // is a single definitive pass, not a per-context running total. The date window
+        // [start,end] also handles off-cycle PLAN_YEAR boundaries. Net-zero/absent skipped.
         const string sql = """
             SELECT ab.participant_id     AS ParticipantId,
                    e.legal_entity_id     AS LegalEntityId,
                    SUM(ab.current_value) AS ClosingBalance
             FROM   accumulator_balance ab
+            JOIN   accumulator_definition ad ON ad.accumulator_definition_id = ab.accumulator_definition_id
             JOIN   payroll_period   pp   ON pp.period_id        = ab.calendar_context_id
-            JOIN   payroll_profile  prof ON prof.employment_id  = ab.participant_id
             JOIN   employment       e    ON e.employment_id     = ab.participant_id
             WHERE  ab.accumulator_definition_id = @DefinitionId
-              AND  prof.payroll_context_id      = @PayrollContextId
+              AND  e.legal_entity_id            = @LegalEntityId
               AND  ab.participant_id IS NOT NULL
-              AND  pp.period_start_date >= @BoundaryStart
-              AND  pp.period_end_date   <= @BoundaryEnd
+              AND  (
+                      (ad.year_basis = 'PAY_DATE'
+                          AND pp.pay_date >= @BoundaryStart AND pp.pay_date <= @BoundaryEnd)
+                   OR (ad.year_basis = 'WORK_PERIOD'
+                          AND pp.period_start_date >= @BoundaryStart AND pp.period_end_date <= @BoundaryEnd)
+                  )
             GROUP BY ab.participant_id, e.legal_entity_id
             HAVING SUM(ab.current_value) <> 0
             """;
         using var conn = _connectionFactory.CreateConnection();
         return (await conn.QueryAsync<ResetClosingBalance>(sql, new
         {
-            DefinitionId     = accumulatorDefinitionId,
-            PayrollContextId = payrollContextId,
-            BoundaryStart    = boundaryStart,
-            BoundaryEnd      = boundaryEnd
+            DefinitionId  = accumulatorDefinitionId,
+            LegalEntityId = legalEntityId,
+            BoundaryStart = boundaryStart,
+            BoundaryEnd   = boundaryEnd
         })).ToList();
+    }
+
+    public async Task<Guid?> GetLegalEntityIdForContextAsync(Guid payrollContextId)
+    {
+        const string sql = "SELECT legal_entity_id FROM payroll_context WHERE payroll_context_id = @Id";
+        using var conn = _connectionFactory.CreateConnection();
+        return await conn.QuerySingleOrDefaultAsync<Guid?>(sql, new { Id = payrollContextId });
     }
 
     public async Task<IReadOnlyDictionary<string, decimal>> GetYtdBalancesAsync(Guid employmentId, DateOnly asOf)
