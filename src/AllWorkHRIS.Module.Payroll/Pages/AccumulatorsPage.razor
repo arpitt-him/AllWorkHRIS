@@ -127,6 +127,14 @@
                             }
                         </div>
 
+                        @* YTD recency — the latest pay date reflected in these balances. *@
+                        @if (_asOfDate is not null)
+                        {
+                            <div class="text-muted" style="margin:2px 0 var(--space-2); font-size:.85rem">
+                                YTD as of <strong>@_asOfDate.Value.ToString("MMM d, yyyy")</strong>
+                            </div>
+                        }
+
                         @* Retroactivity banner *@
                         @if (_hasRetroactive)
                         {
@@ -588,6 +596,7 @@
     private IReadOnlyList<string>                          _baseNames          = [];
     private Dictionary<Guid, Dictionary<string, decimal>> _baseByEmp          = new();
     private IReadOnlyList<AccumulatorResetHistoryRow>    _resetHistory     = [];
+    private DateOnly?                                     _asOfDate;
     private AccumulatorFamilyListItem?                   _selectedFamily;
     private AccumulatorFamilyMeta?                       _familyMeta;
     private int                                          _selectedYear;
@@ -644,6 +653,7 @@
         _baseNames        = [];
         _baseByEmp        = new();
         _resetHistory     = [];
+        _asOfDate         = null;
         _hasRetroactive   = false;
         _filteredBalances   = [];
         _familySearch       = "";
@@ -673,6 +683,7 @@
         _baseNames        = [];
         _baseByEmp        = new();
         _resetHistory     = [];
+        _asOfDate         = null;
         _hasRetroactive   = false;
         _filteredBalances   = [];
         _familySearch       = "";
@@ -721,6 +732,8 @@
                       .ToDictionary(gg => gg.Key, gg => gg.Sum(x => x.YtdBalance)));
         _resetHistory     = await QueryService.GetResetHistoryAsync(
             _selectedFamily!.FamilyId, EntityId);
+        _asOfDate         = await QueryService.GetAsOfDateAsync(
+            _selectedFamily!.FamilyId, EntityId, tab.Year);
         _filteredBalances = _employeeBalances;
 
         _loadingBalances = false;

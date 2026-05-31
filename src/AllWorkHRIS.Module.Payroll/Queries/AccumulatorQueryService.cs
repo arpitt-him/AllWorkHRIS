@@ -173,6 +173,29 @@ public sealed class AccumulatorQueryService
         return years.Select(y => new AccumulatorYearTab(y, BuildYearLabel(y, resetType, planYearStartMonth))).ToList();
     }
 
+    /// The latest pay date reflected in a family's balances for the entity + (pay-date) year —
+    /// the "YTD as of …" anchor: everything with a later pay date simply hasn't been run yet.
+    /// Null when the family has no balances for that year.
+    public async Task<DateOnly?> GetAsOfDateAsync(int familyId, Guid legalEntityId, int year)
+    {
+        const string sql = """
+            SELECT MAX(pp.pay_date)
+            FROM   accumulator_balance ab
+            JOIN   accumulator_definition ad ON ad.accumulator_definition_id = ab.accumulator_definition_id
+            JOIN   payroll_period pp          ON pp.period_id = ab.calendar_context_id
+            JOIN   employment e               ON e.employment_id = ab.participant_id
+            WHERE  ab.accumulator_family_id = @FamilyId
+              AND  e.legal_entity_id        = @LegalEntityId
+              AND  ab.participant_id IS NOT NULL
+              AND  (CASE WHEN ad.year_basis = 'PAY_DATE'
+                         THEN CAST(EXTRACT(YEAR FROM pp.pay_date) AS INT)
+                         ELSE pp.period_year END) = @Year
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        return await conn.ExecuteScalarAsync<DateOnly?>(sql,
+            new { FamilyId = familyId, LegalEntityId = legalEntityId, Year = year });
+    }
+
     private static string BuildYearLabel(int year, string resetType, int? planYearStartMonth)
     {
         if (resetType != "PLAN_YEAR") return year.ToString();
