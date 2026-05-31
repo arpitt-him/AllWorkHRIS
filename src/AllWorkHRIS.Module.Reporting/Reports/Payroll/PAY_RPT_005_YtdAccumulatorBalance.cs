@@ -43,8 +43,11 @@ public sealed class PAY_RPT_005_YtdAccumulatorBalance : IReportQuery
             JOIN   employment e             ON e.employment_id = ab.participant_id
             JOIN   person     per           ON per.person_id   = e.person_id
             JOIN   payroll_period pp        ON pp.period_id    = ab.calendar_context_id
+            JOIN   accumulator_definition ad ON ad.accumulator_definition_id = ab.accumulator_definition_id
             WHERE  ab.participant_id IS NOT NULL
-              AND  pp.period_year = EXTRACT(YEAR FROM CAST(@AsOf AS date))
+              AND  (CASE WHEN ad.year_basis = 'PAY_DATE'
+                         THEN CAST(EXTRACT(YEAR FROM pp.pay_date) AS INT)
+                         ELSE pp.period_year END) = CAST(EXTRACT(YEAR FROM CAST(@AsOf AS date)) AS INT)
               AND  (@LegalEntityId IS NULL OR e.legal_entity_id = @LegalEntityId)
             GROUP BY per.legal_last_name, per.legal_first_name, e.employee_number, f.label, f.sort_order
             ORDER BY per.legal_last_name, per.legal_first_name, f.sort_order

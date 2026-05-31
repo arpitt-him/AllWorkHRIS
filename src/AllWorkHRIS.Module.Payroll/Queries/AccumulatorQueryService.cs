@@ -154,15 +154,18 @@ public sealed class AccumulatorQueryService
         int familyId, Guid legalEntityId, string resetType, int? planYearStartMonth)
     {
         const string sql = """
-            SELECT DISTINCT pp.period_year
+            SELECT DISTINCT CASE WHEN ad.year_basis = 'PAY_DATE'
+                                 THEN CAST(EXTRACT(YEAR FROM pp.pay_date) AS INT)
+                                 ELSE pp.period_year END AS accum_year
             FROM   accumulator_balance ab
+            JOIN   accumulator_definition ad ON ad.accumulator_definition_id = ab.accumulator_definition_id
             JOIN   payroll_period pp ON pp.period_id = ab.calendar_context_id
             WHERE  ab.accumulator_family_id = @FamilyId
               AND (ab.participant_id IN (
                        SELECT employment_id FROM employment WHERE legal_entity_id = @LegalEntityId
                    )
                OR  ab.employer_id = @LegalEntityId)
-            ORDER BY pp.period_year DESC
+            ORDER BY accum_year DESC
             """;
         using var conn = _connectionFactory.CreateConnection();
         var years = (await conn.QueryAsync<int>(sql,
@@ -196,7 +199,9 @@ public sealed class AccumulatorQueryService
             JOIN   person p                   ON p.person_id                 = e.person_id
             WHERE  ab.accumulator_family_id = @FamilyId
               AND  e.legal_entity_id        = @LegalEntityId
-              AND  pp.period_year           = @Year
+              AND  (CASE WHEN ad.year_basis = 'PAY_DATE'
+                         THEN CAST(EXTRACT(YEAR FROM pp.pay_date) AS INT)
+                         ELSE pp.period_year END) = @Year
               AND  ab.participant_id IS NOT NULL
             GROUP BY e.employment_id, e.employee_number,
                      p.legal_first_name, p.legal_last_name
@@ -233,7 +238,9 @@ public sealed class AccumulatorQueryService
             JOIN   employment e               ON e.employment_id             = ab.participant_id
             WHERE  ab.accumulator_family_id = @FamilyId
               AND  e.legal_entity_id        = @LegalEntityId
-              AND  pp.period_year           = @Year
+              AND  (CASE WHEN ad.year_basis = 'PAY_DATE'
+                         THEN CAST(EXTRACT(YEAR FROM pp.pay_date) AS INT)
+                         ELSE pp.period_year END) = @Year
               AND  ab.participant_id IS NOT NULL
             GROUP BY ab.participant_id, ad.accumulator_code, ad.accumulator_name
             ORDER BY ad.accumulator_name
@@ -272,7 +279,9 @@ public sealed class AccumulatorQueryService
             JOIN   payroll_period pp ON pp.period_id = pr.period_id
             WHERE  ai.accumulator_definition_id = @DefinitionId
               AND  ai.employment_id             = @EmploymentId
-              AND  pp.period_year               = @Year
+              AND  (CASE WHEN ad.year_basis = 'PAY_DATE'
+                         THEN CAST(EXTRACT(YEAR FROM pp.pay_date) AS INT)
+                         ELSE pp.period_year END) = @Year
             ORDER BY ai.impact_timestamp ASC, ai.apply_sequence ASC, ai.accumulator_impact_id ASC
             """;
         using var conn = _connectionFactory.CreateConnection();
@@ -350,7 +359,7 @@ public sealed class AccumulatorQueryService
             SELECT af.id                        AS family_id,
                    af.label                     AS family_label,
                    MAX(ad.reset_type)           AS reset_type,
-                   pp.period_year               AS current_year,
+                   @Year                        AS current_year,
                    SUM(ab.current_value)        AS ytd_balance,
                    MAX(ad.cap_amount)           AS cap_amount
             FROM   accumulator_balance ab
@@ -358,8 +367,10 @@ public sealed class AccumulatorQueryService
             JOIN   lkp_accumulator_family af ON af.id                        = ab.accumulator_family_id
             JOIN   payroll_period pp          ON pp.period_id                = ab.calendar_context_id
             WHERE  ab.participant_id = @EmploymentId
-              AND  pp.period_year    = @Year
-            GROUP BY af.id, af.label, af.sort_order, pp.period_year
+              AND  (CASE WHEN ad.year_basis = 'PAY_DATE'
+                         THEN CAST(EXTRACT(YEAR FROM pp.pay_date) AS INT)
+                         ELSE pp.period_year END) = @Year
+            GROUP BY af.id, af.label, af.sort_order
             ORDER BY af.sort_order, af.label
             """;
         using var conn = _connectionFactory.CreateConnection();
@@ -398,7 +409,9 @@ public sealed class AccumulatorQueryService
             JOIN   payroll_period pp ON pp.period_id = pr.period_id
             WHERE  ai.employment_id         = @EmploymentId
               AND  ad.accumulator_family_id = @FamilyId
-              AND  pp.period_year           = @Year
+              AND  (CASE WHEN ad.year_basis = 'PAY_DATE'
+                         THEN CAST(EXTRACT(YEAR FROM pp.pay_date) AS INT)
+                         ELSE pp.period_year END) = @Year
             ORDER BY ai.impact_timestamp ASC, ai.apply_sequence ASC, ai.accumulator_impact_id ASC
             """;
         using var conn = _connectionFactory.CreateConnection();

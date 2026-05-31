@@ -949,8 +949,16 @@ public sealed class AccumulatorRepository : IAccumulatorRepository
             JOIN   payroll_period pp          ON pp.period_id = ab.calendar_context_id
             WHERE  ab.participant_id    = @EmploymentId
               AND  ad.reset_type        = 'CALENDAR_YEAR'
-              AND  pp.period_start_date >= @YearStart
-              AND  pp.period_start_date <  @AsOf
+              AND  (
+                      -- ADR-022: pay-date basis (constructive receipt) — prior periods PAID in this tax year
+                      (ad.year_basis = 'PAY_DATE'
+                          AND CAST(EXTRACT(YEAR FROM pp.pay_date) AS INT) = @TaxYear
+                          AND pp.pay_date < @AsOf)
+                      -- work-period (accrual) basis — prior periods WORKED in this calendar year
+                   OR (ad.year_basis = 'WORK_PERIOD'
+                          AND pp.period_start_date >= @YearStart
+                          AND pp.period_start_date <  @AsOf)
+                  )
             GROUP BY ad.accumulator_code
             """;
 
@@ -958,6 +966,7 @@ public sealed class AccumulatorRepository : IAccumulatorRepository
         var rows = await conn.QueryAsync(sql, new
         {
             EmploymentId = employmentId,
+            TaxYear      = asOf.Year,
             YearStart    = new DateOnly(asOf.Year, 1, 1).ToDateTime(TimeOnly.MinValue),
             AsOf         = asOf.ToDateTime(TimeOnly.MinValue)
         });
