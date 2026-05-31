@@ -23,8 +23,9 @@ public interface IAccumulatorResetService
     /// records the closing snapshot for <paramref name="boundaryYear"/> across every
     /// participant in the legal entity (<c>opened_by</c> = the actor, <c>reset_source = MANUAL</c>).
     /// Idempotent — boundaries already closed (e.g. by the automatic trigger) are skipped.
+    /// Returns the number of newly-recorded reset rows.
     /// </summary>
-    Task CloseEntityYearAsync(Guid legalEntityId, int boundaryYear, Guid actor, CancellationToken ct = default);
+    Task<int> CloseEntityYearAsync(Guid legalEntityId, int boundaryYear, string actor, CancellationToken ct = default);
 
     /// <summary>
     /// Manual reset record (off-cycle / correction) — <c>opened_by</c> = the actor,

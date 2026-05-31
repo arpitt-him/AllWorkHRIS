@@ -1,0 +1,129 @@
+@page "/payroll/year-end"
+@layout PayrollShell
+@rendermode InteractiveServer
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using AllWorkHRIS.Core.Temporal
+@using AllWorkHRIS.Host.SharedUI
+@using AllWorkHRIS.Module.Payroll.Services
+@attribute [Authorize(Roles = "PayrollAdmin,HrisAdmin")]
+
+@inject IAccumulatorResetService ResetService
+@inject IHrisSessionState        SessionState
+@inject ITemporalContext         TemporalContext
+
+<PageTitle>Year-End — AllWork HRIS</PageTitle>
+
+<div class="accum-page">
+    <div class="accum-page-header">
+        <h2 class="page-title">Year-End &amp; Operations</h2>
+    </div>
+
+    @if (!SessionState.IsLocked)
+    {
+        <div class="panel-card">
+            <p class="text-muted">Select a legal entity to manage year-end operations.</p>
+        </div>
+    }
+    else
+    {
+        <div class="panel-card">
+            <div class="section-subheader"><span>Year-End Close</span></div>
+            <p class="text-muted" style="max-width:70ch">
+                Records the <strong>entity-wide year-end close</strong> for
+                <strong>@SessionState.SelectedLegalEntityName</strong> — capturing each accumulator's closing balance
+                for the selected tax year (the figures shown under <em>Reset History</em> on the Accumulators page).
+                Wages are counted by <strong>pay date</strong> (constructive receipt, Treas. Reg. § 1.451-2), so a
+                December period paid in January belongs to the new year. The close also runs <strong>automatically</strong>
+                when the first run of a new tax year is approved — use this to record it <strong>on demand</strong>.
+                It is idempotent: boundaries already closed are skipped.
+            </p>
+
+            <div style="display:flex; align-items:flex-end; gap:var(--space-4); flex-wrap:wrap; margin-top:var(--space-3)">
+                <label style="display:flex; flex-direction:column; gap:4px; font-size:.85rem">
+                    <span class="text-muted">Tax year to close</span>
+                    <select @bind="_year" disabled="@_busy" style="min-width:120px; padding:6px 8px">
+                        @foreach (var y in _years)
+                        {
+                            <option value="@y">@y</option>
+                        }
+                    </select>
+                </label>
+
+                @if (!_confirming)
+                {
+                    <button class="btn-primary" disabled="@_busy" @onclick="() => { _confirming = true; _result = null; }">
+                        Close out @_year…
+                    </button>
+                }
+                else
+                {
+                    <span>Close out <strong>@_year</strong> for <strong>@SessionState.SelectedLegalEntityName</strong>?</span>
+                    <button class="btn-primary"   disabled="@_busy" @onclick="CloseAsync">Confirm</button>
+                    <button class="btn-secondary" disabled="@_busy" @onclick="() => _confirming = false">Cancel</button>
+                }
+            </div>
+
+            @if (_busy)
+            {
+                <p class="text-muted" style="margin-top:var(--space-3)">Recording close…</p>
+            }
+            else if (_result is not null)
+            {
+                <p style="margin-top:var(--space-3); color:@(_isError ? "#b3261e" : "#1b7f3b")">@_result</p>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private int      _year;
+    private int[]    _years = [];
+    private bool     _confirming;
+    private bool     _busy;
+    private bool     _isError;
+    private string?  _result;
+    private string   _actor = "operator";
+
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var operativeYear = TemporalContext.GetOperativeDate().Year;
+        _year  = operativeYear - 1;                                   // default: the year just ended
+        _years = [operativeYear, operativeYear - 1, operativeYear - 2, operativeYear - 3];
+
+        if (AuthState is not null)
+        {
+            var user = (await AuthState).User;
+            _actor = user.Identity?.Name ?? "operator";
+        }
+    }
+
+    private async Task CloseAsync()
+    {
+        if (!SessionState.IsLocked) return;
+        _confirming = false;
+        _busy       = true;
+        _result     = null;
+        try
+        {
+            var rows = await ResetService.CloseEntityYearAsync(
+                SessionState.SelectedLegalEntityId!.Value, _year, _actor);
+            _isError = false;
+            _result  = rows > 0
+                ? $"Year-end close recorded for {_year}: {rows} closing balance(s) captured. " +
+                  "View them under Reset History on the Accumulators page."
+                : $"{_year} was already closed for this entity — no new closing balances recorded (idempotent).";
+        }
+        catch (Exception ex)
+        {
+            _isError = true;
+            _result  = $"Error recording the close: {ex.Message}";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

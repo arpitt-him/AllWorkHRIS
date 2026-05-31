@@ -22,6 +22,9 @@
         <AuthorizeView Roles="PayrollAdmin" Context="_">
             <a class="payroll-tab @ActiveClass("/payroll/profiles")" href="/payroll/profiles">Payroll Profiles</a>
         </AuthorizeView>
+        <AuthorizeView Roles="PayrollAdmin,HrisAdmin" Context="_">
+            <a class="payroll-tab @ActiveClass("/payroll/year-end")" href="/payroll/year-end">Year-End</a>
+        </AuthorizeView>
     </div>
 </SectionContent>
 
