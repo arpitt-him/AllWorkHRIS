@@ -66,11 +66,13 @@ public sealed class TaxRateRepository : ITaxRateRepository
         string stepCode, DateOnly payDate, CancellationToken ct = default)
     {
         const string sql = """
-            SELECT rate                 AS Rate,
-                   wage_base            AS WageBase,
-                   period_cap_amount    AS PeriodCap,
-                   annual_cap_amount    AS AnnualCap,
-                   depends_on_step_code AS DependsOnStepCode
+            SELECT rate                       AS Rate,
+                   wage_base                  AS WageBase,
+                   period_cap_amount          AS PeriodCap,
+                   annual_cap_amount          AS AnnualCap,
+                   depends_on_step_code       AS DependsOnStepCode,
+                   wage_threshold             AS WageThreshold,
+                   wage_base_accumulator_code AS WageBaseAccumulatorCode
             FROM   tax_flat_rates
             WHERE  step_code      = @StepCode
               AND  effective_from <= @PayDate

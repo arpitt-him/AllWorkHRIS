@@ -55,6 +55,14 @@ public sealed partial class CalculationEngine : ICalculationEngine
     // Carries hours and rate for NON_EXEMPT employees through both earnings steps.
     private sealed record NonExemptPayData(decimal RegHours, decimal OtHours, decimal HourlyRate);
 
+    // FICA taxable-wage bases snapshotted each run for the YTD wage accumulators (Phase 12.8).
+    // US-specific for now; Phase 13 makes this jurisdiction-configurable.
+    private static readonly (string Code, string Description)[] WageBases =
+    [
+        ("US_FED_MEDICARE_WAGES", "Medicare Taxable Wages"),
+        ("US_FED_SS_WAGES",       "Social Security Taxable Wages"),
+    ];
+
     [LoggerMessage(Level = LogLevel.Debug,
         Message = "Calculating pay for employment {EmploymentId} (result {EmployeePayrollResultId})")]
     private partial void LogCalculationStart(Guid employmentId, Guid employeePayrollResultId);
@@ -187,6 +195,26 @@ public sealed partial class CalculationEngine : ICalculationEngine
             var taxLines = await StepTaxWithholdingsAsync(input, employeePayrollResultId, taxableWages, ficaTaxableWages, now, ct);
             foreach (var line in taxLines)
                 await _resultLineRepo.InsertTaxLineAsync(line);
+
+            // Wage-base snapshots (ADR-019/020, Phase 12.8): record the YTD-feeding taxable-wage
+            // bases so cap-aware steps (e.g. Additional Medicare's $200K floor, SS wage base) can
+            // read exact cumulative YTD wages. Medicare and SS share the uncapped FICA base today —
+            // the SS cap is applied in the SS tax step, not in the wage accumulator. Posted to the
+            // matching YTD accumulator at approval. (US-specific emission for now; Phase 13 generalizes.)
+            foreach (var (code, desc) in WageBases)
+                await _resultLineRepo.InsertWageBaseLineAsync(new WageBaseResultLine
+                {
+                    WageBaseResultLineId    = Guid.NewGuid(),
+                    EmployeePayrollResultId = employeePayrollResultId,
+                    EmploymentId            = input.EmploymentId,
+                    WageBaseCode            = code,
+                    WageBaseDescription     = desc,
+                    TaxableWagesAmount      = ficaTaxableWages,
+                    AccumulatorImpactFlag   = true,
+                    CorrectionFlag          = false,
+                    CorrectsLineId          = null,
+                    CreationTimestamp       = now
+                });
 
             ct.ThrowIfCancellationRequested();
 

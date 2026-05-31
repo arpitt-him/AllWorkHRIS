@@ -451,17 +451,20 @@ public sealed class PayrollGateTests : IDisposable
             """,
             new { Emp = employmentId })).ToList();
 
-        Assert.Single(rows);
-        Assert.Equal("SYSTEM",    (string)rows[0].opened_by);
-        Assert.Equal("AUTOMATIC", (string)rows[0].reset_source);
-        Assert.True((decimal)rows[0].closing_balance > 0m, "Closing balance should be the posted 2025 total");
+        // One SYSTEM reset row per CALENDAR_YEAR accumulator the employee accrued in 2025
+        // (gross wages + the Phase-12.8 Medicare/SS wage bases), all with a real closing balance.
+        Assert.NotEmpty(rows);
+        Assert.All(rows, r => Assert.Equal("SYSTEM",    (string)r.opened_by));
+        Assert.All(rows, r => Assert.Equal("AUTOMATIC", (string)r.reset_source));
+        Assert.All(rows, r => Assert.True((decimal)r.closing_balance > 0m, "Closing balance should be the posted 2025 total"));
+        var countAfterFirst = rows.Count;
 
-        // Idempotency: a second 2026 cross-boundary approval must not duplicate the 2025 reset.
+        // Idempotency: a second 2026 cross-boundary approval must not duplicate the 2025 resets.
         await CalculateAndApproveAsync(AcumPeriod2026B, userId);
-        var count = await conn.ExecuteScalarAsync<int>(
+        var countAfterSecond = await conn.ExecuteScalarAsync<int>(
             "SELECT COUNT(*) FROM accumulator_reset_audit WHERE participant_id = @Emp AND reset_boundary_year = 2025",
             new { Emp = employmentId });
-        Assert.Equal(1, count);
+        Assert.Equal(countAfterFirst, countAfterSecond);
     }
 
     // ---------------------------------------------------------------------------
@@ -619,6 +622,12 @@ public sealed class PayrollGateTests : IDisposable
             conn.Execute(
                 """
                 DELETE FROM employer_contribution_result_line
+                WHERE employee_payroll_result_id IN (
+                    SELECT employee_payroll_result_id FROM employee_payroll_result
+                    WHERE payroll_run_id = @Id)
+                """, new { Id = runId });
+            conn.Execute("""
+                DELETE FROM wage_base_result_line
                 WHERE employee_payroll_result_id IN (
                     SELECT employee_payroll_result_id FROM employee_payroll_result
                     WHERE payroll_run_id = @Id)

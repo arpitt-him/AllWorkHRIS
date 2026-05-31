@@ -528,6 +528,23 @@ public sealed class ResultLineRepository : IResultLineRepository
         await conn.ExecuteAsync(sql, line);
     }
 
+    public async Task InsertWageBaseLineAsync(WageBaseResultLine line)
+    {
+        const string sql = """
+            INSERT INTO wage_base_result_line (
+                wage_base_result_line_id, employee_payroll_result_id, employment_id,
+                wage_base_code, wage_base_description, taxable_wages_amount,
+                accumulator_impact_flag, correction_flag, corrects_line_id, creation_timestamp
+            ) VALUES (
+                @WageBaseResultLineId, @EmployeePayrollResultId, @EmploymentId,
+                @WageBaseCode, @WageBaseDescription, @TaxableWagesAmount,
+                @AccumulatorImpactFlag, @CorrectionFlag, @CorrectsLineId, @CreationTimestamp
+            )
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        await conn.ExecuteAsync(sql, line);
+    }
+
     public async Task<IReadOnlyList<EarningsResultLine>> GetEarningsByResultIdAsync(Guid employeePayrollResultId)
     {
         const string sql = """
@@ -568,6 +585,16 @@ public sealed class ResultLineRepository : IResultLineRepository
         using var conn = _connectionFactory.CreateConnection();
         return (await conn.QueryAsync<EmployerContributionResultLine>(sql,
             new { ResultId = employeePayrollResultId })).ToList();
+    }
+
+    public async Task<IReadOnlyList<WageBaseResultLine>> GetWageBasesByResultIdAsync(Guid employeePayrollResultId)
+    {
+        const string sql = """
+            SELECT * FROM wage_base_result_line
+            WHERE employee_payroll_result_id = @ResultId
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        return (await conn.QueryAsync<WageBaseResultLine>(sql, new { ResultId = employeePayrollResultId })).ToList();
     }
 }
 

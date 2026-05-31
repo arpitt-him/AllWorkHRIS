@@ -38,6 +38,7 @@ public sealed class AccumulatorService : IAccumulatorService
         var deductionLines    = await _resultLineRepo.GetDeductionsByResultIdAsync(result.EmployeePayrollResultId);
         var taxLines          = await _resultLineRepo.GetTaxLinesByResultIdAsync(result.EmployeePayrollResultId);
         var contributionLines = await _resultLineRepo.GetContributionsByResultIdAsync(result.EmployeePayrollResultId);
+        var wageBaseLines     = await _resultLineRepo.GetWageBasesByResultIdAsync(result.EmployeePayrollResultId);
 
         // Single transaction for the entire employee — any mid-chain failure rolls back all layers.
         using var uow = new UnitOfWork(_connectionFactory);
@@ -84,6 +85,17 @@ public sealed class AccumulatorService : IAccumulatorService
             var def = await _accumulatorRepo.GetDefinitionByCodeAsync(line.ContributionCode, asOf);
             if (def is null) continue;
             await ApplyChainAsync(def, line.CalculatedAmount, line.EmployerContributionResultLineId, "EMPLOYER_CONTRIBUTION_LINE", result, runId, now, sequence++, uow);
+            ct.ThrowIfCancellationRequested();
+        }
+
+        // Taxable-wage bases (ADR-019/020, Phase 12.8): accumulate the YTD wage figures the
+        // cap-aware steps read. wage_base_code matches accumulator_definition.accumulator_code,
+        // so the accumulator resolves by code (like taxes). No definition => does not accumulate.
+        foreach (var line in wageBaseLines.Where(l => l.AccumulatorImpactFlag))
+        {
+            var def = await _accumulatorRepo.GetDefinitionByCodeAsync(line.WageBaseCode, asOf);
+            if (def is null) continue;
+            await ApplyChainAsync(def, line.TaxableWagesAmount, line.WageBaseResultLineId, "WAGE_BASE_LINE", result, runId, now, sequence++, uow);
             ct.ThrowIfCancellationRequested();
         }
 

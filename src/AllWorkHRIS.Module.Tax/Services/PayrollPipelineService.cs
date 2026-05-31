@@ -262,7 +262,8 @@ public sealed class PayrollPipelineService : IPayrollPipelineService
         var data = await _rateRepo.GetFlatRateAsync(row.StepCode, payDate, ct);
         return data is null ? null
             : new FlatRateStep(row.StepCode, row.SequenceNumber, appliesTo,
-                data.Rate, data.WageBase, data.PeriodCap, data.AnnualCap, useFica);
+                data.Rate, data.WageBase, data.PeriodCap, data.AnnualCap,
+                data.WageThreshold, data.WageBaseAccumulatorCode, useFica);
     }
 
     private async Task<ICalculationStep?> BuildTieredFlatAsync(

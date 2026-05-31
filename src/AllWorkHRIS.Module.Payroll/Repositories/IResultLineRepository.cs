@@ -8,9 +8,11 @@ public interface IResultLineRepository
     Task InsertDeductionLineAsync(DeductionResultLine line);
     Task InsertTaxLineAsync(TaxResultLine line);
     Task InsertEmployerContributionLineAsync(EmployerContributionResultLine line);
+    Task InsertWageBaseLineAsync(WageBaseResultLine line);
 
     Task<IReadOnlyList<EarningsResultLine>>             GetEarningsByResultIdAsync(Guid employeePayrollResultId);
     Task<IReadOnlyList<DeductionResultLine>>            GetDeductionsByResultIdAsync(Guid employeePayrollResultId);
     Task<IReadOnlyList<TaxResultLine>>                  GetTaxLinesByResultIdAsync(Guid employeePayrollResultId);
     Task<IReadOnlyList<EmployerContributionResultLine>> GetContributionsByResultIdAsync(Guid employeePayrollResultId);
+    Task<IReadOnlyList<WageBaseResultLine>>             GetWageBasesByResultIdAsync(Guid employeePayrollResultId);
 }

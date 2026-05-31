@@ -8,7 +8,8 @@ public sealed record TieredBracketRow(
 
 public sealed record FlatRateRow(
     decimal Rate, decimal? WageBase, decimal? PeriodCap, decimal? AnnualCap,
-    string? DependsOnStepCode);
+    string? DependsOnStepCode,
+    decimal? WageThreshold = null, string? WageBaseAccumulatorCode = null);
 
 public sealed record AllowanceRow(decimal AnnualAmount);
 
