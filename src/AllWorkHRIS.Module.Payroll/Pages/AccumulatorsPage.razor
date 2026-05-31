@@ -264,6 +264,38 @@
                                     }
                                 </div>
                             </div>
+
+                            @* Grid totals — entity-level rollup of the balances shown above (filter-aware) *@
+                            <div class="panel-card accum-totals-card">
+                                <div class="section-subheader">
+                                    <span>@_selectedFamily?.Label YTD Totals</span>
+                                    @if (_familySearch.Trim().Length > 0)
+                                    {
+                                        <span class="text-muted text-sm">(filtered)</span>
+                                    }
+                                </div>
+                                <div class="accum-totals-strip">
+                                    <div class="accum-total">
+                                        <span class="accum-total__label">Employees</span>
+                                        <span class="accum-total__value">@_filteredBalances.Count</span>
+                                    </div>
+                                    <div class="accum-total">
+                                        <span class="accum-total__label">Total</span>
+                                        <span class="accum-total__value">@Fmt(_filteredBalances.Sum(r => r.YtdBalance))</span>
+                                    </div>
+                                    @{
+                                        var _capped = _filteredBalances.Where(r => r.CapAmount.HasValue).ToList();
+                                        var _atCap  = _capped.Count(r => r.YtdBalance >= r.CapAmount!.Value);
+                                    }
+                                    @if (_capped.Count > 0)
+                                    {
+                                        <div class="accum-total">
+                                            <span class="accum-total__label">At Cap</span>
+                                            <span class="accum-total__value">@_atCap of @_capped.Count</span>
+                                        </div>
+                                    }
+                                </div>
+                            </div>
                         }
 
                         @* Period closing balances (the balance carried at each reset boundary) *@
@@ -1464,5 +1496,32 @@
     @@keyframes copyFade {
         from { opacity: 0; transform: translateY(-2px); }
         to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Grid Totals card — entity-level rollup strip under the by-family balance grid. */
+    .accum-totals-card { margin-top: var(--space-3); }
+    .accum-totals-strip {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-5);
+        padding: var(--space-2) 0;
+    }
+    .accum-total {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 140px;
+    }
+    .accum-total__label {
+        font-size: .72rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: .04em;
+        color: var(--text-muted, #6c757d);
+    }
+    .accum-total__value {
+        font-size: 1.15rem;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
     }
 </style>
