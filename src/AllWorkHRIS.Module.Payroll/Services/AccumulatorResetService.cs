@@ -70,7 +70,7 @@ public sealed class AccumulatorResetService : IAccumulatorResetService
     {
         var defs    = await _accumulatorRepo.GetAllActiveDefinitionsAsync(payDate);
         var now     = _wallClock.UtcNow;
-        var written = 0;
+        var touched = 0;
 
         foreach (var def in defs.Where(d => d.ResetType is "CALENDAR_YEAR" or "PLAN_YEAR"))
         {
@@ -82,36 +82,53 @@ public sealed class AccumulatorResetService : IAccumulatorResetService
 
             foreach (var c in closings)
             {
-                if (await _accumulatorRepo.ResetAuditExistsAsync(def.AccumulatorDefinitionId, c.ParticipantId, b.Year))
-                    continue;
+                // Insert if new; amend if a post-close (W-2c) adjustment changed the closing
+                // (ADR-022 §D5 / Phase 12.10.3); skip if already recorded and unchanged.
+                var existing = await _accumulatorRepo.GetResetAuditClosingAsync(
+                    def.AccumulatorDefinitionId, c.ParticipantId, b.Year);
 
-                await _accumulatorRepo.InsertResetAuditAsync(new AccumulatorResetAudit
+                if (existing is null)
                 {
-                    AccumulatorResetAuditId = Guid.NewGuid(),
-                    AccumulatorDefinitionId = def.AccumulatorDefinitionId,
-                    AccumulatorFamilyId     = def.AccumulatorFamilyId,
-                    ParticipantId           = c.ParticipantId,
-                    LegalEntityId           = c.LegalEntityId,
-                    ScopeTypeId             = def.ScopeTypeId,
-                    ResetType               = def.ResetType,
-                    ResetBoundaryYear       = b.Year,
-                    ResetDate               = b.ResetDate,
-                    ClosingBalance          = c.ClosingBalance,
-                    OpenedBy                = openedBy,
-                    ResetSource             = source,
-                    Notes                   = null,
-                    CreatedBy               = SystemActor,
-                    CreationTimestamp       = now
-                });
+                    await _accumulatorRepo.InsertResetAuditAsync(new AccumulatorResetAudit
+                    {
+                        AccumulatorResetAuditId = Guid.NewGuid(),
+                        AccumulatorDefinitionId = def.AccumulatorDefinitionId,
+                        AccumulatorFamilyId     = def.AccumulatorFamilyId,
+                        ParticipantId           = c.ParticipantId,
+                        LegalEntityId           = c.LegalEntityId,
+                        ScopeTypeId             = def.ScopeTypeId,
+                        ResetType               = def.ResetType,
+                        ResetBoundaryYear       = b.Year,
+                        ResetDate               = b.ResetDate,
+                        ClosingBalance          = c.ClosingBalance,
+                        OpenedBy                = openedBy,
+                        ResetSource             = source,
+                        Notes                   = null,
+                        CreatedBy               = SystemActor,
+                        CreationTimestamp       = now
+                    });
 
-                written++;
-                _logger.LogInformation(
-                    "Reset audit recorded ({Source}): {Code} participant {Participant} boundary {Year} closing {Balance:F2}",
-                    source, def.AccumulatorCode, c.ParticipantId, b.Year, c.ClosingBalance);
+                    touched++;
+                    _logger.LogInformation(
+                        "Reset audit recorded ({Source}): {Code} participant {Participant} boundary {Year} closing {Balance:F2}",
+                        source, def.AccumulatorCode, c.ParticipantId, b.Year, c.ClosingBalance);
+                }
+                else if (existing.Value != c.ClosingBalance)
+                {
+                    await _accumulatorRepo.UpdateResetAuditClosingAsync(
+                        def.AccumulatorDefinitionId, c.ParticipantId, b.Year, c.ClosingBalance,
+                        $"Amended (post-close adjustment); prior closing {existing.Value:F2}");
+
+                    touched++;
+                    _logger.LogInformation(
+                        "Reset audit amended ({Source}): {Code} participant {Participant} boundary {Year} {Old:F2} -> {New:F2}",
+                        source, def.AccumulatorCode, c.ParticipantId, b.Year, existing.Value, c.ClosingBalance);
+                }
+                // else: already recorded and unchanged — skip.
             }
         }
 
-        return written;
+        return touched;
     }
 
     public async Task RecordManualResetAsync(AccumulatorDefinition definition, Guid participantId, Guid? legalEntityId,

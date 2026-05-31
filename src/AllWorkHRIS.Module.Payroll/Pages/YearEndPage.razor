@@ -112,9 +112,9 @@
                 SessionState.SelectedLegalEntityId!.Value, _year, _actor);
             _isError = false;
             _result  = rows > 0
-                ? $"Year-end close recorded for {_year}: {rows} closing balance(s) captured. " +
+                ? $"Year-end close for {_year}: {rows} closing balance(s) recorded or updated. " +
                   "View them under Reset History on the Accumulators page."
-                : $"{_year} was already closed for this entity — no new closing balances recorded (idempotent).";
+                : $"{_year} is already closed and up to date for this entity — no changes (idempotent).";
         }
         catch (Exception ex)
         {

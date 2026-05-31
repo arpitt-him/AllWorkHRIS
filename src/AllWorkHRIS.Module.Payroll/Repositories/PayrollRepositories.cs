@@ -890,6 +890,48 @@ public sealed class AccumulatorRepository : IAccumulatorRepository
         return count > 0;
     }
 
+    public async Task<decimal?> GetResetAuditClosingAsync(Guid accumulatorDefinitionId, Guid? participantId, int resetBoundaryYear)
+    {
+        const string sql = """
+            SELECT closing_balance FROM accumulator_reset_audit
+            WHERE accumulator_definition_id = @DefinitionId
+              AND ((@ParticipantId IS NULL AND participant_id IS NULL) OR participant_id = @ParticipantId)
+              AND reset_boundary_year = @BoundaryYear
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        return await conn.ExecuteScalarAsync<decimal?>(sql, new
+        {
+            DefinitionId  = accumulatorDefinitionId,
+            ParticipantId = participantId,
+            BoundaryYear  = resetBoundaryYear
+        });
+    }
+
+    public async Task UpdateResetAuditClosingAsync(
+        Guid accumulatorDefinitionId, Guid? participantId, int resetBoundaryYear, decimal closingBalance, string? notes)
+    {
+        // ADR-022 §D5 / Phase 12.10.3: amend an already-recorded closing when a post-close
+        // (W-2c) adjustment changes the boundary's total. Audit-only; the row's identity
+        // (definition, participant, boundary) and reset_date/opened_by are preserved.
+        const string sql = """
+            UPDATE accumulator_reset_audit
+               SET closing_balance = @ClosingBalance,
+                   notes           = @Notes
+            WHERE accumulator_definition_id = @DefinitionId
+              AND ((@ParticipantId IS NULL AND participant_id IS NULL) OR participant_id = @ParticipantId)
+              AND reset_boundary_year = @BoundaryYear
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        await conn.ExecuteAsync(sql, new
+        {
+            DefinitionId   = accumulatorDefinitionId,
+            ParticipantId  = participantId,
+            BoundaryYear   = resetBoundaryYear,
+            ClosingBalance = closingBalance,
+            Notes          = notes
+        });
+    }
+
     public async Task InsertResetAuditAsync(AccumulatorResetAudit a)
     {
         const string sql = """

@@ -73,6 +73,14 @@ public interface IAccumulatorRepository
     /// </summary>
     Task<bool> ResetAuditExistsAsync(Guid accumulatorDefinitionId, Guid? participantId, int resetBoundaryYear);
 
+    /// <summary>The recorded closing balance for a (definition, participant, boundary), or null if none.
+    /// Used to decide insert vs. amend on a close pass (ADR-022 §D5 / Phase 12.10.3).</summary>
+    Task<decimal?> GetResetAuditClosingAsync(Guid accumulatorDefinitionId, Guid? participantId, int resetBoundaryYear);
+
+    /// <summary>Amends an existing reset record's closing balance + notes after a post-close (W-2c)
+    /// adjustment changes the boundary's total (ADR-022 §D5 / Phase 12.10.3). Audit-only.</summary>
+    Task UpdateResetAuditClosingAsync(Guid accumulatorDefinitionId, Guid? participantId, int resetBoundaryYear, decimal closingBalance, string? notes);
+
     /// <summary>Inserts one audit-only accumulator reset record.</summary>
     Task InsertResetAuditAsync(AccumulatorResetAudit audit);
 
