@@ -1,4 +1,5 @@
 using AllWorkHRIS.Core.Data;
+using AllWorkHRIS.Core.Lookups;
 using AllWorkHRIS.Core.Temporal;
 using AllWorkHRIS.Module.Payroll.Domain.Accumulators;
 using AllWorkHRIS.Module.Payroll.Domain.Results;
@@ -12,15 +13,21 @@ public sealed class AccumulatorService : IAccumulatorService
     private readonly IResultLineRepository  _resultLineRepo;
     private readonly ITemporalContext       _temporalContext;
     private readonly IConnectionFactory     _connectionFactory;
+    private readonly ILookupCache           _lookup;
 
     public AccumulatorService(IAccumulatorRepository accumulatorRepo, IResultLineRepository resultLineRepo,
-        ITemporalContext temporalContext, IConnectionFactory connectionFactory)
+        ITemporalContext temporalContext, IConnectionFactory connectionFactory, ILookupCache lookup)
     {
         _accumulatorRepo   = accumulatorRepo;
         _resultLineRepo    = resultLineRepo;
         _temporalContext   = temporalContext;
         _connectionFactory = connectionFactory;
+        _lookup            = lookup;
     }
+
+    // Lookup ids resolved by code (Phase 12.5.8) — never hard-coded literals, so a seed
+    // re-order can't silently mislabel impact/contribution/balance rows.
+    private int Lkp(string table, string code) => _lookup.GetId(table, code);
 
     public async Task ApplyAsync(EmployeePayrollResult result, Guid runId, CancellationToken ct = default)
     {
@@ -48,7 +55,7 @@ public sealed class AccumulatorService : IAccumulatorService
             // No link => the earnings code does not accumulate (Phase 12.5.4).
             var def = await _accumulatorRepo.GetDefinitionForEarningsAsync(line.EarningsCode, asOf);
             if (def is null) continue;
-            await ApplyChainAsync(def, line.CalculatedAmount, line.EarningsResultLineId, result, runId, now, sequence++, uow);
+            await ApplyChainAsync(def, line.CalculatedAmount, line.EarningsResultLineId, "EARNINGS_LINE", result, runId, now, sequence++, uow);
             ct.ThrowIfCancellationRequested();
         }
 
@@ -60,7 +67,7 @@ public sealed class AccumulatorService : IAccumulatorService
             // No link => the deduction does not accumulate.
             var def = await _accumulatorRepo.GetDefinitionForDeductionAsync(line.DeductionCode, asOf);
             if (def is null) continue;
-            await ApplyChainAsync(def, line.CalculatedAmount, line.DeductionResultLineId, result, runId, now, sequence++, uow);
+            await ApplyChainAsync(def, line.CalculatedAmount, line.DeductionResultLineId, "DEDUCTION_LINE", result, runId, now, sequence++, uow);
             ct.ThrowIfCancellationRequested();
         }
 
@@ -68,7 +75,7 @@ public sealed class AccumulatorService : IAccumulatorService
         {
             var def = await _accumulatorRepo.GetDefinitionByCodeAsync(line.TaxCode, asOf);
             if (def is null) continue;
-            await ApplyChainAsync(def, line.CalculatedAmount, line.TaxResultLineId, result, runId, now, sequence++, uow);
+            await ApplyChainAsync(def, line.CalculatedAmount, line.TaxResultLineId, "TAX_LINE", result, runId, now, sequence++, uow);
             ct.ThrowIfCancellationRequested();
         }
 
@@ -76,7 +83,7 @@ public sealed class AccumulatorService : IAccumulatorService
         {
             var def = await _accumulatorRepo.GetDefinitionByCodeAsync(line.ContributionCode, asOf);
             if (def is null) continue;
-            await ApplyChainAsync(def, line.CalculatedAmount, line.EmployerContributionResultLineId, result, runId, now, sequence++, uow);
+            await ApplyChainAsync(def, line.CalculatedAmount, line.EmployerContributionResultLineId, "EMPLOYER_CONTRIBUTION_LINE", result, runId, now, sequence++, uow);
             ct.ThrowIfCancellationRequested();
         }
 
@@ -102,13 +109,13 @@ public sealed class AccumulatorService : IAccumulatorService
                 PayrollRunId             = original.PayrollRunId,
                 EmploymentId             = original.EmploymentId,
                 PersonId                 = original.PersonId,
-                ImpactStatusId           = 1,
+                ImpactStatusId           = Lkp(LookupTables.ImpactStatus, "POSTED"),
                 ImpactSourceTypeId       = original.ImpactSourceTypeId,
                 SourceObjectId           = original.SourceObjectId,
                 PriorValue               = original.NewValue,
                 DeltaValue               = -original.DeltaValue,
                 NewValue                 = original.PriorValue,
-                PostingDirectionId       = original.DeltaValue >= 0 ? 2 : 1,   // flip direction
+                PostingDirectionId       = Lkp(LookupTables.PostingDirection, original.DeltaValue >= 0 ? "DECREASE" : "INCREASE"),   // flip direction
                 ScopeTypeId              = original.ScopeTypeId,
                 ScopeObjectId            = original.ScopeObjectId,
                 JurisdictionId           = original.JurisdictionId,
@@ -171,7 +178,7 @@ public sealed class AccumulatorService : IAccumulatorService
     // -------------------------------------------------------
 
     private async Task ApplyChainAsync(
-        AccumulatorDefinition def, decimal delta, Guid sourceLineId,
+        AccumulatorDefinition def, decimal delta, Guid sourceLineId, string sourceTypeCode,
         EmployeePayrollResult result, Guid runId, DateTimeOffset now, int sequence, IUnitOfWork uow)
     {
         // Read current balance — if absent this is the first contribution for this scope/period
@@ -192,13 +199,13 @@ public sealed class AccumulatorService : IAccumulatorService
             PayrollRunId             = runId,
             EmploymentId             = result.EmploymentId,
             PersonId                 = result.PersonId,
-            ImpactStatusId           = 1,             // POSTED
-            ImpactSourceTypeId       = 1,             // CALCULATION
+            ImpactStatusId           = Lkp(LookupTables.ImpactStatus, "POSTED"),
+            ImpactSourceTypeId       = Lkp(LookupTables.ImpactSourceType, sourceTypeCode),
             SourceObjectId           = sourceLineId,
             PriorValue               = priorValue,
             DeltaValue               = delta,
             NewValue                 = newValue,
-            PostingDirectionId       = delta >= 0 ? 1 : 2,   // CREDIT : DEBIT
+            PostingDirectionId       = Lkp(LookupTables.PostingDirection, delta >= 0 ? "INCREASE" : "DECREASE"),
             ScopeTypeId              = def.ScopeTypeId,
             ScopeObjectId            = result.EmploymentId,
             JurisdictionId           = null,
@@ -234,7 +241,7 @@ public sealed class AccumulatorService : IAccumulatorService
             ScopeTypeId                 = def.ScopeTypeId,
             ScopeObjectId               = result.EmploymentId,
             ContributionAmount          = delta,
-            ContributionTypeId          = 1,      // ORIGINAL (lkp_contribution_type id 1)
+            ContributionTypeId          = Lkp(LookupTables.ContributionType, "ORIGINAL"),
             BeforeValue                 = priorValue,
             AfterValue                  = newValue,
             CreationTimestamp           = now
@@ -253,7 +260,7 @@ public sealed class AccumulatorService : IAccumulatorService
             PeriodContextId          = def.PeriodContextId,
             CalendarContextId        = result.ExecutionPeriodId,
             CurrentValue             = newValue,
-            BalanceStatusId          = 1,     // ACTIVE
+            BalanceStatusId          = Lkp(LookupTables.AccumulatorBalanceStatus, "ACTIVE"),
             LastUpdatedRunId         = runId,
             LastUpdatedResultSetId   = null,
             LastUpdateTimestamp      = now

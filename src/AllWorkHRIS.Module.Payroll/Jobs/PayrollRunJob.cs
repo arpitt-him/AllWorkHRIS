@@ -212,8 +212,8 @@ public sealed class PayrollRunJob : BackgroundService
                 RootPayrollRunResultSetId    = null,
                 ResultSetLineageSequence     = 1,
                 CorrectionReferenceId        = null,
-                ResultSetStatusId            = (int)ResultSetStatus.Pending,
-                ResultSetTypeId              = 1,
+                ResultSetStatusId            = lookup.GetId(LookupTables.ResultSetStatus, "PENDING"),
+                ResultSetTypeId              = lookup.GetId(LookupTables.ResultSetType, "REGULAR_RUN"),
                 ExecutionStartTimestamp      = now,
                 ExecutionEndTimestamp        = null,
                 ApprovalRequiredFlag         = false,
@@ -396,7 +396,7 @@ public sealed class PayrollRunJob : BackgroundService
 
             await runRepo.UpdateStatusAsync(runId, finalRunStatus, run.InitiatedBy);
             await runRepo.SetRunTimestampsAsync(runId, startTime, TdoNow(), run.InitiatedBy);
-            await resultSetRepo.UpdateStatusAsync(resultSet.PayrollRunResultSetId, (int)ResultSetStatus.Calculated);
+            await resultSetRepo.UpdateStatusAsync(resultSet.PayrollRunResultSetId, lookup.GetId(LookupTables.ResultSetStatus, "CALCULATED"));
 
             var blockedMsg = blocked.Count > 0 ? $", {blocked.Count} blocked (onboarding)" : "";
             await _progress.UpdateAsync(new RunProgress
