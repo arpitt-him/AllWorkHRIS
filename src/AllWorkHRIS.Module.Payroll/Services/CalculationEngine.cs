@@ -61,6 +61,7 @@ public sealed partial class CalculationEngine : ICalculationEngine
     [
         ("US_FED_MEDICARE_WAGES", "Medicare Taxable Wages"),
         ("US_FED_SS_WAGES",       "Social Security Taxable Wages"),
+        ("US_FUTA_WAGES",         "FUTA Taxable Wages"),
     ];
 
     [LoggerMessage(Level = LogLevel.Debug,

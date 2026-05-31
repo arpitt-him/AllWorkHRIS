@@ -80,4 +80,49 @@ public sealed class FlatRateStepWageBaseCeilingTests
         var result = await legacy.ExecuteAsync(ctx);
         Assert.Equal(620.00m, result.StepResults["US_FED_SS"]);
     }
+
+    // ---- FUTA (Phase 12.8.3): employer-only, $7,000 base, 0.6% net → caps at $42/yr ----
+
+    private static FlatRateStep Futa() => new(
+        "US_FUTA", 906, StepAppliesTo.Employer,
+        rate: 0.006m, wageBase: 7_000m, periodCap: null, annualCap: null,
+        wageThreshold: null, wageBaseAccumulatorCode: "US_FUTA_WAGES",
+        useFicaTaxableWages: true);
+
+    private static CalculationContext FutaCtx(decimal periodWages, decimal ytdFutaWages) => new()
+    {
+        PayPeriodsPerYear = 26,
+        FicaTaxableWages  = periodWages,
+        YtdBalances       = ImmutableDictionary<string, decimal>.Empty
+            .SetItem("US_FUTA_WAGES", ytdFutaWages),
+        ExemptFlag        = false,
+    };
+
+    // Employer-applies step → the amount lands in EmployerStepResults.
+    private static async Task<decimal> RunFutaAsync(CalculationContext ctx)
+    {
+        var result = await Futa().ExecuteAsync(ctx);
+        return result.EmployerStepResults.TryGetValue("US_FUTA", out var amt) ? amt : 0m;
+    }
+
+    [Fact]
+    public async Task Futa_BelowCap_TaxesFullPeriodWages()
+    {
+        // YTD 3,000 + 2,000 = 5,000 < 7,000 → 2000 * 0.6% = 12.00.
+        Assert.Equal(12.00m, await RunFutaAsync(FutaCtx(periodWages: 2_000m, ytdFutaWages: 3_000m)));
+    }
+
+    [Fact]
+    public async Task Futa_CrossingCap_FillsExactlyToTheWageBase()
+    {
+        // YTD 6,000 + 2,000 would be 8,000, but only $1,000 of room remains to $7,000:
+        // 1000 * 0.6% = 6.00 (annual FUTA tops out at $42 = 7,000 × 0.6%).
+        Assert.Equal(6.00m, await RunFutaAsync(FutaCtx(periodWages: 2_000m, ytdFutaWages: 6_000m)));
+    }
+
+    [Fact]
+    public async Task Futa_AtOrAboveCap_TaxesNothing()
+    {
+        Assert.Equal(0m, await RunFutaAsync(FutaCtx(periodWages: 2_000m, ytdFutaWages: 7_000m)));
+    }
 }
