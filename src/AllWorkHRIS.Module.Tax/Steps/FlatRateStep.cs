@@ -39,9 +39,25 @@ public sealed class FlatRateStep : ICalculationStep
 
         var periodWages = _useFicaTaxableWages ? ctx.FicaTaxableWages : ctx.IncomeTaxableWages;
 
-        var base_ = _wageBase.HasValue
-            ? Math.Min(periodWages, _wageBase.Value / ctx.PayPeriodsPerYear)
-            : periodWages;
+        // Wage CEILING. With a linked YTD accumulator (Phase 12.8.2 — e.g. Social Security),
+        // fill exactly to the annual wage base: tax this period's wages only up to the room
+        // remaining below the base (base − YTD wages), then nothing. Without a linked
+        // accumulator, fall back to the legacy per-period proration of the base.
+        decimal base_;
+        if (_wageBase.HasValue && _wageBaseAccumulatorCode is not null)
+        {
+            var ytdWages = ctx.YtdBalances.TryGetValue(_wageBaseAccumulatorCode, out var w) ? w : 0m;
+            var roomLeft = Math.Max(0m, _wageBase.Value - ytdWages);
+            base_ = Math.Min(periodWages, roomLeft);
+        }
+        else if (_wageBase.HasValue)
+        {
+            base_ = Math.Min(periodWages, _wageBase.Value / ctx.PayPeriodsPerYear);
+        }
+        else
+        {
+            base_ = periodWages;
+        }
 
         // Annual wage FLOOR (Phase 12.8 — e.g. Additional Medicare $200K). Tax only the part
         // of THIS period's wages that pushes cumulative YTD past the threshold, read from the
