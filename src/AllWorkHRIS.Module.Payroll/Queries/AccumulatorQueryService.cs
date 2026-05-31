@@ -27,6 +27,16 @@ public sealed record AccumulatorEmployeeBalanceRow(
     DateOnly LastUpdated
 );
 
+// One row per (employee, accumulator definition) within a family — so a family
+// that carries more than one definition (e.g. TAXABLE_WAGE_BASE = Medicare wages
+// + SS wages) can be totalled per base instead of blended.
+public sealed record AccumulatorDefinitionBalanceRow(
+    Guid    EmploymentId,
+    string  AccumulatorCode,
+    string  AccumulatorName,
+    decimal YtdBalance
+);
+
 public sealed record AccumulatorImpactRow(
     Guid     ImpactId,
     Guid     RunId,
@@ -203,6 +213,40 @@ public sealed class AccumulatorQueryService
             (decimal)r.ytd_balance,
             r.cap_amount as decimal?,
             ToDateOnly(r.last_updated)
+        )).ToList();
+    }
+
+    /// Per-(employee, definition) YTD balances for a family, scoped to a legal entity
+    /// and year. Lets the UI total each definition separately for multi-definition
+    /// families (Medicare vs SS taxable wages) rather than summing them into one figure.
+    public async Task<IReadOnlyList<AccumulatorDefinitionBalanceRow>> GetDefinitionBalancesAsync(
+        int familyId, Guid legalEntityId, int year)
+    {
+        const string sql = """
+            SELECT ab.participant_id     AS employment_id,
+                   ad.accumulator_code   AS accumulator_code,
+                   ad.accumulator_name   AS accumulator_name,
+                   SUM(ab.current_value) AS ytd_balance
+            FROM   accumulator_balance ab
+            JOIN   accumulator_definition ad ON ad.accumulator_definition_id = ab.accumulator_definition_id
+            JOIN   payroll_period pp          ON pp.period_id                = ab.calendar_context_id
+            JOIN   employment e               ON e.employment_id             = ab.participant_id
+            WHERE  ab.accumulator_family_id = @FamilyId
+              AND  e.legal_entity_id        = @LegalEntityId
+              AND  pp.period_year           = @Year
+              AND  ab.participant_id IS NOT NULL
+            GROUP BY ab.participant_id, ad.accumulator_code, ad.accumulator_name
+            ORDER BY ad.accumulator_name
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        var raws = (await conn.QueryAsync(sql,
+            new { FamilyId = familyId, LegalEntityId = legalEntityId, Year = year })).ToList();
+
+        return raws.Select(r => new AccumulatorDefinitionBalanceRow(
+            (Guid)r.employment_id,
+            (string)r.accumulator_code,
+            (string)r.accumulator_name,
+            (decimal)r.ytd_balance
         )).ToList();
     }
 

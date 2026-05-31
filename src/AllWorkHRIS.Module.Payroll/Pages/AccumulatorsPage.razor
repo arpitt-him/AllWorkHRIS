@@ -179,6 +179,22 @@
                                                     HeaderText="Emp #" Width="110" />
                                         <GridColumn Field="@nameof(AccumulatorEmployeeBalanceRow.EmployeeName)"
                                                     HeaderText="Employee" />
+                                        @if (_baseNames.Count > 1)
+                                        {
+                                            @* Multi-definition family (e.g. Taxable Wage Base): one column per base.
+                                               Their sum is meaningless, so we never show a blended balance. *@
+                                            @foreach (var baseName in _baseNames)
+                                            {
+                                                <GridColumn HeaderText="@baseName" TextAlign="TextAlign.Right" Width="220">
+                                                    <Template>
+                                                        @{ var br = (AccumulatorEmployeeBalanceRow)context; }
+                                                        @Fmt(BaseValue(br.EmploymentId, baseName))
+                                                    </Template>
+                                                </GridColumn>
+                                            }
+                                        }
+                                        else
+                                        {
                                         <GridColumn HeaderText="YTD Balance" TextAlign="TextAlign.Right" Width="130">
                                             <Template>
                                                 @{ var r = (AccumulatorEmployeeBalanceRow)context; }
@@ -214,6 +230,7 @@
                                                 }
                                             </Template>
                                         </GridColumn>
+                                        }
                                         <GridColumn HeaderText="Last Updated" Width="120">
                                             <Template>
                                                 @{ var r = (AccumulatorEmployeeBalanceRow)context; }
@@ -268,31 +285,53 @@
                             @* Grid totals — entity-level rollup of the balances shown above (filter-aware) *@
                             <div class="panel-card accum-totals-card">
                                 <div class="section-subheader">
-                                    <span>@_selectedFamily?.Label YTD Totals</span>
+                                    <span>@_selectedFamily?.Label YTD</span>
                                     @if (_familySearch.Trim().Length > 0)
                                     {
                                         <span class="text-muted text-sm">(filtered)</span>
                                     }
                                 </div>
+                                @{
+                                    var _visibleIds = _filteredBalances.Select(r => r.EmploymentId).ToHashSet();
+                                    var _defTotals = _definitionBalances
+                                        .Where(d => _visibleIds.Contains(d.EmploymentId))
+                                        .GroupBy(d => d.AccumulatorName)
+                                        .Select(g => (Label: TrimYtdSuffix(g.Key), Total: g.Sum(x => x.YtdBalance)))
+                                        .OrderBy(t => t.Label)
+                                        .ToList();
+                                    var _capped = _filteredBalances.Where(r => r.CapAmount.HasValue).ToList();
+                                    var _atCap  = _capped.Count(r => r.YtdBalance >= r.CapAmount!.Value);
+                                }
                                 <div class="accum-totals-strip">
                                     <div class="accum-total">
                                         <span class="accum-total__label">Employees</span>
                                         <span class="accum-total__value">@_filteredBalances.Count</span>
                                     </div>
-                                    <div class="accum-total">
-                                        <span class="accum-total__label">Total</span>
-                                        <span class="accum-total__value">@Fmt(_filteredBalances.Sum(r => r.YtdBalance))</span>
-                                    </div>
-                                    @{
-                                        var _capped = _filteredBalances.Where(r => r.CapAmount.HasValue).ToList();
-                                        var _atCap  = _capped.Count(r => r.YtdBalance >= r.CapAmount!.Value);
+                                    @if (_defTotals.Count > 1)
+                                    {
+                                        @* Multi-definition family (e.g. Taxable Wage Base = Medicare + SS wages):
+                                           total each base separately — their sum is not a meaningful figure. *@
+                                        @foreach (var dt in _defTotals)
+                                        {
+                                            <div class="accum-total">
+                                                <span class="accum-total__label">@dt.Label</span>
+                                                <span class="accum-total__value">@Fmt(dt.Total)</span>
+                                            </div>
+                                        }
                                     }
-                                    @if (_capped.Count > 0)
+                                    else
                                     {
                                         <div class="accum-total">
-                                            <span class="accum-total__label">At Cap</span>
-                                            <span class="accum-total__value">@_atCap of @_capped.Count</span>
+                                            <span class="accum-total__label">Total</span>
+                                            <span class="accum-total__value">@Fmt(_filteredBalances.Sum(r => r.YtdBalance))</span>
                                         </div>
+                                        @if (_capped.Count > 0)
+                                        {
+                                            <div class="accum-total">
+                                                <span class="accum-total__label">At Cap</span>
+                                                <span class="accum-total__value">@_atCap of @_capped.Count</span>
+                                            </div>
+                                        }
                                     }
                                 </div>
                             </div>
@@ -545,6 +584,9 @@
     private IReadOnlyList<AccumulatorFamilyListItem>     _families         = [];
     private IReadOnlyList<AccumulatorYearTab>            _availableYears   = [];
     private IReadOnlyList<AccumulatorEmployeeBalanceRow> _employeeBalances = [];
+    private IReadOnlyList<AccumulatorDefinitionBalanceRow> _definitionBalances = [];
+    private IReadOnlyList<string>                          _baseNames          = [];
+    private Dictionary<Guid, Dictionary<string, decimal>> _baseByEmp          = new();
     private IReadOnlyList<AccumulatorResetHistoryRow>    _resetHistory     = [];
     private AccumulatorFamilyListItem?                   _selectedFamily;
     private AccumulatorFamilyMeta?                       _familyMeta;
@@ -598,6 +640,9 @@
         _familyMeta       = null;
         _availableYears   = [];
         _employeeBalances = [];
+        _definitionBalances = [];
+        _baseNames        = [];
+        _baseByEmp        = new();
         _resetHistory     = [];
         _hasRetroactive   = false;
         _filteredBalances   = [];
@@ -624,6 +669,9 @@
         _familyMeta       = null;
         _availableYears   = [];
         _employeeBalances = [];
+        _definitionBalances = [];
+        _baseNames        = [];
+        _baseByEmp        = new();
         _resetHistory     = [];
         _hasRetroactive   = false;
         _filteredBalances   = [];
@@ -660,6 +708,17 @@
 
         _employeeBalances = await QueryService.GetEmployeeBalancesAsync(
             _selectedFamily!.FamilyId, EntityId, tab.Year);
+        _definitionBalances = await QueryService.GetDefinitionBalancesAsync(
+            _selectedFamily!.FamilyId, EntityId, tab.Year);
+        _baseNames = _definitionBalances
+            .Select(d => TrimYtdSuffix(d.AccumulatorName))
+            .Distinct().OrderBy(n => n).ToList();
+        _baseByEmp = _definitionBalances
+            .GroupBy(d => d.EmploymentId)
+            .ToDictionary(
+                g => g.Key,
+                g => g.GroupBy(x => TrimYtdSuffix(x.AccumulatorName))
+                      .ToDictionary(gg => gg.Key, gg => gg.Sum(x => x.YtdBalance)));
         _resetHistory     = await QueryService.GetResetHistoryAsync(
             _selectedFamily!.FamilyId, EntityId);
         _filteredBalances = _employeeBalances;
@@ -934,25 +993,49 @@
     private static string Fmt(decimal v) =>
         v < 0 ? $"({Math.Abs(v):N2})" : v.ToString("N2");
 
+    // The card title already carries "… YTD"; trim the redundant suffix from
+    // per-definition labels (e.g. "Medicare Taxable Wages YTD" -> "Medicare Taxable Wages").
+    private static string TrimYtdSuffix(string name) =>
+        name.EndsWith(" YTD", StringComparison.OrdinalIgnoreCase) ? name[..^4] : name;
+
+    // One employee's balance for a single base (trimmed definition name); 0 if absent.
+    private decimal BaseValue(Guid empId, string baseName) =>
+        _baseByEmp.TryGetValue(empId, out var m) && m.TryGetValue(baseName, out var v) ? v : 0m;
+
+    // By-family export table — per-base columns for multi-definition families (where a
+    // single blended balance is meaningless), the cap-aware single column otherwise.
+    private (string[] Header, List<string[]> Rows) BuildFamilyExportTable()
+    {
+        if (_baseNames.Count > 1)
+        {
+            var header = new[] { "Employee #", "Employee" }
+                .Concat(_baseNames).Append("Last Updated").ToArray();
+            var rows = _employeeBalances.Select(r => new[] { r.EmployeeNumber, r.EmployeeName }
+                .Concat(_baseNames.Select(b => BaseValue(r.EmploymentId, b).ToString("F2")))
+                .Append(r.LastUpdated.ToString("yyyy-MM-dd")).ToArray()).ToList();
+            return (header, rows);
+        }
+
+        var single = new[] { "Employee #", "Employee", "YTD Balance", "Cap", "Amount Left to Cap", "Last Updated" };
+        var singleRows = _employeeBalances.Select(r =>
+        {
+            var capStr = r.CapAmount.HasValue ? r.CapAmount.Value.ToString("F2") : "";
+            var remStr = r.CapAmount.HasValue ? (r.CapAmount.Value - r.YtdBalance).ToString("F2") : "";
+            return new[] { r.EmployeeNumber, r.EmployeeName, r.YtdBalance.ToString("F2"), capStr, remStr, r.LastUpdated.ToString("yyyy-MM-dd") };
+        }).ToList();
+        return (single, singleRows);
+    }
+
     // ── CSV exports ─────────────────────────────────────────────────────────────
 
     private async Task ExportFamilyBalancesCsvAsync()
     {
         if (_selectedFamily is null) return;
+        var (header, rows) = BuildFamilyExportTable();
         var sb = new StringBuilder();
-        sb.AppendLine("Employee #,Employee,YTD Balance,Cap,Amount Left to Cap,Last Updated");
-        foreach (var r in _employeeBalances)
-        {
-            var capStr = r.CapAmount.HasValue ? r.CapAmount.Value.ToString("F2") : "";
-            var remStr = r.CapAmount.HasValue ? (r.CapAmount.Value - r.YtdBalance).ToString("F2") : "";
-            sb.AppendLine(string.Join(",",
-                Csv(r.EmployeeNumber),
-                Csv(r.EmployeeName),
-                r.YtdBalance.ToString("F2"),
-                capStr,
-                remStr,
-                r.LastUpdated.ToString("yyyy-MM-dd")));
-        }
+        sb.AppendLine(string.Join(",", header.Select(Csv)));
+        foreach (var row in rows)
+            sb.AppendLine(string.Join(",", row.Select(Csv)));
         await DownloadCsvAsync($"accumulators-family-{_selectedFamily.Code}-{_selectedYear}.csv", sb.ToString());
     }
 
@@ -1015,20 +1098,11 @@
     private async Task CopyFamilyBalancesTsvAsync()
     {
         if (_selectedFamily is null) return;
+        var (header, rows) = BuildFamilyExportTable();
         var sb = new StringBuilder();
-        sb.AppendLine("Employee #\tEmployee\tYTD Balance\tCap\tAmount Left to Cap\tLast Updated");
-        foreach (var r in _employeeBalances)
-        {
-            var capStr = r.CapAmount.HasValue ? r.CapAmount.Value.ToString("F2") : "";
-            var remStr = r.CapAmount.HasValue ? (r.CapAmount.Value - r.YtdBalance).ToString("F2") : "";
-            sb.AppendLine(string.Join('\t',
-                Tsv(r.EmployeeNumber),
-                Tsv(r.EmployeeName),
-                r.YtdBalance.ToString("F2"),
-                capStr,
-                remStr,
-                r.LastUpdated.ToString("yyyy-MM-dd")));
-        }
+        sb.AppendLine(string.Join('\t', header.Select(Tsv)));
+        foreach (var row in rows)
+            sb.AppendLine(string.Join('\t', row.Select(Tsv)));
         await JS.InvokeVoidAsync("allworkClipboard.copy", sb.ToString());
         _familyBalancesCopiedRecent = true;
         StateHasChanged();
