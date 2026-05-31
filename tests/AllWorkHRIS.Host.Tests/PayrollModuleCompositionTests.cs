@@ -136,7 +136,11 @@ public sealed class PayrollModuleCompositionTests
         IPlatformModule module = new PayrollModule();
 
         Assert.Equal("Payroll", module.ModuleName);
-        Assert.Equal("0.1.0",   module.ModuleVersion);
+        // ModuleVersion is assembly-driven since ADR-018 (the hardcoded "0.1.0" was removed),
+        // so assert it's a populated, parseable version rather than a brittle literal.
+        Assert.False(string.IsNullOrWhiteSpace(module.ModuleVersion));
+        Assert.True(System.Version.TryParse(module.ModuleVersion.Split('+')[0], out _),
+            $"ModuleVersion should be a parseable version; got '{module.ModuleVersion}'");
         Assert.False(string.IsNullOrWhiteSpace(module.ModuleDescription));
     }
 
