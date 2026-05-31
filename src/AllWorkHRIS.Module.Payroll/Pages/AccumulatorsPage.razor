@@ -298,13 +298,13 @@
                             </div>
                         }
 
-                        @* Period closing balances (the balance carried at each reset boundary) *@
-                        @if (_resetHistory.Count > 0)
-                        {
-                            <div class="panel-card">
-                                <div class="section-subheader">
-                                    <span>Reset History</span>
-                                </div>
+                        @* Reset History — audit trail of accumulator resets (ADR-020); empty-state when none recorded *@
+                        <div class="panel-card">
+                            <div class="section-subheader">
+                                <span>Reset History</span>
+                            </div>
+                            @if (_resetHistory.Count > 0)
+                            {
                                 <table class="config-table">
                                     <thead>
                                         <tr>
@@ -347,8 +347,12 @@
                                         }
                                     }
                                 </div>
-                            </div>
-                        }
+                            }
+                            else
+                            {
+                                <p class="text-muted accum-reset-empty">No resets recorded yet — a reset is logged automatically when a payroll run crosses a calendar or plan-year boundary, or via a manual reset.</p>
+                            }
+                        </div>
                     }
                 }
             </div>
@@ -1523,5 +1527,9 @@
         font-size: 1.15rem;
         font-weight: 600;
         font-variant-numeric: tabular-nums;
+    }
+    .accum-reset-empty {
+        margin: var(--space-2) 0 0;
+        font-size: .85rem;
     }
 </style>
