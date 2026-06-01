@@ -196,6 +196,36 @@ public sealed class AccumulatorQueryService
             new { FamilyId = familyId, LegalEntityId = legalEntityId, Year = year });
     }
 
+    /// The IRS §402(g)-style combined deferral limit governing a family (ADR-021), if any —
+    /// e.g. RETIREMENT's 401K-PRE + 401K-ROTH share one $23,500 limit. Returns the most-recent
+    /// deferral_limit_group limit whose members include this family's accumulators and that is
+    /// effective during the year. Null when no group governs the family (its accumulators carry
+    /// their own per-leg cap_amount instead). Global-default scope for now (legal_entity_id IS
+    /// NULL); the legalEntityId param is reserved for the trust-override wiring (deferred slice).
+    public async Task<decimal?> GetCombinedDeferralLimitAsync(int familyId, Guid legalEntityId, int year)
+    {
+        const string sql = """
+            SELECT g.limit_amount
+            FROM   deferral_limit_group g
+            WHERE  g.legal_entity_id IS NULL
+              AND  EXTRACT(YEAR FROM g.effective_from) <= @Year
+              AND  (g.effective_to IS NULL OR EXTRACT(YEAR FROM g.effective_to) >= @Year)
+              AND  EXISTS (
+                       SELECT 1
+                       FROM   deferral_limit_group_member m
+                       JOIN   accumulator_definition ad ON ad.accumulator_code = m.member_accumulator_code
+                       WHERE  m.group_code               = g.group_code
+                         AND  ad.accumulator_family_id   = @FamilyId
+                         AND  EXTRACT(YEAR FROM m.effective_from) <= @Year
+                         AND  (m.effective_to IS NULL OR EXTRACT(YEAR FROM m.effective_to) >= @Year)
+                   )
+            ORDER BY g.effective_from DESC
+            FETCH FIRST 1 ROWS ONLY
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        return await conn.ExecuteScalarAsync<decimal?>(sql, new { FamilyId = familyId, Year = year });
+    }
+
     private static string BuildYearLabel(int year, string resetType, int? planYearStartMonth)
     {
         if (resetType != "PLAN_YEAR") return year.ToString();
@@ -373,8 +403,12 @@ public sealed class AccumulatorQueryService
     /// (e.g. GROSS_WAGES = REG + OT + OT_PREM, RETIREMENT = 401K-PRE + 401K-ROTH).
     /// Drill-in is by family (<see cref="GetEmployeeFamilyImpactAsync"/>), so the
     /// per-definition breakdown is still reachable via the impact trail.
-    /// ResetType / CapAmount are pulled as MAX — the system assumes members of a
-    /// family share these (they do for every family seeded today).
+    /// ResetType is pulled as MAX — the system assumes members of a family share it.
+    /// CapAmount is the per-leg cap_amount, falling back (COALESCE) to the family's combined
+    /// §402(g) deferral-limit-group limit (ADR-021) — so RETIREMENT, whose per-leg caps are
+    /// NULL (the limit lives on the group), still shows its combined headroom here, matching
+    /// the by-family view. The combined limit is a correlated scalar (no row multiplication,
+    /// so the YTD SUM is unaffected). Global-default group scope for now.
     public async Task<IReadOnlyList<AccumulatorEmployeeSummaryRow>> GetEmployeeSummaryAsync(
         Guid employmentId, int year)
     {
@@ -384,7 +418,23 @@ public sealed class AccumulatorQueryService
                    MAX(ad.reset_type)           AS reset_type,
                    @Year                        AS current_year,
                    SUM(ab.current_value)        AS ytd_balance,
-                   MAX(ad.cap_amount)           AS cap_amount
+                   COALESCE(MAX(ad.cap_amount),
+                            (SELECT g.limit_amount
+                             FROM   deferral_limit_group g
+                             WHERE  g.legal_entity_id IS NULL
+                               AND  EXTRACT(YEAR FROM g.effective_from) <= @Year
+                               AND  (g.effective_to IS NULL OR EXTRACT(YEAR FROM g.effective_to) >= @Year)
+                               AND  EXISTS (
+                                        SELECT 1
+                                        FROM   deferral_limit_group_member m
+                                        JOIN   accumulator_definition ad2 ON ad2.accumulator_code = m.member_accumulator_code
+                                        WHERE  m.group_code             = g.group_code
+                                          AND  ad2.accumulator_family_id = af.id
+                                          AND  EXTRACT(YEAR FROM m.effective_from) <= @Year
+                                          AND  (m.effective_to IS NULL OR EXTRACT(YEAR FROM m.effective_to) >= @Year)
+                                    )
+                             ORDER BY g.effective_from DESC
+                             FETCH FIRST 1 ROWS ONLY)) AS cap_amount
             FROM   accumulator_balance ab
             JOIN   accumulator_definition ad ON ad.accumulator_definition_id = ab.accumulator_definition_id
             JOIN   lkp_accumulator_family af ON af.id                        = ab.accumulator_family_id

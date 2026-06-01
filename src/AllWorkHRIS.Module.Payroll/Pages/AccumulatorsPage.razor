@@ -100,7 +100,16 @@
                                 <span class="meta-pill">@yearLabel</span>
                             }
                         </div>
-                        @if (_familyMeta?.CapAmount.HasValue == true)
+                        @if (_combinedDeferralLimit.HasValue)
+                        {
+                            @* §402(g) combined limit (ADR-021): one cap shared across the family's
+                               members (e.g. pre-tax + Roth 401(k)), not a per-leg cap. *@
+                            <div class="family-header-cap" title="IRS §402(g) combined elective-deferral limit — shared across this family's deferral types">
+                                <span class="cap-label">Combined Cap</span>
+                                <span class="cap-value">@Fmt(_combinedDeferralLimit.Value)</span>
+                            </div>
+                        }
+                        else if (_familyMeta?.CapAmount.HasValue == true)
                         {
                             <div class="family-header-cap">
                                 <span class="cap-label">Cap</span>
@@ -193,10 +202,47 @@
                                                Their sum is meaningless, so we never show a blended balance. *@
                                             @foreach (var baseName in _baseNames)
                                             {
-                                                <GridColumn HeaderText="@baseName" TextAlign="TextAlign.Right" Width="220">
+                                                <GridColumn HeaderText="@($"{baseName} YTD")" TextAlign="TextAlign.Right" Width="220">
                                                     <Template>
                                                         @{ var br = (AccumulatorEmployeeBalanceRow)context; }
                                                         @Fmt(BaseValue(br.EmploymentId, baseName))
+                                                    </Template>
+                                                </GridColumn>
+                                            }
+                                            @if (_combinedDeferralLimit.HasValue)
+                                            {
+                                                @* §402(g): the legs share ONE limit, so the combined YTD and the
+                                                   headroom against it (limit − combined) are both meaningful.
+                                                   r.YtdBalance already sums the member legs. *@
+                                                <GridColumn HeaderText="Combined YTD" TextAlign="TextAlign.Right" Width="160">
+                                                    <Template>
+                                                        @{ var r = (AccumulatorEmployeeBalanceRow)context; }
+                                                        @Fmt(r.YtdBalance)
+                                                    </Template>
+                                                </GridColumn>
+                                                <GridColumn HeaderText="Amount Left to Cap" TextAlign="TextAlign.Right" Width="290">
+                                                    <Template>
+                                                        @{
+                                                            var r = (AccumulatorEmployeeBalanceRow)context;
+                                                            decimal lim = _combinedDeferralLimit!.Value;
+                                                            decimal rem = lim - r.YtdBalance;
+                                                        }
+                                                        @if (rem < 0)
+                                                        {
+                                                            <span class="cap-reached">@Fmt(rem) <span class="badge badge-danger">REVIEW REQUIRED</span></span>
+                                                        }
+                                                        else if (rem == 0)
+                                                        {
+                                                            <span class="cap-reached">@Fmt(rem) <span class="badge badge-danger">CAP REACHED</span></span>
+                                                        }
+                                                        else if (lim > 0 && rem / lim <= 0.10m)
+                                                        {
+                                                            <span class="cap-warning">@Fmt(rem)</span>
+                                                        }
+                                                        else
+                                                        {
+                                                            <span>@Fmt(rem)</span>
+                                                        }
                                                     </Template>
                                                 </GridColumn>
                                             }
@@ -324,6 +370,21 @@
                                             <div class="accum-total">
                                                 <span class="accum-total__label">@dt.Label</span>
                                                 <span class="accum-total__value">@Fmt(dt.Total)</span>
+                                            </div>
+                                        }
+                                        @if (_combinedDeferralLimit.HasValue)
+                                        {
+                                            @* §402(g): the per-leg totals share ONE limit, so the combined
+                                               figure IS meaningful here (unlike non-additive wage bases). *@
+                                            var _combinedTotal = _filteredBalances.Sum(r => r.YtdBalance);
+                                            var _atCapCombined = _filteredBalances.Count(r => r.YtdBalance >= _combinedDeferralLimit!.Value);
+                                            <div class="accum-total">
+                                                <span class="accum-total__label">Combined</span>
+                                                <span class="accum-total__value">@Fmt(_combinedTotal)</span>
+                                            </div>
+                                            <div class="accum-total">
+                                                <span class="accum-total__label">At Cap</span>
+                                                <span class="accum-total__value">@_atCapCombined of @_filteredBalances.Count</span>
                                             </div>
                                         }
                                     }
@@ -597,6 +658,9 @@
     private Dictionary<Guid, Dictionary<string, decimal>> _baseByEmp          = new();
     private IReadOnlyList<AccumulatorResetHistoryRow>    _resetHistory     = [];
     private DateOnly?                                     _asOfDate;
+    // §402(g) combined deferral limit governing the family this year (ADR-021), if any —
+    // e.g. RETIREMENT's 401K-PRE + 401K-ROTH share one limit. Null = no group governs it.
+    private decimal?                                     _combinedDeferralLimit;
     private AccumulatorFamilyListItem?                   _selectedFamily;
     private AccumulatorFamilyMeta?                       _familyMeta;
     private int                                          _selectedYear;
@@ -684,6 +748,7 @@
         _baseByEmp        = new();
         _resetHistory     = [];
         _asOfDate         = null;
+        _combinedDeferralLimit = null;
         _hasRetroactive   = false;
         _filteredBalances   = [];
         _familySearch       = "";
@@ -733,6 +798,8 @@
         _resetHistory     = await QueryService.GetResetHistoryAsync(
             _selectedFamily!.FamilyId, EntityId);
         _asOfDate         = await QueryService.GetAsOfDateAsync(
+            _selectedFamily!.FamilyId, EntityId, tab.Year);
+        _combinedDeferralLimit = await QueryService.GetCombinedDeferralLimitAsync(
             _selectedFamily!.FamilyId, EntityId, tab.Year);
         _filteredBalances = _employeeBalances;
 
@@ -1021,11 +1088,23 @@
     {
         if (_baseNames.Count > 1)
         {
+            // §402(g) families also carry the combined total + headroom against the one limit;
+            // non-additive wage-base families just carry the per-base columns.
+            var lim = _combinedDeferralLimit;
+            var tail = lim.HasValue
+                ? new[] { "Combined YTD", "Amount Left to Cap", "Last Updated" }
+                : new[] { "Last Updated" };
             var header = new[] { "Employee #", "Employee" }
-                .Concat(_baseNames).Append("Last Updated").ToArray();
-            var rows = _employeeBalances.Select(r => new[] { r.EmployeeNumber, r.EmployeeName }
-                .Concat(_baseNames.Select(b => BaseValue(r.EmploymentId, b).ToString("F2")))
-                .Append(r.LastUpdated.ToString("yyyy-MM-dd")).ToArray()).ToList();
+                .Concat(_baseNames.Select(b => $"{b} YTD")).Concat(tail).ToArray();
+            var rows = _employeeBalances.Select(r =>
+            {
+                var cells = new[] { r.EmployeeNumber, r.EmployeeName }
+                    .Concat(_baseNames.Select(b => BaseValue(r.EmploymentId, b).ToString("F2")));
+                if (lim.HasValue)
+                    cells = cells.Append(r.YtdBalance.ToString("F2"))
+                                 .Append((lim.Value - r.YtdBalance).ToString("F2"));
+                return cells.Append(r.LastUpdated.ToString("yyyy-MM-dd")).ToArray();
+            }).ToList();
             return (header, rows);
         }
 
