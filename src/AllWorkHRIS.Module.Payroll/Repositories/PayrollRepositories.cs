@@ -1004,7 +1004,12 @@ public sealed class AccumulatorRepository : IAccumulatorRepository
             JOIN   accumulator_definition ad ON ad.accumulator_definition_id = ab.accumulator_definition_id
             JOIN   payroll_period pp          ON pp.period_id = ab.calendar_context_id
             WHERE  ab.participant_id    = @EmploymentId
-              AND  ad.reset_type        = 'CALENDAR_YEAR'
+              -- CALENDAR_YEAR: tax/wage-base accumulators. PLAN_YEAR: 401(k) elective-deferral
+              -- accumulators (401K-PRE/401K-ROTH) the §402(g) clamp reads (ADR-021). §402(g) is a
+              -- statutory CALENDAR-year limit, so these are bounded on the same pay-date/calendar
+              -- basis below — correct for a 1/1 plan year. (A non-calendar plan-year limit would
+              -- need its own plan-year boundary math; none is consumed by a cap today.)
+              AND  ad.reset_type IN ('CALENDAR_YEAR', 'PLAN_YEAR')
               AND  (
                       -- ADR-022: pay-date basis (constructive receipt) — prior periods PAID in this tax year
                       (ad.year_basis = 'PAY_DATE'

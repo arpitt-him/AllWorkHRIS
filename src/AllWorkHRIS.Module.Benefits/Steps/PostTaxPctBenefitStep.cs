@@ -13,6 +13,8 @@ public sealed class PostTaxPctBenefitStep : ICalculationStep
 {
     private readonly decimal _rate;
     private readonly decimal _coverageFraction;
+    private readonly decimal? _combinedDeferralLimit;
+    private readonly IReadOnlyList<string>? _deferralMemberCodes;
 
     public string        StepCode       { get; }
     public int           SequenceNumber { get; }
@@ -22,12 +24,16 @@ public sealed class PostTaxPctBenefitStep : ICalculationStep
         string  stepCode,
         int     sequenceNumber,
         decimal rate,
-        decimal coverageFraction)
+        decimal coverageFraction,
+        decimal? combinedDeferralLimit = null,
+        IReadOnlyList<string>? deferralMemberCodes = null)
     {
         StepCode          = stepCode;
         SequenceNumber    = sequenceNumber;
         _rate             = rate;
         _coverageFraction = coverageFraction;
+        _combinedDeferralLimit = combinedDeferralLimit;
+        _deferralMemberCodes   = deferralMemberCodes;
     }
 
     public Task<CalculationContext> ExecuteAsync(CalculationContext ctx, CancellationToken ct = default)
@@ -35,6 +41,12 @@ public sealed class PostTaxPctBenefitStep : ICalculationStep
         // IncomeTaxableWages has been reduced by pre-tax deductions; this is the
         // post-deduction gross base for Roth and other post-tax percentage contributions.
         var amount = Money.Round(ctx.IncomeTaxableWages * _rate * _coverageFraction);
+
+        // §402(g) combined limit (ADR-021): Roth takes only the headroom left after this period's
+        // pre-tax deferral (already posted to StepResults) and prior-run member YTD.
+        if (_combinedDeferralLimit.HasValue && _deferralMemberCodes is not null)
+            amount = DeferralLimitClamp.Apply(
+                amount, _combinedDeferralLimit.Value, _deferralMemberCodes, ctx);
 
         ctx = ctx with
         {

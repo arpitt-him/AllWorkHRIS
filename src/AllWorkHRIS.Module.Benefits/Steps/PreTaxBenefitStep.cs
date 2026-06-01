@@ -12,6 +12,8 @@ public sealed class PreTaxBenefitStep : ICalculationStep
     private readonly decimal? _employerAmount;
     private readonly bool   _reducesIncomeTax;
     private readonly bool   _reducesFica;
+    private readonly decimal? _combinedDeferralLimit;
+    private readonly IReadOnlyList<string>? _deferralMemberCodes;
 
     public string        StepCode       { get; }
     public int           SequenceNumber { get; }
@@ -23,7 +25,9 @@ public sealed class PreTaxBenefitStep : ICalculationStep
         decimal employeeAmount,
         decimal? employerAmount,
         bool    reducesIncomeTax,
-        bool    reducesFica)
+        bool    reducesFica,
+        decimal? combinedDeferralLimit = null,
+        IReadOnlyList<string>? deferralMemberCodes = null)
     {
         StepCode       = stepCode;
         SequenceNumber = sequenceNumber;
@@ -31,21 +35,31 @@ public sealed class PreTaxBenefitStep : ICalculationStep
         _employerAmount   = employerAmount;
         _reducesIncomeTax = reducesIncomeTax;
         _reducesFica      = reducesFica;
+        _combinedDeferralLimit = combinedDeferralLimit;
+        _deferralMemberCodes   = deferralMemberCodes;
     }
 
     public Task<CalculationContext> ExecuteAsync(CalculationContext ctx, CancellationToken ct = default)
     {
-        if (_reducesIncomeTax) ctx = ctx.WithReducedIncomeTaxableWages(_employeeAmount);
-        if (_reducesFica)      ctx = ctx.WithReducedFicaTaxableWages(_employeeAmount);
+        // §402(g) combined limit (ADR-021): clamp the elective deferral to the headroom shared
+        // across this group's members. Pre-tax runs first, so it fills the combined room before Roth.
+        var employeeAmount = _employeeAmount;
+        if (_combinedDeferralLimit.HasValue && _deferralMemberCodes is not null)
+            employeeAmount = DeferralLimitClamp.Apply(
+                employeeAmount, _combinedDeferralLimit.Value, _deferralMemberCodes, ctx);
+
+        // Wage reductions and net pay must use the CLAMPED amount, not the elected amount.
+        if (_reducesIncomeTax) ctx = ctx.WithReducedIncomeTaxableWages(employeeAmount);
+        if (_reducesFica)      ctx = ctx.WithReducedFicaTaxableWages(employeeAmount);
 
         // Record employee deduction as a negative net-pay impact (not via WithStepResult — no ComputedTax)
-        ctx = ctx with { NetPay = ctx.NetPay - _employeeAmount };
+        ctx = ctx with { NetPay = ctx.NetPay - employeeAmount };
         ctx = ctx with
         {
-            StepResults = ctx.StepResults.SetItem(StepCode, _employeeAmount)
+            StepResults = ctx.StepResults.SetItem(StepCode, employeeAmount)
         };
 
-        // Record employer contribution if present
+        // Employer contribution is governed by §415, not §402(g) — left unclamped here.
         if (_employerAmount.HasValue && _employerAmount.Value > 0)
             ctx = ctx.WithEmployerStepResult(StepCode + "_ER", _employerAmount.Value);
 

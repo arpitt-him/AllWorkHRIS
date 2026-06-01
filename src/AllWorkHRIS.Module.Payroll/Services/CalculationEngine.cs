@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using Microsoft.Extensions.Logging;
 using AllWorkHRIS.Core;
 using AllWorkHRIS.Core.Pipeline;
@@ -132,6 +133,12 @@ public sealed partial class CalculationEngine : ICalculationEngine
 
             var allBenefitSteps = await _benefitStepProvider.GetStepsForEmployeeAsync(benefitRequest, ct);
 
+            // Prior-period YTD balances — required so cap-aware benefit steps (e.g. the §402(g)
+            // combined 401(k) deferral clamp, ADR-021) measure the running total, not just this
+            // period. Without this the clamp sees 0 YTD every period and never enforces the limit.
+            var benefitYtd = (await _accumulatorService.GetYtdBalancesAsync(input.EmploymentId, input.PayDate))
+                .ToImmutableDictionary();
+
             // Run all benefit steps in sequence order on a single context.
             // Pre-tax steps (seq < 800) reduce IncomeTaxableWages; post-tax PCT steps (seq ≥ 800)
             // then read the already-reduced wage base — ordering handles the dependency.
@@ -149,6 +156,7 @@ public sealed partial class CalculationEngine : ICalculationEngine
                 IncomeTaxableWages = cashGross,
                 FicaTaxableWages   = cashGross,
                 NetPay             = cashGross,
+                YtdBalances        = benefitYtd,
                 JurisdictionCode   = string.Empty
             };
 

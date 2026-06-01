@@ -41,6 +41,10 @@ public sealed class BenefitsModule : IPlatformModule
                .As<IDeductionEmployerMatchRepository>()
                .InstancePerLifetimeScope();
 
+        builder.RegisterType<DeferralLimitGroupRepository>()
+               .As<IDeferralLimitGroupRepository>()
+               .InstancePerLifetimeScope();
+
         builder.RegisterType<BenefitElectionService>()
                .As<IBenefitElectionService>()
                .InstancePerLifetimeScope();

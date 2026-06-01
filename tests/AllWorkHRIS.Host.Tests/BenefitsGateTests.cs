@@ -64,6 +64,7 @@ public sealed class BenefitsGateTests : IAsyncLifetime
 
         var rateTableRepo  = new DeductionRateTableRepository(_connectionFactory);
         var matchRepo      = new DeductionEmployerMatchRepository(_connectionFactory);
+        var deferralRepo   = new DeferralLimitGroupRepository(_connectionFactory);
         IBenefitCalculator[] calculators =
         [
             new FixedPerPeriodCalculator(),
@@ -73,7 +74,7 @@ public sealed class BenefitsGateTests : IAsyncLifetime
             new CoverageBasedCalculator()
         ];
         var calculatorFactory = new BenefitCalculatorFactory(calculators);
-        var benefitProvider   = new BenefitStepProvider(_electionRepo, rateTableRepo, matchRepo, calculatorFactory);
+        var benefitProvider   = new BenefitStepProvider(_electionRepo, rateTableRepo, matchRepo, deferralRepo, calculatorFactory);
 
         _pipeline = new PayrollPipelineService(
             new TaxRateRepository(_connectionFactory),

@@ -12,17 +12,20 @@ public sealed class BenefitStepProvider : IBenefitStepProvider
     private readonly IBenefitElectionRepository        _electionRepository;
     private readonly IDeductionRateTableRepository     _rateTableRepository;
     private readonly IDeductionEmployerMatchRepository _matchRepository;
+    private readonly IDeferralLimitGroupRepository     _deferralLimitGroupRepository;
     private readonly BenefitCalculatorFactory          _calculatorFactory;
 
     public BenefitStepProvider(
         IBenefitElectionRepository        electionRepository,
         IDeductionRateTableRepository     rateTableRepository,
         IDeductionEmployerMatchRepository matchRepository,
+        IDeferralLimitGroupRepository     deferralLimitGroupRepository,
         BenefitCalculatorFactory          calculatorFactory)
     {
         _electionRepository  = electionRepository;
         _rateTableRepository = rateTableRepository;
         _matchRepository     = matchRepository;
+        _deferralLimitGroupRepository = deferralLimitGroupRepository;
         _calculatorFactory   = calculatorFactory;
     }
 
@@ -37,6 +40,12 @@ public sealed class BenefitStepProvider : IBenefitStepProvider
             request.EmploymentId, periodStart, periodEnd, ct)).ToList();
 
         if (elections.Count == 0) return [];
+
+        // §402(g) combined elective-deferral limits (ADR-021): resolve the groups active on the pay
+        // date, then map each member accumulator code → (combined limit, full member set). A member
+        // step clamps against the sum of its group's members, not its own leg. Global default only
+        // for now (legalEntityId null) — entity-override wiring mirrors the match path, deferred.
+        var deferralLimitByCode = await BuildDeferralLimitMapAsync(request.PayDate, ct);
 
         var steps   = new List<ICalculationStep>(elections.Count * 2);
         int preSeq  = 110;
@@ -58,7 +67,8 @@ public sealed class BenefitStepProvider : IBenefitStepProvider
             if (election.CalculationMode == CalculationMode.PctPostTax)
             {
                 var rate = election.ContributionPct ?? 0m;
-                steps.Add(new PostTaxPctBenefitStep(stepCode, postSeq++, rate, fraction));
+                var (postLimit, postMembers) = ResolveDeferralLimit(deferralLimitByCode, stepCode);
+                steps.Add(new PostTaxPctBenefitStep(stepCode, postSeq++, rate, fraction, postLimit, postMembers));
 
                 var postMatch = await LoadMatchRuleAsync(election, request.PayDate, ct);
                 if (postMatch is not null)
@@ -85,10 +95,12 @@ public sealed class BenefitStepProvider : IBenefitStepProvider
 
             if (election.TaxTreatment == TaxTreatment.PreTax)
             {
+                var (preLimit, preMembers) = ResolveDeferralLimit(deferralLimitByCode, stepCode);
                 steps.Add(new PreTaxBenefitStep(
                     stepCode, preSeq++,
                     eeAmount, erAmount,
-                    reducesIncomeTax: true, reducesFica: election.FicaExempt));
+                    reducesIncomeTax: true, reducesFica: election.FicaExempt,
+                    combinedDeferralLimit: preLimit, deferralMemberCodes: preMembers));
 
                 var preMatch = await LoadMatchRuleAsync(election, request.PayDate, ct);
                 if (preMatch is not null)
@@ -120,6 +132,27 @@ public sealed class BenefitStepProvider : IBenefitStepProvider
     private Task<DeductionEmployerMatch?> LoadMatchRuleAsync(
         BenefitDeductionElection election, DateOnly asOf, CancellationToken ct)
         => _matchRepository.GetActiveByDeductionIdAsync(election.DeductionId, asOf, employeeGroupId: null, ct);
+
+    // Member accumulator code → (combined §402(g) limit, full member set) for the pay date.
+    // A code appears once per group; the same member set is shared by every member of that group.
+    private async Task<IReadOnlyDictionary<string, (decimal Limit, IReadOnlyList<string> Members)>>
+        BuildDeferralLimitMapAsync(DateOnly payDate, CancellationToken ct)
+    {
+        var groups = await _deferralLimitGroupRepository.GetActiveGroupsAsync(payDate, legalEntityId: null, ct);
+        if (groups.Count == 0)
+            return new Dictionary<string, (decimal, IReadOnlyList<string>)>();
+
+        var map = new Dictionary<string, (decimal, IReadOnlyList<string>)>(StringComparer.OrdinalIgnoreCase);
+        foreach (var group in groups)
+            foreach (var memberCode in group.MemberAccumulatorCodes)
+                map[memberCode] = (group.LimitAmount, group.MemberAccumulatorCodes);
+
+        return map;
+    }
+
+    private static (decimal? Limit, IReadOnlyList<string>? Members) ResolveDeferralLimit(
+        IReadOnlyDictionary<string, (decimal Limit, IReadOnlyList<string> Members)> map, string stepCode)
+        => map.TryGetValue(stepCode, out var hit) ? (hit.Limit, hit.Members) : (null, null);
 
     private static MatchBenefitStep BuildMatchStep(
         string stepCode, int seq, DeductionEmployerMatch matchRule, PipelineRequest request)
