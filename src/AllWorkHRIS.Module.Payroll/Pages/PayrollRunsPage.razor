@@ -98,6 +98,8 @@
                                     Width="100%"
                                     Placeholder="— select —">
                         <DropDownListFieldSettings Value="PeriodId" Text="PeriodLabel" />
+                        <DropDownListEvents TValue="Guid" TItem="PeriodOption"
+                                            ValueChange="OnNewRunPeriodChangedAsync" />
                     </SfDropDownList>
                 </div>
                 <div class="form-field">
@@ -107,6 +109,8 @@
                                     @bind-Value="_newRun.RunTypeId"
                                     Width="100%">
                         <DropDownListFieldSettings Value="Value" Text="Label" />
+                        <DropDownListEvents TValue="int" TItem="IntOption"
+                                            ValueChange="OnRunTypeChangedAsync" />
                     </SfDropDownList>
                 </div>
                 <div class="form-field">
@@ -115,6 +119,39 @@
                                Placeholder="e.g. April Biweekly" />
                 </div>
             </div>
+
+            @* Phase 12.6 — targeted population for non-Regular runs. A Regular run always pays the
+               full context (no picker); Supplemental/Adjustment/Correction runs target a subset. *@
+            @if (!IsRegularType && _newRun.PeriodId != Guid.Empty)
+            {
+                <div class="scoped-run-section" style="margin-top:1rem; border-top:1px solid var(--color-border, #e5e7eb); padding-top:1rem;">
+                    <div class="form-field" style="max-width:520px;">
+                        <label class="form-label">Trigger reason <span style="color:var(--color-danger,#dc2626)">*</span></label>
+                        <SfTextBox @bind-Value="_newRun.TriggerReason"
+                                   Placeholder="Why this targeted run? e.g. catch up 2 EEs missed in the Regular run"
+                                   Width="100%" />
+                    </div>
+                    <div style="display:flex; align-items:center; gap:1rem; margin:0.75rem 0 0.5rem;">
+                        <span class="form-label" style="margin:0;">Target employees <span style="color:var(--color-danger,#dc2626)">*</span></span>
+                        <button class="btn-secondary" type="button" @onclick="CarryOverExceptionsAsync" disabled="@(_carryoverCount == 0)">
+                            Carry over this period's exceptions@(_carryoverCount > 0 ? $" ({_carryoverCount})" : "")
+                        </button>
+                        <span class="text-muted text-sm">@_targetableEmployees.Count active employee(s) in this context</span>
+                    </div>
+                    <SfGrid @ref="_targetGrid" TValue="RunTargetEmployee" DataSource="@_targetableEmployees"
+                            AllowPaging="true" AllowSorting="true" Height="260" CssClass="e-gridhover">
+                        <GridPageSettings PageSize="10" />
+                        <GridSelectionSettings Type="SelectionType.Multiple" CheckboxOnly="true" PersistSelection="true" />
+                        <GridColumns>
+                            <GridColumn Type="ColumnType.CheckBox" Width="50" />
+                            <GridColumn Field="@nameof(RunTargetEmployee.EmploymentId)" IsPrimaryKey="true" Visible="false" />
+                            <GridColumn Field="@nameof(RunTargetEmployee.EmployeeNumber)" HeaderText="EE #" Width="120" />
+                            <GridColumn Field="@nameof(RunTargetEmployee.Name)" HeaderText="Employee" />
+                        </GridColumns>
+                    </SfGrid>
+                </div>
+            }
+
             @if (_newRunError is not null)
             {
                 <div class="alert-error">@_newRunError</div>
@@ -182,10 +219,14 @@
                     </Template>
                 </GridColumn>
                 <GridColumn Field="PayDate" HeaderText="Pay Date" Width="120" Format="MM/dd/yyyy" />
-                <GridColumn Field="RunTypeId" HeaderText="Type" Width="130">
+                <GridColumn Field="RunTypeId" HeaderText="Type" Width="170">
                     <Template>
                         @{ var run = (PayrollRun)context; }
                         <span class="badge badge-neutral">@GetRunTypeLabel(run.RunTypeId)</span>
+                        @if (run.RunScopeId is not null)
+                        {
+                            <span class="badge badge-info" title="Targeted run — pays a selected subset of employees">Scoped</span>
+                        }
                     </Template>
                 </GridColumn>
                 <GridColumn Field="RunStatusId" HeaderText="Status" Width="180">
@@ -276,13 +317,17 @@
     ];
 
     private record IntOption(int Value, string Label);
-    private static readonly List<IntOption> _runTypeOptions =
-    [
-        new(1, "Regular"),
-        new(2, "Supplemental"),
-        new(3, "Adjustment"),
-        new(4, "Correction"),
-    ];
+    // Lookup-driven (ADR-017 A3 — never hard-code lookup ids): the initiation-eligible run types.
+    private List<IntOption> _runTypeOptions = [];
+    private int             _regularRunTypeId;
+
+    // Phase 12.6 — scoped-run targeting state.
+    private List<RunTargetEmployee>     _targetableEmployees = [];
+    private SfGrid<RunTargetEmployee>?  _targetGrid;
+    private int                         _carryoverCount;
+    private bool                        _carryoverUsed;
+    private IReadOnlyList<Guid>?        _pendingTargets;
+    private bool IsRegularType => _newRun.RunTypeId == _regularRunTypeId;
 
     private record PeriodOption(Guid PeriodId, string PeriodLabel);
     private List<PeriodOption> PeriodOptions => _openPeriods
@@ -319,6 +364,12 @@
                               _calculatedStatus, S("UNDER_REVIEW"), _approvingStatus,
                               _approvedStatus];
         _statusById = LookupCache.GetAll(LookupTables.RunStatus).ToDictionary(e => e.Id);
+
+        _regularRunTypeId = LookupCache.GetId(LookupTables.RunType, "REGULAR");
+        _runTypeOptions = LookupCache.GetAll(LookupTables.RunType)
+            .Where(e => e.Code is "REGULAR" or "SUPPLEMENTAL" or "ADJUSTMENT" or "CORRECTION")
+            .Select(e => new IntOption(e.Id, e.Label))
+            .ToList();
     }
 
     private List<PayrollRun> _filteredRuns => _statusFilter switch
@@ -400,6 +451,7 @@
         _newRun.ContextId = args.Value;
         _newRun.PeriodId  = Guid.Empty;
         _openPeriods = (await ContextRepo.GetOpenPeriodsAsync(args.Value)).ToList();
+        await LoadTargetingDataAsync();
     }
 
     private void ToggleNewRunForm()
@@ -409,7 +461,60 @@
         _confirmEarlyRun = false;
         _selectedPeriod  = null;
         if (_showNewRunForm)
-            _newRun = new NewRunFormModel { ContextId = _selectedContextId, RunTypeId = 1 };
+        {
+            _newRun = new NewRunFormModel { ContextId = _selectedContextId, RunTypeId = _regularRunTypeId };
+            ResetTargeting();
+        }
+    }
+
+    // Phase 12.6 — targeting picker state.
+    private void ResetTargeting()
+    {
+        _targetableEmployees = [];
+        _carryoverCount      = 0;
+        _carryoverUsed       = false;
+        _pendingTargets      = null;
+    }
+
+    private async Task LoadTargetingDataAsync()
+    {
+        if (IsRegularType || _newRun.ContextId == Guid.Empty)
+        {
+            ResetTargeting();
+            return;
+        }
+        _targetableEmployees = [.. await RunService.GetTargetableEmployeesAsync(_newRun.ContextId)];
+        _carryoverCount      = _newRun.PeriodId == Guid.Empty
+            ? 0
+            : (await RunService.GetCarryoverEmploymentIdsAsync(_newRun.PeriodId)).Count;
+        _carryoverUsed       = false;
+    }
+
+    private async Task OnRunTypeChangedAsync(ChangeEventArgs<int, IntOption> args)
+    {
+        _newRun.RunTypeId = args.Value;
+        await LoadTargetingDataAsync();
+    }
+
+    private async Task OnNewRunPeriodChangedAsync(ChangeEventArgs<Guid, PeriodOption> args)
+    {
+        _newRun.PeriodId = args.Value;
+        if (!IsRegularType)
+            _carryoverCount = (await RunService.GetCarryoverEmploymentIdsAsync(_newRun.PeriodId)).Count;
+    }
+
+    private async Task CarryOverExceptionsAsync()
+    {
+        if (_targetGrid is null || _newRun.PeriodId == Guid.Empty) return;
+        var ids = (await RunService.GetCarryoverEmploymentIdsAsync(_newRun.PeriodId)).ToHashSet();
+        if (ids.Count == 0) return;
+        var indices = _targetableEmployees
+            .Select((e, i) => (e, i))
+            .Where(t => ids.Contains(t.e.EmploymentId))
+            .Select(t => t.i)
+            .ToArray();
+        await _targetGrid.SelectRowsAsync(indices);
+        _carryoverUsed = true;
     }
 
     private async Task InitiateRunAsync()
@@ -418,6 +523,29 @@
         {
             _newRunError = "Payroll context and period are required.";
             return;
+        }
+
+        // Phase 12.6 — a non-Regular run targets a selected subset; gather + validate now so the
+        // error surfaces before the early-run confirm. Selection is read from the grid (persisted
+        // across paging); the service + job both re-validate context membership.
+        _pendingTargets = null;
+        if (!IsRegularType)
+        {
+            var selected = _targetGrid is null
+                ? new List<RunTargetEmployee>()
+                : await _targetGrid.GetSelectedRecordsAsync();
+            var targetIds = selected.Select(s => s.EmploymentId).Distinct().ToList();
+            if (targetIds.Count == 0)
+            {
+                _newRunError = "Select at least one employee to target — or choose a Regular run to pay the whole context.";
+                return;
+            }
+            if (string.IsNullOrWhiteSpace(_newRun.TriggerReason))
+            {
+                _newRunError = "A trigger reason is required for a targeted run.";
+                return;
+            }
+            _pendingTargets = targetIds;
         }
 
         _selectedPeriod = _openPeriods.FirstOrDefault(p => p.PeriodId == _newRun.PeriodId);
@@ -461,13 +589,17 @@
         {
             await RunService.InitiateRunAsync(new InitiatePayrollRunCommand
             {
-                PayrollContextId = _newRun.ContextId,
-                PeriodId         = _newRun.PeriodId,
-                RunTypeId        = _newRun.RunTypeId,
-                RunDescription   = string.IsNullOrWhiteSpace(_newRun.Description) ? null : _newRun.Description,
-                InitiatedBy      = _currentUserId,
-                ParentRunId      = null
+                PayrollContextId    = _newRun.ContextId,
+                PeriodId            = _newRun.PeriodId,
+                RunTypeId           = _newRun.RunTypeId,
+                RunDescription      = string.IsNullOrWhiteSpace(_newRun.Description) ? null : _newRun.Description,
+                InitiatedBy         = _currentUserId,
+                ParentRunId         = null,
+                TargetEmploymentIds = _pendingTargets,
+                TriggerReason       = string.IsNullOrWhiteSpace(_newRun.TriggerReason) ? null : _newRun.TriggerReason!.Trim(),
+                ExceptionDerived    = _carryoverUsed
             });
+            _pendingTargets = null;
             _showNewRunForm = false;
             await LoadRunsAsync();
             StartPolling();
@@ -565,9 +697,10 @@
 
     private sealed class NewRunFormModel
     {
-        public Guid   ContextId   { get; set; }
-        public Guid   PeriodId    { get; set; }
-        public int    RunTypeId   { get; set; } = 1;
-        public string Description { get; set; } = "";
+        public Guid    ContextId     { get; set; }
+        public Guid    PeriodId      { get; set; }
+        public int     RunTypeId     { get; set; }
+        public string  Description   { get; set; } = "";
+        public string? TriggerReason { get; set; }   // Phase 12.6 — required for a scoped run
     }
 }

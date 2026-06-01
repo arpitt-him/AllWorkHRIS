@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Threading.Channels;
 using Autofac;
 using AllWorkHRIS.Core.Events;
@@ -205,7 +206,7 @@ public sealed class PayrollRunJob : BackgroundService
             {
                 PayrollRunResultSetId        = Guid.NewGuid(),
                 PayrollRunId                 = runId,
-                RunScopeId                   = null,
+                RunScopeId                   = run.RunScopeId,
                 SourcePeriodId               = run.PeriodId,
                 ExecutionPeriodId            = run.PeriodId,
                 ParentPayrollRunResultSetId  = null,
@@ -233,12 +234,11 @@ public sealed class PayrollRunJob : BackgroundService
             var period         = await contextRepo.GetPeriodByIdAsync(run.PeriodId)
                                  ?? throw new InvalidOperationException($"Period {run.PeriodId} not found for run {runId}");
 
-            // Resolve the employee population for this run via payroll_profile
-            var population = await ResolvePopulationAsync(run, profileRepo, ct);
-            var total      = population.Count;
-
-            // Record employees blocked by incomplete onboarding tasks
-            var blocked = await profileRepo.GetActiveBlockedEmploymentIdsByContextAsync(run.PayrollContextId);
+            // Resolve the employee population + blocked set for this run. A full-context run
+            // pays all active+cleared employees and flags every blocked employee; a scoped
+            // run (Phase 12.6) narrows both to its validated target list.
+            var (population, blocked) = await ResolvePopulationAsync(run, profileRepo, runRepo, lookup);
+            var total = population.Count;
             if (blocked.Count > 0)
             {
                 var exceptionTime = TdoNow();
@@ -286,7 +286,7 @@ public sealed class PayrollRunJob : BackgroundService
                     EmployeePayrollResultId          = resultId,
                     PayrollRunResultSetId             = resultSet.PayrollRunResultSetId,
                     PayrollRunId                      = runId,
-                    RunScopeId                        = null,
+                    RunScopeId                        = run.RunScopeId,
                     EmploymentId                      = employmentId,
                     PersonId                          = Guid.Empty, // TODO: resolve via PayrollProfile
                     PayrollContextId                  = run.PayrollContextId,
@@ -423,9 +423,66 @@ public sealed class PayrollRunJob : BackgroundService
         }
     }
 
-    private static Task<IReadOnlyList<Guid>> ResolvePopulationAsync(
-        PayrollRun run, IPayrollProfileRepository profileRepo, CancellationToken ct)
-        => profileRepo.GetActiveEmploymentIdsByContextAsync(run.PayrollContextId);
+    // Resolves the run's employee population and the blocked set to flag as exceptions.
+    // Full-context run: pay all active+cleared employees and flag every blocked employee in the
+    // context (unchanged). Scoped run (Phase 12.6): narrow both to the run_scope's validated
+    // target list — a supplemental/catch-up run pays only its chosen stragglers, never the whole
+    // context. Targets are validated to belong to the run's payroll context (legal-entity scoping).
+    private static async Task<(IReadOnlyList<Guid> Population, IReadOnlyList<Guid> Blocked)> ResolvePopulationAsync(
+        PayrollRun run, IPayrollProfileRepository profileRepo, IPayrollRunRepository runRepo, ILookupCache lookup)
+    {
+        var eligible = await profileRepo.GetActiveEmploymentIdsByContextAsync(run.PayrollContextId);
+        var blocked  = await profileRepo.GetActiveBlockedEmploymentIdsByContextAsync(run.PayrollContextId);
+
+        if (run.RunScopeId is not Guid scopeId)
+            return (eligible, blocked);  // full-context run — unchanged behaviour
+
+        var scope = await runRepo.GetRunScopeAsync(scopeId)
+            ?? throw new InvalidOperationException(
+                $"Run {run.RunId} references run_scope {scopeId} which was not found.");
+
+        var targets = ParseScopeTargets(scope, lookup);
+
+        // Reject any target not enrolled in this run's payroll context — a scoped run must never
+        // reach across pay groups / legal entities (the application's core scoping invariant).
+        var enrolled  = (await profileRepo.GetEnrolledEmploymentIdsByContextAsync(run.PayrollContextId)).ToHashSet();
+        var outsiders = targets.Where(t => !enrolled.Contains(t)).ToList();
+        if (outsiders.Count > 0)
+            throw new InvalidOperationException(
+                $"Run {run.RunId}: run_scope {scopeId} targets {outsiders.Count} employment(s) not enrolled " +
+                $"in payroll context {run.PayrollContextId}: {string.Join(", ", outsiders.Take(5))}" +
+                (outsiders.Count > 5 ? " …" : ""));
+
+        var targetSet = targets.ToHashSet();
+        return (eligible.Where(targetSet.Contains).ToList(),
+                blocked.Where(targetSet.Contains).ToList());
+    }
+
+    // EXPLICIT / EXCEPTION population methods carry a JSON array of employment_id strings (the
+    // resolved target list). QUERY-method scopes aren't produced by the current UI / unsupported.
+    private static IReadOnlyList<Guid> ParseScopeTargets(RunScope scope, ILookupCache lookup)
+    {
+        var method = lookup.GetCode(LookupTables.PopulationMethod, scope.PopulationMethodId);
+        if (method is not ("EXPLICIT" or "EXCEPTION"))
+            throw new NotSupportedException(
+                $"run_scope {scope.RunScopeId}: population_method '{method}' is not supported yet (EXPLICIT / EXCEPTION only).");
+
+        List<string>? raw;
+        try { raw = JsonSerializer.Deserialize<List<string>>(scope.PopulationDefinition); }
+        catch (JsonException ex)
+        {
+            throw new InvalidOperationException(
+                $"run_scope {scope.RunScopeId}: population_definition is not a valid JSON id array.", ex);
+        }
+
+        return (raw ?? [])
+            .Select(s => Guid.TryParse(s, out var g)
+                ? g
+                : throw new InvalidOperationException(
+                    $"run_scope {scope.RunScopeId}: population_definition contains a non-GUID entry '{s}'."))
+            .Distinct()
+            .ToList();
+    }
 
     // -------------------------------------------------------------
     // Approval path — ADR-017 (Phase 12.5.3)

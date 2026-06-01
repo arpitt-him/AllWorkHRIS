@@ -90,6 +90,49 @@ public sealed class PayrollRunService : IPayrollRunService
             ?? throw new InvalidOperationException($"Payroll period {command.PeriodId} not found.");
 
         var now = _temporal.GetOperativeNow();
+
+        // Phase 12.6 — a scoped (targeted) run: create the run_scope defining its population, then
+        // link the run to it. Only non-Regular runs may be scoped; a trigger reason is required;
+        // the scope is parented to the period's Regular run (the run it supplements).
+        Guid? runScopeId  = null;
+        Guid? parentRunId = command.ParentRunId;
+        if (command.TargetEmploymentIds is { Count: > 0 } targets)
+        {
+            if (command.RunTypeId == _lookup.GetId(LookupTables.RunType, "REGULAR"))
+                throw new InvalidOperationException(
+                    "A Regular run pays the full payroll context and cannot be scoped to selected employees. " +
+                    "Use a Supplemental, Adjustment, or Correction run to target a subset.");
+            if (string.IsNullOrWhiteSpace(command.TriggerReason))
+                throw new InvalidOperationException("A scoped run requires a trigger reason.");
+
+            var parent = await _runRepo.GetActiveRegularRunForPeriodAsync(command.PeriodId)
+                ?? throw new InvalidOperationException(
+                    "A scoped run requires an existing Regular run for the period to supplement.");
+            parentRunId ??= parent.RunId;
+
+            var distinctTargets = targets.Distinct().ToList();
+            var scope = new RunScope
+            {
+                RunScopeId           = Guid.NewGuid(),
+                ParentRunId          = parent.RunId,
+                PayrollContextId     = command.PayrollContextId,
+                ScopeTypeId          = _lookup.GetId(LookupTables.ScopeType, "CATCH_UP"),
+                ScopeStatusId        = _lookup.GetId(LookupTables.ScopeStatus, "READY"),
+                TriggerReason        = command.TriggerReason!.Trim(),
+                PopulationMethodId   = _lookup.GetId(LookupTables.PopulationMethod,
+                                          command.ExceptionDerived ? "EXCEPTION" : "EXPLICIT"),
+                PopulationDefinition = JsonSerializer.Serialize(distinctTargets.Select(t => t.ToString()).ToList()),
+                PopulationCount      = distinctTargets.Count,
+                ExceptionDerivedFlag = command.ExceptionDerived,
+                PriorityLevel        = "CATCH_UP",
+                AdjustmentFlag       = false,
+                CreatedBy            = command.InitiatedBy,
+                CreationTimestamp    = now
+            };
+            await _runRepo.InsertRunScopeAsync(scope);
+            runScopeId = scope.RunScopeId;
+        }
+
         var run = new PayrollRun
         {
             RunId                      = Guid.NewGuid(),
@@ -99,8 +142,9 @@ public sealed class PayrollRunService : IPayrollRunService
             RunTypeId                  = command.RunTypeId,
             RunStatusId                = StatusId("DRAFT"),
             RunDescription             = command.RunDescription,
-            ParentRunId                = command.ParentRunId,
+            ParentRunId                = parentRunId,
             RelatedRunGroupId          = null,
+            RunScopeId                 = runScopeId,
             RuleAndConfigVersionRef    = null,
             TemporalOverrideActiveFlag = false,
             TemporalOverrideDate       = null,
@@ -252,6 +296,23 @@ public sealed class PayrollRunService : IPayrollRunService
 
     public Task<IReadOnlyList<PayrollRun>> GetRunsByContextAsync(Guid payrollContextId)
         => _runRepo.GetByContextAsync(payrollContextId);
+
+    // ── Phase 12.6 — scoped/targeted run support ────────────────────────────
+    public Task<IReadOnlyList<RunTargetEmployee>> GetTargetableEmployeesAsync(Guid payrollContextId)
+        => _runRepo.GetTargetableEmployeesByContextAsync(payrollContextId);
+
+    public async Task<IReadOnlyList<Guid>> GetCarryoverEmploymentIdsAsync(Guid periodId)
+    {
+        // The catch-up case: pre-fill the picker from the period's Regular run exceptions
+        // (BLOCKING_TASKS_INCOMPLETE, NET_PAY_FLOOR_APPLIED, etc.). No Regular run yet → empty.
+        var parent = await _runRepo.GetActiveRegularRunForPeriodAsync(periodId);
+        if (parent is null) return [];
+        var exceptions = await _runRepo.GetRunExceptionsAsync(parent.RunId);
+        return exceptions.Select(e => e.EmploymentId).Distinct().ToList();
+    }
+
+    public Task<RunScope?> GetRunScopeAsync(Guid runScopeId)
+        => _runRepo.GetRunScopeAsync(runScopeId);
 
     private async Task<PayrollRun> RequireRunAsync(Guid runId)
         => await _runRepo.GetByIdAsync(runId)

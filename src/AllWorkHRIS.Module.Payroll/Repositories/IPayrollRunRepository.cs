@@ -44,4 +44,16 @@ public interface IPayrollRunRepository
     Task SetRunTimestampsAsync(Guid runId, DateTimeOffset startTimestamp, DateTimeOffset? endTimestamp, Guid updatedBy);
     Task InsertRunExceptionAsync(PayrollRunException exception);
     Task<IReadOnlyList<PayrollRunException>> GetRunExceptionsAsync(Guid runId);
+
+    // Phase 12.6 — scoped/targeted runs. A non-Regular run that targets a subset of
+    // employees carries a run_scope row defining that population; the run links to it
+    // via payroll_run.run_scope_id.
+    Task<RunScope?> GetRunScopeAsync(Guid runScopeId);
+    Task<Guid> InsertRunScopeAsync(RunScope scope);
+
+    // Active employees in a payroll context (EE # + name) — the targeting picker's data source.
+    Task<IReadOnlyList<RunTargetEmployee>> GetTargetableEmployeesByContextAsync(Guid payrollContextId);
 }
+
+// Phase 12.6 — a selectable employee for the scoped-run targeting picker.
+public sealed record RunTargetEmployee(Guid EmploymentId, string EmployeeNumber, string Name);

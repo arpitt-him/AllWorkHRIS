@@ -107,14 +107,14 @@ public sealed class PayrollRunRepository : IPayrollRunRepository
             INSERT INTO payroll_run (
                 run_id, payroll_context_id, period_id, pay_date,
                 run_type_id, run_status_id, run_description,
-                parent_run_id, related_run_group_id, rule_and_config_version_ref,
+                parent_run_id, related_run_group_id, run_scope_id, rule_and_config_version_ref,
                 temporal_override_active_flag, temporal_override_date,
                 initiated_by, run_start_timestamp, run_end_timestamp,
                 created_by, creation_timestamp, last_updated_by, last_update_timestamp
             ) VALUES (
                 @RunId, @PayrollContextId, @PeriodId, @PayDate,
                 @RunTypeId, @RunStatusId, @RunDescription,
-                @ParentRunId, @RelatedRunGroupId, @RuleAndConfigVersionRef,
+                @ParentRunId, @RelatedRunGroupId, @RunScopeId, @RuleAndConfigVersionRef,
                 @TemporalOverrideActiveFlag, @TemporalOverrideDate,
                 @InitiatedBy, @RunStartTimestamp, @RunEndTimestamp,
                 @CreatedBy, @CreationTimestamp, @LastUpdatedBy, @LastUpdateTimestamp
@@ -132,6 +132,7 @@ public sealed class PayrollRunRepository : IPayrollRunRepository
             run.RunDescription,
             run.ParentRunId,
             run.RelatedRunGroupId,
+            run.RunScopeId,
             run.RuleAndConfigVersionRef,
             run.TemporalOverrideActiveFlag,
             TemporalOverrideDate       = run.TemporalOverrideDate?.ToDateTime(TimeOnly.MinValue),
@@ -212,6 +213,87 @@ public sealed class PayrollRunRepository : IPayrollRunRepository
             """;
         using var conn = _connectionFactory.CreateConnection();
         return (await conn.QueryAsync<PayrollRunException>(sql, new { RunId = runId })).ToList();
+    }
+
+    // ── Run scope (Phase 12.6) ──────────────────────────────────────────────
+    public async Task<RunScope?> GetRunScopeAsync(Guid runScopeId)
+    {
+        const string sql = """
+            SELECT run_scope_id            AS RunScopeId,
+                   parent_run_id           AS ParentRunId,
+                   payroll_context_id      AS PayrollContextId,
+                   scope_type_id           AS ScopeTypeId,
+                   scope_status_id         AS ScopeStatusId,
+                   trigger_reason          AS TriggerReason,
+                   population_method_id    AS PopulationMethodId,
+                   population_definition   AS PopulationDefinition,
+                   population_count        AS PopulationCount,
+                   exception_derived_flag  AS ExceptionDerivedFlag,
+                   priority_level          AS PriorityLevel,
+                   adjustment_flag         AS AdjustmentFlag,
+                   created_by              AS CreatedBy,
+                   creation_timestamp      AS CreationTimestamp
+            FROM   run_scope
+            WHERE  run_scope_id = @RunScopeId
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        return await conn.QueryFirstOrDefaultAsync<RunScope>(sql, new { RunScopeId = runScopeId });
+    }
+
+    public async Task<Guid> InsertRunScopeAsync(RunScope scope)
+    {
+        const string sql = """
+            INSERT INTO run_scope (
+                run_scope_id, parent_run_id, payroll_context_id,
+                scope_type_id, scope_status_id, trigger_reason,
+                population_method_id, population_definition, population_count,
+                population_resolved_flag, exception_derived_flag, priority_level,
+                adjustment_flag, created_by, creation_timestamp
+            ) VALUES (
+                @RunScopeId, @ParentRunId, @PayrollContextId,
+                @ScopeTypeId, @ScopeStatusId, @TriggerReason,
+                @PopulationMethodId, @PopulationDefinition, @PopulationCount,
+                TRUE, @ExceptionDerivedFlag, @PriorityLevel,
+                @AdjustmentFlag, @CreatedBy, @CreationTimestamp
+            )
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        await conn.ExecuteAsync(sql, new
+        {
+            scope.RunScopeId,
+            scope.ParentRunId,
+            scope.PayrollContextId,
+            scope.ScopeTypeId,
+            scope.ScopeStatusId,
+            scope.TriggerReason,
+            scope.PopulationMethodId,
+            scope.PopulationDefinition,
+            scope.PopulationCount,
+            scope.ExceptionDerivedFlag,
+            scope.PriorityLevel,
+            scope.AdjustmentFlag,
+            scope.CreatedBy,
+            scope.CreationTimestamp
+        });
+        return scope.RunScopeId;
+    }
+
+    public async Task<IReadOnlyList<RunTargetEmployee>> GetTargetableEmployeesByContextAsync(Guid payrollContextId)
+    {
+        // Active employees enrolled in the context — the targeting picker for a scoped run.
+        const string sql = """
+            SELECT e.employment_id   AS EmploymentId,
+                   e.employee_number AS EmployeeNumber,
+                   p.legal_first_name || ' ' || p.legal_last_name AS Name
+            FROM   payroll_profile pp
+            JOIN   employment e ON e.employment_id = pp.employment_id
+            JOIN   person     p ON p.person_id     = e.person_id
+            WHERE  pp.payroll_context_id = @PayrollContextId
+              AND  pp.enrollment_status  = 'ACTIVE'
+            ORDER BY e.employee_number
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        return (await conn.QueryAsync<RunTargetEmployee>(sql, new { PayrollContextId = payrollContextId })).ToList();
     }
 }
 
@@ -1660,6 +1742,19 @@ public sealed class PayrollProfileRepository : IPayrollProfileRepository
             WHERE payroll_context_id    = @PayrollContextId
               AND enrollment_status     = 'ACTIVE'
               AND blocking_tasks_cleared = TRUE
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        return (await conn.QueryAsync<Guid>(sql, new { PayrollContextId = payrollContextId })).ToList();
+    }
+
+    public async Task<IReadOnlyList<Guid>> GetEnrolledEmploymentIdsByContextAsync(Guid payrollContextId)
+    {
+        // Phase 12.6 — membership universe for scoped-run validation: every employment
+        // enrolled in this context, regardless of enrollment status or blocking. A scoped
+        // target outside this set is cross-context and rejected.
+        const string sql = """
+            SELECT employment_id FROM payroll_profile
+            WHERE payroll_context_id = @PayrollContextId
             """;
         using var conn = _connectionFactory.CreateConnection();
         return (await conn.QueryAsync<Guid>(sql, new { PayrollContextId = payrollContextId })).ToList();

@@ -11,6 +11,7 @@ public sealed record PayrollRun
     public string?     RunDescription             { get; init; }
     public Guid?       ParentRunId                { get; init; }
     public Guid?       RelatedRunGroupId          { get; init; }
+    public Guid?       RunScopeId                 { get; init; }  // Phase 12.6: targets a run_scope population; null = full-context run
     public string?     RuleAndConfigVersionRef    { get; init; }
     public bool        TemporalOverrideActiveFlag { get; init; }
     public DateOnly?   TemporalOverrideDate       { get; init; }

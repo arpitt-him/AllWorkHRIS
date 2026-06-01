@@ -140,7 +140,10 @@ public sealed class PayRegisterQueryService
                        SELECT id FROM lkp_run_status
                        WHERE  code IN ('APPROVED', 'RELEASING', 'RELEASED')
                    )
-            ORDER  BY pr.pay_date DESC
+            -- pay date newest-first; creation_timestamp as the tiebreaker so that within a
+            -- shared pay date (e.g. a Regular run + its 12.6 supplemental) the chronologically
+            -- last run bubbles to the top. Also makes the default-selected run the newest one.
+            ORDER  BY pr.pay_date DESC, pr.creation_timestamp DESC
             """,
             new { LegalEntityId = legalEntityId })).ToList();
     }
