@@ -15,6 +15,13 @@ namespace AllWorkHRIS.Host.Tests.TestSupport;
 internal sealed class StandardHoursPayrollHoursSource : IPayrollHoursSource
 {
     public Task<IReadOnlyList<(DateOnly WorkDate, decimal Hours)>> GetApprovedHoursByEmploymentAndPeriodAsync(
-        Guid employmentId, DateOnly periodStart, DateOnly periodEnd)
+        Guid employmentId, DateOnly periodStart, DateOnly periodEnd, Guid payrollRunId)
         => Task.FromResult<IReadOnlyList<(DateOnly WorkDate, decimal Hours)>>([(periodStart, 40m)]);
+
+    public Task LockHoursForRunAsync(
+        Guid payrollRunId, IReadOnlyList<Guid> employmentIds, DateOnly periodStart, DateOnly periodEnd, CancellationToken ct = default)
+        => Task.CompletedTask;
+
+    public Task UnlockHoursForRunAsync(Guid payrollRunId, CancellationToken ct = default)
+        => Task.CompletedTask;
 }

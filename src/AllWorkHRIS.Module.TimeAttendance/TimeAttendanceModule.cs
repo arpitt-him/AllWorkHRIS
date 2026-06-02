@@ -44,9 +44,10 @@ public sealed class TimeAttendanceModule : IPlatformModule
                .As<ITimeEntryService>()
                .InstancePerLifetimeScope();
 
-        builder.RegisterType<PayrollHandoffService>()
-               .As<IPayrollHandoffService>()
-               .InstancePerLifetimeScope();
+        // Phase 12.7: the standalone PayrollHandoffService (which locked time entries on a manual
+        // handoff step) is retired — locking now happens automatically at run approval
+        // (lock-on-approve) and unlocks on cancel, via the Core IPayrollHoursSource seam. The
+        // /ta/handoff page is repurposed to a read-only Timecard Review.
 
         builder.RegisterType<TimeImportService>()
                .As<ITimeImportService>()
@@ -109,7 +110,7 @@ public sealed class TimeAttendanceModule : IPlatformModule
         };
         yield return new MenuContribution
         {
-            Label       = "Payroll Handoff",
+            Label       = "Timecard Review",
             Href        = "/ta/handoff",
             SortOrder   = 3,
             RequiredRole = "TimeAdmin",

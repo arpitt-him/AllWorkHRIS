@@ -7,19 +7,20 @@
 @using Syncfusion.Blazor.Grids
 @inject IHrisSessionState          SessionState
 @inject TimeAttendanceQueryService QueryService
-@inject IPayrollHandoffService     HandoffService
 
-<PageTitle>Payroll Handoff — AllWork HRIS</PageTitle>
+<PageTitle>Timecard Review — AllWork HRIS</PageTitle>
 
 <div class="page-container">
 
     <div class="page-header">
-        <h2 class="page-title">Payroll Handoff</h2>
+        <h2 class="page-title">Timecard Review</h2>
     </div>
 
     <p style="color:#6b7280;font-size:.875rem;margin-bottom:var(--space-5,1.25rem);">
-        Lock approved time entries and deliver them to the payroll pipeline.
-        Once a period is handed off, its entries cannot be edited.
+        Review what each period will hand to payroll — approved hours ready to be consumed, and hours already locked to a run.
+        There is no separate handoff step: approved time entries are <strong>locked automatically when the payroll run is approved</strong>
+        ("approve = commit and lock the hours that produced it"), and unlocked if that run is cancelled. Use this page to check readiness
+        and spot blockers before running payroll.
     </p>
 
     @if (_loading)
@@ -32,18 +33,6 @@
     }
     else
     {
-        @* ── Handoff results (shown outside grid so always visible) ── *@
-        @foreach (var kvp in _handoffResults)
-        {
-            var periodLabel = _periods.FirstOrDefault(p => p.PeriodId == kvp.Key)?.PeriodLabel ?? "Period";
-            <div class="alert @(kvp.Value.IsError ? "alert--error" : "alert--success")"
-                 style="margin-bottom:.5rem;">
-                <strong>@periodLabel</strong> —
-                @if (kvp.Value.IsError) { <span>Handoff failed: </span> } else { <span>Handoff complete — </span> }
-                @kvp.Value.Message
-            </div>
-        }
-
         @* ── Context filter (only shown when there is more than one) ── *@
         @if (_contextFilterOptions.Count > 2)  @* > 2 because the list always has "(All contexts)" + at least one real entry *@
         {
@@ -79,26 +68,20 @@
                     <GridColumn HeaderText="Total Hours" Width="110" CustomAttributes="@(new Dictionary<string,object>{{"class","text-right"}})">
                         <Template>@{ var row = (HandoffPeriodRow)context; }@row.TotalHours.ToString("0.##")</Template>
                     </GridColumn>
-                    <GridColumn HeaderText="Status" Width="200">
+                    <GridColumn HeaderText="Status" Width="220">
                         <Template>
-                            @{ var row = (HandoffPeriodRow)context;
-                               var isDone    = _completedPeriods.Contains(row.PeriodId);
-                               var isRunning = _runningPeriodId == row.PeriodId; }
-                            @if (isDone)
+                            @{ var row = (HandoffPeriodRow)context; }
+                            @if (row.LockedEntries > 0 && row.ApprovedEntries == 0)
                             {
-                                <span class="badge badge--success">Handed Off</span>
+                                <span class="badge badge--success">Locked to a run</span>
                             }
-                            else if (isRunning)
+                            else if (row.ApprovedEntries > 0 && row.LockedEntries > 0)
                             {
-                                <span class="badge badge--info">Processing…</span>
-                            }
-                            else if (row.LockedEntries > 0 && row.ApprovedEntries == 0)
-                            {
-                                <span class="badge badge--success">Complete</span>
+                                <span class="badge badge--warning">@row.ApprovedEntries ready · @row.LockedEntries locked</span>
                             }
                             else if (row.ApprovedEntries > 0)
                             {
-                                <span class="badge badge--warning">Pending (@row.ApprovedEntries ready)</span>
+                                <span class="badge badge--warning">@row.ApprovedEntries ready for payroll</span>
                             }
                             else
                             {
@@ -114,42 +97,6 @@
                                     ? row.FirstLockAt.Value.ToLocalTime().ToString("MMM d, yyyy h:mm tt")
                                     : "—")
                             </span>
-                        </Template>
-                    </GridColumn>
-                    <GridColumn HeaderText="" Width="220" AllowSorting="false">
-                        <Template>
-                            @{ var row = (HandoffPeriodRow)context;
-                               var isDone    = _completedPeriods.Contains(row.PeriodId);
-                               var isRunning = _runningPeriodId == row.PeriodId; }
-                            @if (isRunning)
-                            {
-                                <div class="handoff-progress">
-                                    <div class="handoff-progress__bar" style="width:@(_progressPct)%;"></div>
-                                </div>
-                            }
-                            else if (!isDone && row.ApprovedEntries > 0)
-                            {
-                                <span style="display:flex;gap:.4rem;align-items:center;">
-                                    @if (_confirmHandoffId == row.PeriodId)
-                                    {
-                                        <button class="btn btn--primary btn--sm"
-                                                @onclick="() => RunHandoffAsync(row.PeriodId, (int)row.ApprovedEntries)">
-                                            Confirm
-                                        </button>
-                                        <button class="btn btn--ghost btn--sm"
-                                                @onclick="() => _confirmHandoffId = null">
-                                            Cancel
-                                        </button>
-                                    }
-                                    else
-                                    {
-                                        <button class="btn btn--secondary btn--sm"
-                                                @onclick="() => _confirmHandoffId = row.PeriodId">
-                                            Run Handoff
-                                        </button>
-                                    }
-                                </span>
-                            }
                         </Template>
                     </GridColumn>
                 </GridColumns>
@@ -221,15 +168,7 @@
 
     private sealed record ContextFilterItem(Guid Id, string Name);
 
-    private Guid? _confirmHandoffId;
-    private Guid? _runningPeriodId;
-    private int   _progressPct;
-
-    private readonly HashSet<Guid>                                        _completedPeriods = [];
-    private readonly Dictionary<Guid, HandoffResultMsg>                  _handoffResults   = new();
-    private readonly Dictionary<Guid, IReadOnlyList<HandoffPreviewEntry>> _previewCache    = new();
-
-    private sealed record HandoffResultMsg(bool IsError, string Message);
+    private readonly Dictionary<Guid, IReadOnlyList<HandoffPreviewEntry>> _previewCache = new();
 
     protected override async Task OnInitializedAsync()
     {
@@ -283,61 +222,6 @@
         if (!_previewCache.ContainsKey(periodId))
         {
             _previewCache[periodId] = await QueryService.GetEntriesForPeriodAsync(periodId);
-            StateHasChanged();
-        }
-    }
-
-    private async Task RunHandoffAsync(Guid periodId, int approvedCount)
-    {
-        _confirmHandoffId = null;
-        _runningPeriodId  = periodId;
-        _progressPct      = 0;
-        _handoffResults.Remove(periodId);
-        StateHasChanged();
-
-        try
-        {
-            var progressStep = Math.Max(4, approvedCount > 0 ? 80 / approvedCount : 80);
-
-            var progressTask = Task.Run(async () =>
-            {
-                while (_progressPct < 80)
-                {
-                    await Task.Delay(200);
-                    _progressPct = Math.Min(_progressPct + progressStep, 80);
-                    await InvokeAsync(StateHasChanged);
-                }
-            });
-
-            var payrollRunId = Guid.NewGuid();
-            var result = await HandoffService.ExecuteHandoffAsync(periodId, payrollRunId);
-
-            await progressTask.WaitAsync(TimeSpan.FromSeconds(5));
-            _progressPct = 100;
-            StateHasChanged();
-
-            await Task.Delay(600);
-
-            _completedPeriods.Add(periodId);
-            _handoffResults[periodId] = new HandoffResultMsg(
-                IsError: result.Failed > 0,
-                Message: result.Failed == 0
-                    ? $"{result.Delivered} entries locked, {result.TotalHours:0.##} hours delivered."
-                    : $"{result.Delivered} delivered, {result.Failed} failed.");
-        }
-        catch (Exception ex)
-        {
-            _handoffResults[periodId] = new HandoffResultMsg(true, ex.Message);
-        }
-        finally
-        {
-            _runningPeriodId = null;
-            _progressPct     = 0;
-
-            var entityId = SessionState.SelectedLegalEntityId;
-            if (entityId.HasValue)
-                await LoadAsync(entityId.Value);
-
             StateHasChanged();
         }
     }

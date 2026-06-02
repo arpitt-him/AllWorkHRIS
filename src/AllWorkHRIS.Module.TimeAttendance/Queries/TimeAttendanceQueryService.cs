@@ -59,6 +59,27 @@ public sealed record HandoffPreviewEntry(
     decimal  Duration,
     string   StatusCode);
 
+// Phase 12.7b — approve-by-exception. A SUBMITTED/CORRECTED entry flagged for human review.
+public sealed record TimeExceptionRow(
+    Guid     TimeEntryId,
+    Guid     EmploymentId,
+    string   EmployeeName,
+    string   EmployeeNumber,
+    DateOnly WorkDate,
+    string   TimeCategoryCode,
+    decimal  Duration,
+    string   Reason);
+
+// An active non-exempt employee with no time entries for the period (missing timecard).
+public sealed record MissingTimecardRow(Guid EmploymentId, string EmployeeName, string EmployeeNumber);
+
+// The exception-review breakdown for a period: which SUBMITTED entries are clean (safe to auto-
+// approve), which are anomalies to review, and which expected employees filed nothing.
+public sealed record ExceptionReviewResult(
+    IReadOnlyList<Guid>               CleanEntryIds,
+    IReadOnlyList<TimeExceptionRow>   Anomalies,
+    IReadOnlyList<MissingTimecardRow> MissingEmployees);
+
 // ── Query service ────────────────────────────────────────────────────────────
 
 public sealed class TimeAttendanceQueryService
@@ -271,6 +292,120 @@ public sealed class TimeAttendanceQueryService
             """,
             new { LegalEntityId = legalEntityId })).ToList();
     }
+
+    // Phase 12.7b — classify a period's SUBMITTED/CORRECTED entries into clean (safe to auto-approve)
+    // vs anomalies needing review, and find active non-exempt employees who filed nothing. Anomalies:
+    // zero/negative hours, an INCOMPLETE punch (exactly one of start/end present — a clock-in with no
+    // clock-out or vice versa; a duration-only entry with NEITHER is legitimate, e.g. imported time),
+    // and overtime — but routine OT
+    // auto-approves; OT is flagged only when an employee's TOTAL period overtime REACHES OR EXCEEDS the
+    // threshold (the saved value is the trigger: OT >= it forces review). NULL = never flag OT.
+    // "Outside the employee's schedule" is deferred until per-employee scheduled hours are populated.
+    // Phase 12.7b — the OT review threshold operative for a period: its payroll context's
+    // ot_review_threshold_hours (pre-populated from the legal-entity default at context creation,
+    // set on the pay-calendar/context page). NULL = overtime never flagged on hours for that group.
+    public async Task<decimal?> GetOtReviewThresholdAsync(Guid periodId)
+    {
+        using var conn = _connectionFactory.CreateConnection();
+        return await conn.ExecuteScalarAsync<decimal?>(
+            """
+            SELECT pc.ot_review_threshold_hours
+            FROM   payroll_period  pp
+            JOIN   payroll_context pc ON pc.payroll_context_id = pp.payroll_context_id
+            WHERE  pp.period_id = @PeriodId
+            """,
+            new { PeriodId = periodId });
+    }
+
+    public async Task<ExceptionReviewResult> GetExceptionReviewAsync(Guid legalEntityId, Guid periodId)
+    {
+        using var conn = _connectionFactory.CreateConnection();
+        var otThreshold = await GetOtReviewThresholdAsync(periodId);
+
+        // ot_tot: each employee's total OVERTIME hours this period (SUBMITTED/CORRECTED), so an OT
+        // entry is flagged only when that running total is over the threshold.
+        const string entriesSql = """
+            WITH ot_tot AS (
+                SELECT te.employment_id, SUM(te.duration) AS ot_hours
+                FROM   time_entry te
+                JOIN   lkp_time_entry_status s ON s.id = te.status_id
+                JOIN   lkp_time_category     c ON c.id = te.time_category_id
+                WHERE  te.payroll_period_id = @PeriodId
+                  AND  c.code = 'OVERTIME'
+                  AND  s.code IN ('SUBMITTED','CORRECTED')
+                GROUP BY te.employment_id
+            )
+            SELECT te.time_entry_id,
+                   te.employment_id,
+                   p.legal_first_name || ' ' || p.legal_last_name AS employee_name,
+                   e.employee_number,
+                   te.work_date,
+                   c.code      AS time_category_code,
+                   te.duration,
+                   CASE
+                       WHEN te.duration <= 0 THEN 'Zero or negative hours'
+                       WHEN (te.start_time IS NULL AND te.end_time IS NOT NULL)
+                         OR (te.start_time IS NOT NULL AND te.end_time IS NULL)
+                            THEN 'Incomplete punch (only one of start/end)'
+                       WHEN c.code = 'OVERTIME' AND @OtThreshold IS NOT NULL
+                            AND COALESCE(ot.ot_hours, 0) >= @OtThreshold
+                            THEN 'Overtime at/over trigger'
+                       ELSE NULL
+                   END AS reason
+            FROM   time_entry te
+            JOIN   lkp_time_entry_status s ON s.id = te.status_id
+            JOIN   lkp_time_category     c ON c.id = te.time_category_id
+            JOIN   employment            e ON e.employment_id = te.employment_id
+            JOIN   person                p ON p.person_id     = e.person_id
+            JOIN   assignment            a ON a.employment_id = e.employment_id
+            JOIN   org_unit             ou ON ou.org_unit_id  = a.department_id
+            LEFT JOIN ot_tot            ot ON ot.employment_id = te.employment_id
+            WHERE  te.payroll_period_id = @PeriodId
+              AND  ou.legal_entity_id   = @LegalEntityId
+              AND  s.code IN ('SUBMITTED','CORRECTED')
+            ORDER  BY p.legal_last_name, p.legal_first_name, te.work_date
+            """;
+        var rows = (await conn.QueryAsync<ExceptionEntryRaw>(
+            entriesSql, new { PeriodId = periodId, LegalEntityId = legalEntityId, OtThreshold = otThreshold })).ToList();
+
+        var cleanIds  = rows.Where(r => string.IsNullOrEmpty(r.Reason)).Select(r => r.TimeEntryId).ToList();
+        var anomalies = rows.Where(r => !string.IsNullOrEmpty(r.Reason))
+            .Select(r => new TimeExceptionRow(
+                r.TimeEntryId, r.EmploymentId, r.EmployeeName, r.EmployeeNumber,
+                r.WorkDate, r.TimeCategoryCode, r.Duration, r.Reason!))
+            .ToList();
+
+        // Active non-exempt employees in the entity with no (non-void) entry for the period.
+        const string missingSql = """
+            SELECT e.employment_id,
+                   p.legal_first_name || ' ' || p.legal_last_name AS employee_name,
+                   e.employee_number
+            FROM   employment e
+            JOIN   person      p  ON p.person_id     = e.person_id
+            JOIN   assignment  a  ON a.employment_id = e.employment_id
+            JOIN   org_unit    ou ON ou.org_unit_id  = a.department_id
+            JOIN   lkp_flsa_status f ON f.id = e.flsa_status_id
+            WHERE  ou.legal_entity_id = @LegalEntityId
+              AND  f.code             = 'NON_EXEMPT'
+              AND  e.employment_status_id IN (SELECT id FROM lkp_employment_status WHERE code = 'ACTIVE')
+              AND  NOT EXISTS (
+                       SELECT 1 FROM time_entry te
+                       JOIN   lkp_time_entry_status s ON s.id = te.status_id
+                       WHERE  te.employment_id     = e.employment_id
+                         AND  te.payroll_period_id = @PeriodId
+                         AND  s.code <> 'VOID'
+                   )
+            ORDER  BY p.legal_last_name, p.legal_first_name
+            """;
+        var missing = (await conn.QueryAsync<MissingTimecardRow>(
+            missingSql, new { PeriodId = periodId, LegalEntityId = legalEntityId })).ToList();
+
+        return new ExceptionReviewResult(cleanIds, anomalies, missing);
+    }
+
+    private sealed record ExceptionEntryRaw(
+        Guid TimeEntryId, Guid EmploymentId, string EmployeeName, string EmployeeNumber,
+        DateOnly WorkDate, string TimeCategoryCode, decimal Duration, string? Reason);
 
     public async Task<(int PendingApproval, int OverTimeAlerts, int CutoffRisk)>
         GetStatCardsAsync(Guid legalEntityId, Guid periodId)

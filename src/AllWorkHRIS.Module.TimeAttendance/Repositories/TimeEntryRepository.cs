@@ -190,6 +190,46 @@ public sealed class TimeEntryRepository : ITimeEntryRepository
         }, uow.Transaction);
     }
 
+    public async Task<int> ApproveEntriesAsync(IReadOnlyList<Guid> timeEntryIds, Guid approvedBy, IUnitOfWork uow)
+    {
+        // Phase 12.7b — batch approve: SUBMITTED/CORRECTED → APPROVED for the given ids in one
+        // statement. Ids not in an approvable state are silently skipped (count reflects actual
+        // transitions). Backs the per-employee "Approve All", period bulk, and approve-by-exception.
+        if (timeEntryIds.Count == 0) return 0;
+
+        var approvedId  = _lookupCache.GetId(TimeAttendanceLookupTables.TimeEntryStatus, "APPROVED");
+        var submittedId = _lookupCache.GetId(TimeAttendanceLookupTables.TimeEntryStatus, "SUBMITTED");
+        var correctedId = _lookupCache.GetId(TimeAttendanceLookupTables.TimeEntryStatus, "CORRECTED");
+
+        var p = new DynamicParameters();
+        p.Add("ApprovedId",  approvedId);
+        p.Add("ApprovedBy",  approvedBy);
+        p.Add("Now",         _temporal.GetOperativeNow());
+        p.Add("SubmittedId", submittedId);
+        p.Add("CorrectedId", correctedId);
+        var inIds = BuildInClause(p, "Id", timeEntryIds);
+
+        var sql = $"""
+            UPDATE time_entry
+            SET    status_id   = @ApprovedId,
+                   approved_by = @ApprovedBy,
+                   approved_at = @Now,
+                   updated_at  = @Now
+            WHERE  time_entry_id IN {inIds}
+              AND  status_id     IN (@SubmittedId, @CorrectedId)
+            """;
+        return await uow.Connection.ExecuteAsync(sql, p, uow.Transaction);
+    }
+
+    public async Task<bool> GetAutoApproveImportedTimeAsync(Guid legalEntityId)
+    {
+        // Phase 12.7b — per-LE config: does this legal entity auto-approve IMPORT-method time?
+        using var conn = _connectionFactory.CreateConnection();
+        return await conn.ExecuteScalarAsync<bool>(
+            "SELECT COALESCE(auto_approve_imported_time, FALSE) FROM org_unit WHERE org_unit_id = @LegalEntityId",
+            new { LegalEntityId = legalEntityId });
+    }
+
     public async Task UpdateStatusWithReasonAsync(
         Guid timeEntryId, string status, Guid actorId, string reason, IUnitOfWork uow)
     {
@@ -285,8 +325,11 @@ public sealed class TimeEntryRepository : ITimeEntryRepository
     }
 
     public async Task<IReadOnlyList<(DateOnly WorkDate, decimal Hours)>> GetApprovedHoursByEmploymentAndPeriodAsync(
-        Guid employmentId, DateOnly periodStart, DateOnly periodEnd)
+        Guid employmentId, DateOnly periodStart, DateOnly periodEnd, Guid payrollRunId)
     {
+        // Phase 12.7: a run consumes hours that are APPROVED (not yet committed to any run) or
+        // already LOCKED to *this* run — but never hours LOCKED to a *different* run, so a second
+        // run over the same date range can't re-sum hours an earlier approved run already took.
         const string sql = """
             SELECT te.work_date, SUM(te.duration) AS hours
             FROM   time_entry          te
@@ -294,7 +337,8 @@ public sealed class TimeEntryRepository : ITimeEntryRepository
             WHERE  te.employment_id = @EmploymentId
               AND  te.work_date >= @PeriodStart
               AND  te.work_date <= @PeriodEnd
-              AND  s.code IN ('APPROVED', 'LOCKED')
+              AND  (s.code = 'APPROVED'
+                    OR (s.code = 'LOCKED' AND te.payroll_run_id = @PayrollRunId))
             GROUP BY te.work_date
             ORDER BY te.work_date
             """;
@@ -304,10 +348,69 @@ public sealed class TimeEntryRepository : ITimeEntryRepository
         {
             EmploymentId = employmentId,
             PeriodStart  = periodStart.ToDateTime(TimeOnly.MinValue),
-            PeriodEnd    = periodEnd.ToDateTime(TimeOnly.MinValue)
+            PeriodEnd    = periodEnd.ToDateTime(TimeOnly.MinValue),
+            PayrollRunId = payrollRunId
         });
 
         return rows.Select(r => (r.WorkDate, r.Hours)).ToList();
+    }
+
+    // ── Phase 12.7 — lock-on-approve / unlock-on-cancel ─────────────────────────
+    public async Task<int> LockHoursForRunAsync(
+        Guid payrollRunId, IReadOnlyList<Guid> employmentIds, DateOnly periodStart, DateOnly periodEnd, CancellationToken ct = default)
+    {
+        if (employmentIds.Count == 0) return 0;
+
+        // APPROVED → LOCKED for the run's employees within the period range, stamped with the run.
+        // Entries already LOCKED to this run are untouched (status filter), so re-firing is a no-op.
+        var p = new DynamicParameters();
+        p.Add("PayrollRunId", payrollRunId);
+        p.Add("Now",          _temporal.GetOperativeNow());
+        p.Add("PeriodStart",  periodStart.ToDateTime(TimeOnly.MinValue));
+        p.Add("PeriodEnd",    periodEnd.ToDateTime(TimeOnly.MinValue));
+        var inEmp = BuildInClause(p, "Emp", employmentIds);
+
+        var sql = $"""
+            UPDATE time_entry
+            SET    status_id      = (SELECT id FROM lkp_time_entry_status WHERE code = 'LOCKED'),
+                   payroll_run_id = @PayrollRunId,
+                   updated_at     = @Now
+            WHERE  status_id      = (SELECT id FROM lkp_time_entry_status WHERE code = 'APPROVED')
+              AND  work_date     >= @PeriodStart
+              AND  work_date     <= @PeriodEnd
+              AND  employment_id IN {inEmp}
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        return await conn.ExecuteAsync(sql, p);
+    }
+
+    // ANSI-compliant parameterized IN list — avoids Postgres-specific ANY(@array) and Dapper's
+    // list-expansion (not wired in this stack; it leaves a bare placeholder → 42601 syntax error).
+    private static string BuildInClause<T>(DynamicParameters p, string prefix, IEnumerable<T> values)
+    {
+        var names = new List<string>();
+        var i = 0;
+        foreach (var v in values) { var n = $"{prefix}{i++}"; p.Add(n, v); names.Add($"@{n}"); }
+        return names.Count == 0 ? "(NULL)" : "(" + string.Join(",", names) + ")";
+    }
+
+    public async Task<int> UnlockHoursForRunAsync(Guid payrollRunId, CancellationToken ct = default)
+    {
+        // LOCKED → APPROVED, clear the run id, for every entry locked to this run.
+        const string sql = """
+            UPDATE time_entry
+            SET    status_id      = (SELECT id FROM lkp_time_entry_status WHERE code = 'APPROVED'),
+                   payroll_run_id = NULL,
+                   updated_at     = @Now
+            WHERE  status_id      = (SELECT id FROM lkp_time_entry_status WHERE code = 'LOCKED')
+              AND  payroll_run_id = @PayrollRunId
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        return await conn.ExecuteAsync(sql, new
+        {
+            PayrollRunId = payrollRunId,
+            Now          = _temporal.GetOperativeNow()
+        });
     }
 
     private sealed record WorkedDayRow

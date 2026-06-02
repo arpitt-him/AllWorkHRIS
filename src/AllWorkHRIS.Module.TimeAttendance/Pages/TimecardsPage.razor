@@ -67,6 +67,72 @@
             </div>
         </div>
 
+        @* ── Approve by exception (Phase 12.7b) ───────────────────────── *@
+        @if (_review is not null
+             && (_review.CleanEntryIds.Count > 0 || _review.Anomalies.Count > 0 || _review.MissingEmployees.Count > 0))
+        {
+            <div class="card exception-panel" style="margin-bottom:var(--space-5,1.25rem);padding:1rem 1.25rem;">
+                <div style="display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;">
+                    <strong>Approve by exception</strong>
+                    <span class="badge badge--success">@_review.CleanEntryIds.Count clean</span>
+                    <span class="badge badge--warning">@_review.Anomalies.Count to review</span>
+                    <span class="badge badge--neutral">@_review.MissingEmployees.Count missing timecard@(_review.MissingEmployees.Count == 1 ? "" : "s")</span>
+                    <button class="btn-sm btn-primary" disabled="@(_review.CleanEntryIds.Count == 0)" @onclick="ApproveCleanAsync">
+                        Approve @_review.CleanEntryIds.Count clean
+                    </button>
+                    @if (_review.Anomalies.Count > 0 || _review.MissingEmployees.Count > 0)
+                    {
+                        <button class="btn-sm btn-secondary" @onclick="() => _showExceptions = !_showExceptions">
+                            @(_showExceptions ? "Hide" : "Show") exceptions
+                        </button>
+                    }
+                </div>
+                <div style="margin-top:.5rem;font-size:.8rem;color:#9ca3af;">
+                    @(_otThreshold.HasValue
+                        ? $"Overtime is flagged for review when an employee's period OT reaches {_otThreshold.Value:0.##} hrs (the trigger)."
+                        : "Overtime is not flagged on hours for this pay group (routine OT auto-approves).")
+                    Set this on the pay calendar (Payroll → Pay Calendars → this context → OT Review Threshold).
+                </div>
+
+                @if (_showExceptions)
+                {
+                    @if (_review.Anomalies.Count > 0)
+                    {
+                        <div style="margin-top:.9rem;">
+                            <div class="exception-subhead">Entries to review</div>
+                            <table class="exception-table">
+                                <thead><tr><th>Employee</th><th>Work Date</th><th>Category</th><th class="num">Hours</th><th>Why</th></tr></thead>
+                                <tbody>
+                                    @foreach (var a in _review.Anomalies)
+                                    {
+                                        <tr>
+                                            <td>@a.EmployeeName <span class="exc-emp-num">#@a.EmployeeNumber</span></td>
+                                            <td>@a.WorkDate.ToString("MMM d, yyyy")</td>
+                                            <td><span class="badge badge--category">@a.TimeCategoryCode</span></td>
+                                            <td class="num">@a.Duration.ToString("0.##")</td>
+                                            <td><span class="badge badge--warning">@a.Reason</span></td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                    @if (_review.MissingEmployees.Count > 0)
+                    {
+                        <div style="margin-top:.9rem;">
+                            <div class="exception-subhead">Active non-exempt employees with no timecard this period</div>
+                            <ul class="exception-missing">
+                                @foreach (var m in _review.MissingEmployees)
+                                {
+                                    <li>@m.EmployeeName <span class="exc-emp-num">#@m.EmployeeNumber</span></li>
+                                }
+                            </ul>
+                        </div>
+                    }
+                }
+            </div>
+        }
+
         @* ── Grid ─────────────────────────────────────────────────────── *@
         @if (_rows.Count == 0)
         {
@@ -214,6 +280,11 @@
     private bool                       _loading;
     private int                        _pendingApproval, _overtimeAlerts, _cutoffRisk;
 
+    // Phase 12.7b — approve-by-exception.
+    private ExceptionReviewResult?     _review;
+    private bool                       _showExceptions;
+    private decimal?                   _otThreshold;       // active OT review threshold for the period's context (read-only here; set on the pay calendar)
+
     private Guid?                                    _detailEmploymentId;
     private List<TimeEntryRow>                       _detailEntries    = [];
     private bool                                     _detailLoading;
@@ -288,11 +359,25 @@
             _rows = (await QueryService.GetTimecardSummariesAsync(entityId.Value, _selectedPeriodId)).ToList();
             (_pendingApproval, _overtimeAlerts, _cutoffRisk) =
                 await QueryService.GetStatCardsAsync(entityId.Value, _selectedPeriodId);
+            _review      = await QueryService.GetExceptionReviewAsync(entityId.Value, _selectedPeriodId);
+            _otThreshold = await QueryService.GetOtReviewThresholdAsync(_selectedPeriodId);
         }
         finally
         {
             _loading = false;
         }
+    }
+
+    // Phase 12.7b — auto-approve the clean SUBMITTED entries; anomalies + missing timecards stay
+    // for manual handling.
+    private async Task ApproveCleanAsync()
+    {
+        if (_review is null || _review.CleanEntryIds.Count == 0) return;
+        var authState = await AuthState.GetAuthenticationStateAsync();
+        var actorId   = GetActorId(authState);
+        try { await TimeEntryService.ApproveTimeEntriesAsync(_review.CleanEntryIds, actorId); }
+        catch (Exception ex) { _errorMsg = ex.Message; }
+        await LoadPeriodAsync();
     }
 
     private async Task OnRowExpandedAsync(DetailsExpandedEventArgs<TimecardSummaryRow> args)
@@ -341,15 +426,14 @@
         var actorId   = GetActorId(authState);
 
         var entries = await QueryService.GetEntriesForEmploymentAsync(row.EmploymentId, _selectedPeriodId);
-        foreach (var entry in entries.Where(e => e.StatusCode is "SUBMITTED" or "CORRECTED"))
+        var ids = entries.Where(e => e.StatusCode is "SUBMITTED" or "CORRECTED")
+                         .Select(e => e.TimeEntryId).ToList();
+        try
         {
-            try
-            {
-                await TimeEntryService.ApproveTimeEntryAsync(
-                    new ApproveTimeEntryCommand { TimeEntryId = entry.TimeEntryId, ApprovedBy = actorId });
-            }
-            catch (Exception ex) { _errorMsg = ex.Message; }
+            // Phase 12.7b — one batch transaction instead of a per-entry approval loop.
+            await TimeEntryService.ApproveTimeEntriesAsync(ids, actorId);
         }
+        catch (Exception ex) { _errorMsg = ex.Message; }
 
         await RefreshDetailAsync(row.EmploymentId);
         await LoadPeriodAsync();
@@ -447,4 +531,18 @@
     .seg-btn:not(:last-child) { border-right:1px solid #e5e7eb; }
     .seg-btn--active { background:#2563eb;color:#fff; }
     .seg-btn:not(.seg-btn--active):hover { background:#f3f4f6; }
+
+    /* Phase 12.7b — approve-by-exception panel */
+    .exception-panel .badge { font-size:.72rem;padding:.12rem .45rem;border-radius:4px; }
+    .badge--success  { background:#d1fae5;color:#065f46;border:1px solid #6ee7b7; }
+    .badge--warning  { background:#fef3c7;color:#92400e;border:1px solid #fde68a; }
+    .badge--neutral  { background:#f3f4f6;color:#6b7280;border:1px solid #e5e7eb; }
+    .badge--category { background:#f3f4f6;color:#374151;border:1px solid #e5e7eb;font-weight:500; }
+    .exception-subhead { font-size:.8rem;font-weight:600;color:#6b7280;margin-bottom:.35rem;text-transform:uppercase;letter-spacing:.03em; }
+    .exception-table { width:100%;border-collapse:collapse;font-size:.8125rem; }
+    .exception-table th { text-align:left;padding:.35rem .6rem;border-bottom:1px solid #e5e7eb;color:#6b7280;font-weight:600; }
+    .exception-table td { padding:.35rem .6rem;border-bottom:1px solid #f3f4f6; }
+    .exception-table .num { text-align:right; }
+    .exception-missing { margin:.25rem 0 0;padding-left:1.1rem;font-size:.8125rem;color:#374151;columns:2; }
+    .exc-emp-num { font-size:.75rem;color:#9ca3af;margin-left:.2rem; }
 </style>

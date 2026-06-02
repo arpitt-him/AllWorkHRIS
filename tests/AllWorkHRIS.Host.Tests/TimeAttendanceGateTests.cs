@@ -380,22 +380,8 @@ public sealed class TimeAttendanceGateTests : IAsyncLifetime
         await notifier.NotifyRetroCalculationReviewAsync(entryId, empId, periodId);
     }
 
-    // -----------------------------------------------------------------------
-    // TC-TA-017 — HandoffResult record preserves Delivered, Failed, TotalHours.
-    // -----------------------------------------------------------------------
-    [Fact]
-    public void TC_TA_017_HandoffResult_Fields()
-    {
-        var periodId = Guid.NewGuid();
-        var runId    = Guid.NewGuid();
-        var result   = new HandoffResult(periodId, runId, Delivered: 12, Failed: 1, TotalHours: 96.5m);
-
-        Assert.Equal(periodId, result.PeriodId);
-        Assert.Equal(runId,    result.PayrollRunId);
-        Assert.Equal(12,       result.Delivered);
-        Assert.Equal(1,        result.Failed);
-        Assert.Equal(96.5m,    result.TotalHours);
-    }
+    // TC-TA-017 retired (Phase 12.7): the manual handoff + HandoffResult were removed when
+    // locking moved to run approval (lock-on-approve). See PayrollRunJob / IPayrollHoursSource.
 
     // -----------------------------------------------------------------------
     // TC-TA-018 — TimeAttendanceDashboardContributor.AccentColor matches

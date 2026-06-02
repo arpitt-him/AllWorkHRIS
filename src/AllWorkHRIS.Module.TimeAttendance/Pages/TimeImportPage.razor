@@ -139,6 +139,12 @@
                         <Template>@{ var h = (TimeImportHistoryRow)context; }@h.ImportedAt.ToLocalTime().ToString("MMM d, yyyy h:mm tt")</Template>
                     </GridColumn>
                     <GridColumn HeaderText="By" Field="ImportedBy" Width="170" />
+                    <GridColumn HeaderText="Pay Period" Width="200">
+                        <Template>
+                            @{ var h = (TimeImportHistoryRow)context; }
+                            <span style="@(h.PeriodYear is null ? "color:#9ca3af;" : "")">@h.PeriodLabel</span>
+                        </Template>
+                    </GridColumn>
                     <GridColumn HeaderText="Rows" Field="TotalRows" TextAlign="TextAlign.Right" Width="80" />
                     <GridColumn HeaderText="Imported" Field="AcceptedCount" TextAlign="TextAlign.Right" Width="100" />
                     <GridColumn HeaderText="Failed" Field="RejectedCount" TextAlign="TextAlign.Right" Width="90" />

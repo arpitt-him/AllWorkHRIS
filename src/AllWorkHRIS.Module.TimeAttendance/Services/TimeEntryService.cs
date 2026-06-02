@@ -66,11 +66,14 @@ public sealed class TimeEntryService : ITimeEntryService
                 "and cannot be submitted for FLSA-exempt employees.")
                 { ExceptionCode = "EXC-TIM-005" };
 
-        var submittedStatusId = _lookupCache.GetId(TimeAttendanceLookupTables.TimeEntryStatus, "SUBMITTED");
-        var timeCategoryId    = _lookupCache.GetId(TimeAttendanceLookupTables.TimeCategory, command.TimeCategory);
-        var entryMethodId     = _lookupCache.GetId(TimeAttendanceLookupTables.EntryMethod, command.EntryMethod);
+        // Phase 12.7b — a trusted source (e.g. IMPORT into an auto-approve legal entity) lands the
+        // entry APPROVED on submit, skipping manual review. Self-service / manual stay SUBMITTED.
+        var initialStatus    = command.AutoApprove ? "APPROVED" : "SUBMITTED";
+        var initialStatusId  = _lookupCache.GetId(TimeAttendanceLookupTables.TimeEntryStatus, initialStatus);
+        var timeCategoryId   = _lookupCache.GetId(TimeAttendanceLookupTables.TimeCategory, command.TimeCategory);
+        var entryMethodId    = _lookupCache.GetId(TimeAttendanceLookupTables.EntryMethod, command.EntryMethod);
 
-        var entry = TimeEntry.Create(command, submittedStatusId, timeCategoryId, entryMethodId, _temporal.GetOperativeNow());
+        var entry = TimeEntry.Create(command, initialStatusId, timeCategoryId, entryMethodId, _temporal.GetOperativeNow());
 
         Guid entryId;
         using var uow = new UnitOfWork(_connectionFactory);
@@ -85,7 +88,9 @@ public sealed class TimeEntryService : ITimeEntryService
             throw;
         }
 
-        await _notifier.NotifyTimeApprovalAsync(entryId, command.EmploymentId);
+        // No approval is pending for an auto-approved (already APPROVED) entry — skip the notice.
+        if (!command.AutoApprove)
+            await _notifier.NotifyTimeApprovalAsync(entryId, command.EmploymentId);
 
         // OT detection runs at submission so the manager sees REGULAR/OT split before approving
         var anchor    = await _workSchedules.ResolveWorkweekAnchorAsync(command.PayrollPeriodId, command.EmploymentId);
@@ -130,6 +135,26 @@ public sealed class TimeEntryService : ITimeEntryService
             throw;
         }
     }
+
+    public async Task<int> ApproveTimeEntriesAsync(IReadOnlyList<Guid> timeEntryIds, Guid approvedBy)
+    {
+        if (timeEntryIds.Count == 0) return 0;
+        using var uow = new UnitOfWork(_connectionFactory);
+        try
+        {
+            var count = await _repository.ApproveEntriesAsync(timeEntryIds, approvedBy, uow);
+            uow.Commit();
+            return count;
+        }
+        catch
+        {
+            uow.Rollback();
+            throw;
+        }
+    }
+
+    public Task<bool> GetAutoApproveImportedTimeAsync(Guid legalEntityId)
+        => _repository.GetAutoApproveImportedTimeAsync(legalEntityId);
 
     public async Task RejectTimeEntryAsync(RejectTimeEntryCommand command)
     {

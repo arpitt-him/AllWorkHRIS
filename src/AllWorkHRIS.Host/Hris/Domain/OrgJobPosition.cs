@@ -16,6 +16,7 @@ public sealed record OrgUnit
     public string?  StateOfIncorporation    { get; init; }
     public int?     LegalEntityTypeId       { get; init; }
     public decimal? OtWeeklyThresholdHours      { get; init; }
+    public decimal? OtReviewThresholdHours      { get; init; }   // Phase 12.7b — LE default OT review threshold (hrs); null = off
   public int?     DefaultWorkweekStartDay     { get; init; }
     public string? AddressLine1 { get; init; }
     public string? AddressLine2 { get; init; }

@@ -302,7 +302,7 @@ public sealed partial class CalculationEngine : ICalculationEngine
         if (input.FlsaStatusCode != "NON_EXEMPT") return null;
 
         var entries = await _hoursSource.GetApprovedHoursByEmploymentAndPeriodAsync(
-            input.EmploymentId, input.PayPeriodStart, input.PayPeriodEnd);
+            input.EmploymentId, input.PayPeriodStart, input.PayPeriodEnd, input.RunId);
 
         var (regHours, otHours) = ComputeOtSplit(entries, input.OtWeeklyThresholdHours, input.WorkWeekStartDay);
 

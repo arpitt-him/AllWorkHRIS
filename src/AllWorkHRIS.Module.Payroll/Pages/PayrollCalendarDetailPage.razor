@@ -119,6 +119,10 @@
                             <span class="detail-value">@_context.OtWeeklyThresholdHours.ToString("0.##") hrs / week</span>
                         </div>
                         <div class="detail-field">
+                            <span class="detail-label">OT Review Trigger</span>
+                            <span class="detail-value">@(_context.OtReviewThresholdHours.HasValue ? _context.OtReviewThresholdHours.Value.ToString("0.##") + " hrs" : "—")</span>
+                        </div>
+                        <div class="detail-field">
                             <span class="detail-label">Workweek Start</span>
                             <span class="detail-value">@WorkweekDayLabel(_context.WorkweekStartDay)</span>
                         </div>
@@ -147,6 +151,14 @@
                                              Min="0.01m" Max="40m" Step="0.5m" Format="0.##" />
                             <span style="font-size:var(--font-size-sm);color:#6B7280">
                                 FLSA standard is 40.00. Override only if this pay group has a lower company-configured threshold.
+                            </span>
+                        </div>
+                        <div class="form-field">
+                            <label class="form-label">OT Review Threshold (hrs)</label>
+                            <SfNumericTextBox TValue="decimal?" @bind-Value="_editOtReviewThreshold"
+                                             Min="0m" Max="168m" Step="0.5m" Format="0.##" Placeholder="blank = never flag OT" />
+                            <span style="font-size:var(--font-size-sm);color:#6B7280">
+                                Approve-by-exception trigger: hold an employee's overtime for manual review when their period OT reaches this. Blank = routine OT auto-approves.
                             </span>
                         </div>
                         <div class="form-field">
@@ -481,6 +493,7 @@
     // Inline settings editing
     private bool     _showEditSettings;
     private decimal  _editOtThreshold;
+    private decimal? _editOtReviewThreshold;   // Phase 12.7b — null = OT never flagged on hours
     private int      _editWorkweekStartDay;
     private string?  _settingsError;
 
@@ -873,8 +886,9 @@
     private void BeginEditSettings()
     {
         if (_context is null) return;
-        _editOtThreshold      = _context.OtWeeklyThresholdHours;
-        _editWorkweekStartDay = _context.WorkweekStartDay;
+        _editOtThreshold       = _context.OtWeeklyThresholdHours;
+        _editOtReviewThreshold = _context.OtReviewThresholdHours;
+        _editWorkweekStartDay  = _context.WorkweekStartDay;
         _settingsError        = null;
         _showEditSettings     = true;
     }
@@ -899,7 +913,7 @@
         try
         {
             await ContextRepo.UpdateContextSettingsAsync(
-                ContextId, _editOtThreshold, _editWorkweekStartDay, _currentUserId);
+                ContextId, _editOtThreshold, _editWorkweekStartDay, _editOtReviewThreshold, _currentUserId);
 
             // Reload the context so the metadata panel reflects the saved values
             _context          = await ContextRepo.GetByIdAsync(ContextId);

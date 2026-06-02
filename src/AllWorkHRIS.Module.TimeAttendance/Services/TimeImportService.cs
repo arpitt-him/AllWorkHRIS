@@ -41,6 +41,12 @@ public sealed class TimeImportService : ITimeImportService
             ? await ResolveEntityNameAsync(scopedEntityId.Value)
             : null;
 
+        // Phase 12.7b — IMPORT is a trusted entry method: if this legal entity is configured to
+        // auto-approve imported time, the entries land APPROVED (skipping manual review). Resolved
+        // once for the whole file. No scoped entity ⇒ stay with manual approval (safe default).
+        var autoApprove = scopedEntityId.HasValue
+            && await _timeEntryService.GetAutoApproveImportedTimeAsync(scopedEntityId.Value);
+
         var validCategories = _lookupCache
             .GetAll(TimeAttendanceLookupTables.TimeCategory)
             .ToDictionary(e => e.Code, e => e.Code, StringComparer.OrdinalIgnoreCase);
@@ -50,6 +56,7 @@ public sealed class TimeImportService : ITimeImportService
         var periodCache   = new Dictionary<Guid, PeriodInfo?>();
         var errors        = new List<TimeImportError>();
         int imported      = 0;
+        var acceptedPeriods = new HashSet<Guid>();  // Phase 12.7c — distinct periods among accepted rows
 
         foreach (var (rowNum, row) in rows)
         {
@@ -127,6 +134,7 @@ public sealed class TimeImportService : ITimeImportService
                     EndTime         = row.EndTime,
                     PayrollPeriodId = row.PayrollPeriodId,
                     EntryMethod     = "IMPORT",
+                    AutoApprove     = autoApprove,  // Phase 12.7b — per-LE trusted-source auto-approve
                     SubmittedBy     = importedBy,
                     Notes           = NullIfEmpty(row.Notes),
                     ProjectCode     = NullIfEmpty(row.ProjectCode),
@@ -134,6 +142,7 @@ public sealed class TimeImportService : ITimeImportService
                 };
                 await _timeEntryService.SubmitTimeEntryAsync(command);
                 imported++;
+                acceptedPeriods.Add(row.PayrollPeriodId);
             }
             catch (Exception ex)
             {
@@ -148,10 +157,12 @@ public sealed class TimeImportService : ITimeImportService
         {
             try
             {
+                // One distinct accepted period → record it; a multi-period file → null ("Multiple").
+                var periodId = acceptedPeriods.Count == 1 ? acceptedPeriods.First() : (Guid?)null;
                 await RecordHistoryAsync(
                     scopedEntityId.Value, fileName, importedByName,
                     totalRows: imported + errors.Count,
-                    accepted: imported, rejected: errors.Count);
+                    accepted: imported, rejected: errors.Count, periodId: periodId);
             }
             catch (Exception ex)
             {
@@ -165,17 +176,17 @@ public sealed class TimeImportService : ITimeImportService
 
     private async Task RecordHistoryAsync(
         Guid legalEntityId, string fileName, string importedByName,
-        int totalRows, int accepted, int rejected)
+        int totalRows, int accepted, int rejected, Guid? periodId)
     {
         using var conn = _connectionFactory.CreateConnection();
         await conn.ExecuteAsync(
             """
             INSERT INTO time_entry_import_history
                 (time_entry_import_history_id, legal_entity_id, file_name, imported_by,
-                 imported_at, total_rows, accepted_count, rejected_count, status)
+                 imported_at, total_rows, accepted_count, rejected_count, status, payroll_period_id)
             VALUES
                 (@Id, @LegalEntityId, @FileName, @ImportedBy,
-                 @ImportedAt, @TotalRows, @Accepted, @Rejected, @Status)
+                 @ImportedAt, @TotalRows, @Accepted, @Rejected, @Status, @PeriodId)
             """,
             new
             {
@@ -187,7 +198,8 @@ public sealed class TimeImportService : ITimeImportService
                 TotalRows     = totalRows,
                 Accepted      = accepted,
                 Rejected      = rejected,
-                Status        = rejected == 0 ? "SUCCESS" : "PARTIAL"
+                Status        = rejected == 0 ? "SUCCESS" : "PARTIAL",
+                PeriodId      = periodId
             });
     }
 
@@ -197,16 +209,20 @@ public sealed class TimeImportService : ITimeImportService
         using var conn = _connectionFactory.CreateConnection();
         var rows = await conn.QueryAsync<TimeImportHistoryRow>(
             """
-            SELECT file_name       AS FileName,
-                   imported_at     AS ImportedAt,
-                   imported_by     AS ImportedBy,
-                   total_rows      AS TotalRows,
-                   accepted_count  AS AcceptedCount,
-                   rejected_count  AS RejectedCount,
-                   status          AS Status
-            FROM   time_entry_import_history
-            WHERE  legal_entity_id = @LegalEntityId
-            ORDER  BY imported_at DESC
+            SELECT h.file_name       AS FileName,
+                   h.imported_at     AS ImportedAt,
+                   h.imported_by     AS ImportedBy,
+                   h.total_rows      AS TotalRows,
+                   h.accepted_count  AS AcceptedCount,
+                   h.rejected_count  AS RejectedCount,
+                   h.status          AS Status,
+                   pp.period_year    AS PeriodYear,
+                   pp.period_number  AS PeriodNumber,
+                   pp.pay_date       AS PayDate
+            FROM   time_entry_import_history h
+            LEFT JOIN payroll_period pp ON pp.period_id = h.payroll_period_id
+            WHERE  h.legal_entity_id = @LegalEntityId
+            ORDER  BY h.imported_at DESC
             """,
             new { LegalEntityId = legalEntityId });
         return rows.AsList();

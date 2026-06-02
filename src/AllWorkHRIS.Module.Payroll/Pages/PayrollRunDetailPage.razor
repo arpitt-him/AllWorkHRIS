@@ -7,6 +7,8 @@
 @using Microsoft.AspNetCore.Components.Authorization
 @using Syncfusion.Blazor.Grids
 @using AllWorkHRIS.Core.Lookups
+@using AllWorkHRIS.Core.Temporal
+@inject IWallClock                      WallClock
 @inject IPayrollRunService              RunService
 @inject IPayrollContextRepository       ContextRepo
 @inject IEmployeePayrollResultRepository ResultRepo
@@ -199,11 +201,14 @@
                                of host-startup recovery, so an operator isn't stuck waiting for a restart. *@
                             @if (IsResumable(_run.RunStatusId))
                             {
-                                <button class="btn-primary" @onclick="ResumeAsync" disabled="@_submitting">
+                                var processing = IsActivelyProcessing();
+                                <button class="btn-primary" @onclick="ResumeAsync" disabled="@(_submitting || processing)">
                                     @(_submitting ? "Working…" : "Resume")
                                 </button>
                                 <span style="font-size:var(--font-size-sm);color:#6B7280;align-self:center;">
-                                    Re-runs the background job for a run stuck in this state.
+                                    @(processing
+                                        ? "Processing… Resume becomes available only if the run stalls."
+                                        : "Re-runs the background job for a run stuck in this state.")
                                 </span>
                             }
                             @if (_run.RunStatusId != _draftStatus
@@ -364,6 +369,18 @@
     // re-run would orphan a partial result set (matches recovery's fail-it rule).
     private bool IsResumable(int? statusId)
         => statusId == _approvingStatus || statusId == _releasingStatus;
+
+    // The background job is genuinely mid-flight when its progress is fresh and not yet complete.
+    // Resume is a recovery affordance for a *stalled* run, so it stays disabled while work is
+    // actively streaming — and re-enables only once progress goes stale (job died) or hits 100%
+    // without the status flipping (the classic stuck-at-the-finish case).
+    private bool IsActivelyProcessing()
+    {
+        if (_run is null) return false;
+        var pr = ProgressNotifier.GetProgress(_run.RunId);
+        if (pr is null || pr.PercentComplete >= 100) return false;
+        return (WallClock.UtcNow - pr.UpdatedAt) < TimeSpan.FromSeconds(15);
+    }
 
     // Results exist (and are viewable) once the run has moved past CALCULATING.
     private bool HasResultsToShow(int? statusId)

@@ -46,7 +46,7 @@
             <GridColumns>
                 <GridColumn Field="OrgUnitName"            HeaderText="Name" />
                 <GridColumn Field="OrgUnitCode"            HeaderText="Code"           Width="100" />
-                <GridColumn Field="LegalEntityTypeId"      HeaderText="Type">
+                <GridColumn Field="LegalEntityTypeId"      HeaderText="Type"           Width="120">
                     <Template>@EntityTypeLabel(((OrgUnit)context).LegalEntityTypeId)</Template>
                 </GridColumn>
                 <GridColumn Field="TaxRegistrationNumber"  HeaderText="Tax ID"         Width="120">
@@ -58,10 +58,16 @@
                 <GridColumn Field="CountryCode"            HeaderText="Country"        Width="85">
                     <Template>@(((OrgUnit)context).CountryCode ?? "—")</Template>
                 </GridColumn>
-                <GridColumn Field="OtWeeklyThresholdHours" HeaderText="OT Hrs"        Width="115">
+                <GridColumn Field="OtWeeklyThresholdHours" HeaderText="OT Hrs"        Width="100">
                     <Template>
                         @{ var ot = (OrgUnit)context; }
                         @(ot.OtWeeklyThresholdHours.HasValue ? ot.OtWeeklyThresholdHours.Value.ToString("0.##") + " hrs" : "40 hrs")
+                    </Template>
+                </GridColumn>
+                <GridColumn Field="OtReviewThresholdHours" HeaderText="OT Review Trigger" Width="150">
+                    <Template>
+                        @{ var rt = (OrgUnit)context; }
+                        @(rt.OtReviewThresholdHours.HasValue ? rt.OtReviewThresholdHours.Value.ToString("0.##") + " hrs" : "—")
                     </Template>
                 </GridColumn>
                 <GridColumn Field="DefaultWorkweekStartDay" HeaderText="WW Start"       Width="125">
@@ -140,6 +146,12 @@
                     <span style="font-size:var(--font-size-sm);color:#6B7280">Default 40.00 — applies to all payroll contexts for this entity unless overridden.</span>
                 </div>
                 <div class="form-field">
+                    <label class="form-label">OT Review Threshold (hrs)</label>
+                    <SfNumericTextBox TValue="decimal?" @bind-Value="_otReviewThreshold"
+                                     Min="0" Max="168" Step="0.5m" Format="0.##" Placeholder="blank = never flag OT" />
+                    <span style="font-size:var(--font-size-sm);color:#6B7280">Default for new payroll contexts: approve-by-exception holds an employee's OT for review when their period OT reaches this trigger. Blank = routine OT auto-approves.</span>
+                </div>
+                <div class="form-field">
                     <label class="form-label">Default Workweek Start Day</label>
                     <SfDropDownList TValue="string" TItem="DropItem"
                                     DataSource="@_workweekOptions"
@@ -209,6 +221,12 @@
                     <span style="font-size:var(--font-size-sm);color:#6B7280">Changing this does not automatically update existing payroll contexts.</span>
                 </div>
                 <div class="form-field">
+                    <label class="form-label">OT Review Threshold (hrs)</label>
+                    <SfNumericTextBox TValue="decimal?" @bind-Value="_editOtReviewThreshold"
+                                     Min="0" Max="168" Step="0.5m" Format="0.##" Placeholder="blank = never flag OT" />
+                    <span style="font-size:var(--font-size-sm);color:#6B7280">Default for new payroll contexts; changing it does not update existing contexts. Blank = routine OT auto-approves.</span>
+                </div>
+                <div class="form-field">
                     <label class="form-label">Default Workweek Start Day</label>
                     <SfDropDownList TValue="string" TItem="DropItem"
                                     DataSource="@_workweekOptions"
@@ -269,6 +287,7 @@
     private string   _stateOfInc   = "";
     private string   _countryCode  = "";
     private decimal  _otThreshold                = 40.00m;
+    private decimal? _otReviewThreshold;          // Phase 12.7b — LE default OT review threshold; null = off
     private string   _defaultWorkweekStartDay    = "";
     private string?  _error;
     private bool     _saving       = false;
@@ -283,6 +302,7 @@
     private string   _editStateOfInc   = "";
     private string   _editCountryCode  = "";
     private decimal  _editOtThreshold              = 40.00m;
+    private decimal? _editOtReviewThreshold;       // Phase 12.7b — LE default OT review threshold; null = off
     private string   _editDefaultWorkweekStartDay  = "";
     private string?  _editError;
 
@@ -308,6 +328,7 @@
         _name = _code = _entityTypeId = _taxId = _stateOfInc = _countryCode = "";
         _effectiveDt  = TemporalContext.GetOperativeDate();
         _otThreshold              = 40.00m;
+        _otReviewThreshold        = null;
         _defaultWorkweekStartDay  = "";
         _error                    = null;
         _showPanel    = true;
@@ -339,6 +360,7 @@
                 StateOfIncorporation     = _stateOfInc,
                 CountryCode              = _countryCode,
                 OtWeeklyThresholdHours   = _otThreshold,
+                OtReviewThresholdHours   = _otReviewThreshold,
                 DefaultWorkweekStartDay  = int.TryParse(_defaultWorkweekStartDay, out var wsd) ? wsd : null,
                 EffectiveStartDate       = DateOnly.FromDateTime(_effectiveDt),
                 InitiatedBy              = actorId
@@ -362,6 +384,7 @@
         _editStateOfInc   = entity.StateOfIncorporation  ?? "";
         _editCountryCode  = entity.CountryCode            ?? "";
         _editOtThreshold             = entity.OtWeeklyThresholdHours ?? 40.00m;
+        _editOtReviewThreshold       = entity.OtReviewThresholdHours;
         _editDefaultWorkweekStartDay = entity.DefaultWorkweekStartDay?.ToString() ?? "";
         _editError                   = null;
         _showEditPanel    = true;
@@ -394,6 +417,7 @@
                 StateOfIncorporation     = _editStateOfInc,
                 CountryCode              = _editCountryCode,
                 OtWeeklyThresholdHours   = _editOtThreshold,
+                OtReviewThresholdHours   = _editOtReviewThreshold,
                 DefaultWorkweekStartDay  = int.TryParse(_editDefaultWorkweekStartDay, out var ewsd) ? ewsd : null,
                 UpdatedBy                = actorId
             };

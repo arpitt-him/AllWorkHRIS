@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Threading.Channels;
 using AllWorkHRIS.Core.Audit;
 using AllWorkHRIS.Core.Lookups;
+using AllWorkHRIS.Core.Pipeline;
 using AllWorkHRIS.Core.Temporal;
 using AllWorkHRIS.Module.Payroll.Commands;
 using AllWorkHRIS.Module.Payroll.Domain.Run;
@@ -24,6 +25,7 @@ public sealed class PayrollRunService : IPayrollRunService
     private readonly ILogger<PayrollRunService>  _logger;
     private readonly IAuditService               _auditService;
     private readonly ILookupCache                _lookup;
+    private readonly IPayrollHoursSource         _hoursSource;
 
     public PayrollRunService(
         IPayrollRunRepository       runRepo,
@@ -32,7 +34,8 @@ public sealed class PayrollRunService : IPayrollRunService
         ITemporalContext            temporal,
         ILogger<PayrollRunService>  logger,
         IAuditService               auditService,
-        ILookupCache                lookup)
+        ILookupCache                lookup,
+        IPayrollHoursSource         hoursSource)
     {
         _runRepo      = runRepo;
         _contextRepo  = contextRepo;
@@ -41,6 +44,7 @@ public sealed class PayrollRunService : IPayrollRunService
         _logger       = logger;
         _auditService = auditService;
         _lookup       = lookup;
+        _hoursSource  = hoursSource;
     }
 
     // Status-id helpers — keep the cache call out of the hot path and give the
@@ -276,6 +280,13 @@ public sealed class PayrollRunService : IPayrollRunService
         }
 
         await _runRepo.UpdateStatusAsync(command.RunId, StatusId("CANCELLED"), command.CancelledBy);
+
+        // Phase 12.7 — unlock-on-cancel: release any time entries this run had locked, returning
+        // them to the pool for a fresh run. Cancel today is only from Draft/Calculated (no locks
+        // yet, since locking happens at approval), so this is a no-op now and the safety net for
+        // when a locked (approved) run can be reversed/cancelled — closes the stranded-lock gap.
+        await _hoursSource.UnlockHoursForRunAsync(command.RunId);
+
         _logger.LogInformation("Run {RunId} cancelled by {UserId}: {Reason}",
             command.RunId, command.CancelledBy, command.Reason);
 

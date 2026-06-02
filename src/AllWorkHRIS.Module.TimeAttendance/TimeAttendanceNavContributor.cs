@@ -23,7 +23,7 @@ public sealed class TimeAttendanceNavContributor : INavContributor
 
         if (roles.Any(r => r is "TimeAdmin"))
         {
-            items.Add(new("Payroll Handoff", "/ta/handoff", RequiredRole: "TimeAdmin"));
+            items.Add(new("Timecard Review", "/ta/handoff", RequiredRole: "TimeAdmin"));
             items.Add(new("Import Entries",  "/ta/import",  RequiredRole: "TimeAdmin"));
         }
 

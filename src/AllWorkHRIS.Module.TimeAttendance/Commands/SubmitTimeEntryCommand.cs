@@ -15,4 +15,7 @@ public sealed record SubmitTimeEntryCommand
     public string?          Notes           { get; init; }
     public string?          ProjectCode     { get; init; }
     public string?          TaskCode        { get; init; }
+    // Phase 12.7b — when true the entry lands APPROVED instead of SUBMITTED (trusted source, e.g.
+    // an IMPORT into a legal entity configured for auto-approve). Set by the caller, not the user.
+    public bool             AutoApprove     { get; init; }
 }

@@ -1265,7 +1265,7 @@ public sealed class PayrollContextRepository : IPayrollContextRepository
                 context_version_number, context_change_reason_code,
                 effective_start_date, effective_end_date,
                 pay_date_convention, pay_date_offset_days, cutoff_offset_days, extra_period_policy,
-                ot_weekly_threshold_hours, workweek_start_day,
+                ot_weekly_threshold_hours, ot_review_threshold_hours, workweek_start_day,
                 created_by, creation_timestamp, last_updated_by, last_update_timestamp
             ) VALUES (
                 @PayrollContextId, @PayrollContextCode, @PayrollContextName,
@@ -1274,7 +1274,7 @@ public sealed class PayrollContextRepository : IPayrollContextRepository
                 @ContextVersionNumber, @ContextChangeReasonCode,
                 @EffectiveStartDate, @EffectiveEndDate,
                 @PayDateConvention, @PayDateOffsetDays, @CutoffOffsetDays, @ExtraPeriodPolicy,
-                @OtWeeklyThresholdHours, @WorkweekStartDay,
+                @OtWeeklyThresholdHours, @OtReviewThresholdHours, @WorkweekStartDay,
                 @CreatedBy, @CreationTimestamp, @LastUpdatedBy, @LastUpdateTimestamp
             )
             """;
@@ -1299,6 +1299,7 @@ public sealed class PayrollContextRepository : IPayrollContextRepository
             context.CutoffOffsetDays,
             context.ExtraPeriodPolicy,
             context.OtWeeklyThresholdHours,
+            context.OtReviewThresholdHours,
             context.WorkweekStartDay,
             context.CreatedBy,
             context.CreationTimestamp,
@@ -1384,12 +1385,13 @@ public sealed class PayrollContextRepository : IPayrollContextRepository
         ));
     }
 
-    public async Task UpdateContextSettingsAsync(Guid payrollContextId, decimal otWeeklyThresholdHours, int workweekStartDay, Guid updatedBy)
+    public async Task UpdateContextSettingsAsync(Guid payrollContextId, decimal otWeeklyThresholdHours, int workweekStartDay, decimal? otReviewThresholdHours, Guid updatedBy)
     {
         const string sql = """
             UPDATE payroll_context
             SET ot_weekly_threshold_hours = @OtWeeklyThresholdHours,
                 workweek_start_day        = @WorkweekStartDay,
+                ot_review_threshold_hours = @OtReviewThresholdHours,
                 last_updated_by           = @UpdatedBy,
                 last_update_timestamp     = CURRENT_TIMESTAMP
             WHERE payroll_context_id = @PayrollContextId
@@ -1397,10 +1399,11 @@ public sealed class PayrollContextRepository : IPayrollContextRepository
         using var conn = _connectionFactory.CreateConnection();
         await conn.ExecuteAsync(sql, new
         {
-            PayrollContextId      = payrollContextId,
+            PayrollContextId       = payrollContextId,
             OtWeeklyThresholdHours = otWeeklyThresholdHours,
-            WorkweekStartDay      = workweekStartDay,
-            UpdatedBy             = updatedBy
+            WorkweekStartDay       = workweekStartDay,
+            OtReviewThresholdHours = otReviewThresholdHours,
+            UpdatedBy              = updatedBy
         });
 
         await _auditService.LogAsync(new AuditEventRecord(
@@ -1408,11 +1411,12 @@ public sealed class PayrollContextRepository : IPayrollContextRepository
             EntityType:    "PayrollContext",
             EntityId:      payrollContextId,
             ModuleName:    "PAYROLL",
-            ChangeSummary: $"OT threshold updated to {otWeeklyThresholdHours} hrs, workweek start updated to {workweekStartDay}",
+            ChangeSummary: $"OT threshold updated to {otWeeklyThresholdHours} hrs, workweek start {workweekStartDay}, OT review threshold {(otReviewThresholdHours.HasValue ? otReviewThresholdHours.Value + " hrs" : "off")}",
             AfterJson:     JsonSerializer.Serialize(new
             {
                 ot_weekly_threshold_hours = otWeeklyThresholdHours,
-                workweek_start_day        = workweekStartDay
+                workweek_start_day        = workweekStartDay,
+                ot_review_threshold_hours = otReviewThresholdHours
             })
         ));
     }
@@ -1592,17 +1596,17 @@ public sealed class PayrollContextRepository : IPayrollContextRepository
         return await conn.ExecuteScalarAsync<int>(sql, new { PayrollContextId = payrollContextId });
     }
 
-    public async Task<(decimal? OtWeeklyThresholdHours, int? WorkweekStartDay)> GetLegalEntityDefaultsAsync(Guid legalEntityId)
+    public async Task<(decimal? OtWeeklyThresholdHours, int? WorkweekStartDay, decimal? OtReviewThresholdHours)> GetLegalEntityDefaultsAsync(Guid legalEntityId)
     {
         const string sql = """
-            SELECT ot_weekly_threshold_hours, default_workweek_start_day
+            SELECT ot_weekly_threshold_hours, default_workweek_start_day, ot_review_threshold_hours
             FROM org_unit
             WHERE org_unit_id = @LegalEntityId
             """;
         using var conn = _connectionFactory.CreateConnection();
         var row = await conn.QuerySingleOrDefaultAsync(sql, new { LegalEntityId = legalEntityId });
-        if (row is null) return (null, null);
-        return ((decimal?)row.ot_weekly_threshold_hours, (int?)row.default_workweek_start_day);
+        if (row is null) return (null, null, null);
+        return ((decimal?)row.ot_weekly_threshold_hours, (int?)row.default_workweek_start_day, (decimal?)row.ot_review_threshold_hours);
     }
 }
 

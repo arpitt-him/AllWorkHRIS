@@ -1035,6 +1035,7 @@ public sealed class OrgStructureService : IOrgStructureService
             StateOfIncorporation    = string.IsNullOrWhiteSpace(command.StateOfIncorporation)   ? null : command.StateOfIncorporation.Trim(),
             CountryCode             = string.IsNullOrWhiteSpace(command.CountryCode)            ? null : command.CountryCode.Trim().ToUpper(),
             OtWeeklyThresholdHours   = command.OtWeeklyThresholdHours,
+            OtReviewThresholdHours   = command.OtReviewThresholdHours,
             DefaultWorkweekStartDay  = command.DefaultWorkweekStartDay,
             OrgStatusId              = _activeStatusId,
             EffectiveStartDate      = command.EffectiveStartDate,

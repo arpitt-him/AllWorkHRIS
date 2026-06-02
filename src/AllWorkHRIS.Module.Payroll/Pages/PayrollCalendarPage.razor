@@ -162,6 +162,14 @@
                             </span>
                         </div>
                         <div class="form-field">
+                            <label class="form-label">OT Review Threshold (hrs)</label>
+                            <SfNumericTextBox TValue="decimal?" @bind-Value="_newCtx.OtReviewThresholdHours"
+                                             Min="0" Max="168" Step="0.5m" Width="100%" Placeholder="blank = never flag OT" />
+                            <span style="font-size:var(--font-size-sm);color:#6B7280">
+                                Approve-by-exception trigger: hold an employee's overtime for manual review when their period OT reaches this. Blank = routine OT auto-approves.
+                            </span>
+                        </div>
+                        <div class="form-field">
                             <label class="form-label">Workweek Start Day</label>
                             <SfDropDownList TValue="int" TItem="IntOption"
                                             DataSource="@_weekdayOptions"
@@ -339,16 +347,17 @@
         if (_showNewContextForm)
         {
             var entityId = SessionState.SelectedLegalEntityId ?? Guid.Empty;
-            var (otThreshold, wwStartDay) = entityId != Guid.Empty
+            var (otThreshold, wwStartDay, otReviewThreshold) = entityId != Guid.Empty
                 ? await ContextRepo.GetLegalEntityDefaultsAsync(entityId)
-                : (null, null);
+                : (null, null, null);
 
             _newCtx = new NewContextForm
             {
                 EffectiveStartDate     = DateOnly.FromDateTime(TemporalContext.GetOperativeDate()),
                 LegalEntityId          = entityId,
                 OtWeeklyThresholdHours = otThreshold ?? 40.00m,
-                WorkweekStartDay       = wwStartDay  ?? 1
+                WorkweekStartDay       = wwStartDay  ?? 1,
+                OtReviewThresholdHours = otReviewThreshold   // null = inherit "off"
             };
         }
     }
@@ -397,6 +406,7 @@
                 CutoffOffsetDays        = _newCtx.CutoffOffsetDays,
                 ExtraPeriodPolicy       = _newCtx.ExtraPeriodPolicy,
                 OtWeeklyThresholdHours  = _newCtx.OtWeeklyThresholdHours,
+                OtReviewThresholdHours  = _newCtx.OtReviewThresholdHours,
                 WorkweekStartDay        = _newCtx.WorkweekStartDay,
                 CreatedBy               = _currentUserId,
                 CreationTimestamp       = now,
@@ -484,6 +494,7 @@
         public int      CutoffOffsetDays       { get; set; } = 3;
         public string   ExtraPeriodPolicy      { get; set; } = "EXTRA_SPECIAL";
         public decimal  OtWeeklyThresholdHours { get; set; } = 40.00m;
+        public decimal? OtReviewThresholdHours { get; set; }   // Phase 12.7b — null = OT never flagged
         public int      WorkweekStartDay        { get; set; } = 1;
     }
 }

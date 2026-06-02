@@ -43,11 +43,11 @@ public interface IPayrollContextRepository
     /// used to pre-populate new payroll context forms. Returns nulls when the entity
     /// has no stored defaults (system defaults apply: 40.00 hrs, Monday).
     /// </summary>
-    Task<(decimal? OtWeeklyThresholdHours, int? WorkweekStartDay)> GetLegalEntityDefaultsAsync(Guid legalEntityId);
+    Task<(decimal? OtWeeklyThresholdHours, int? WorkweekStartDay, decimal? OtReviewThresholdHours)> GetLegalEntityDefaultsAsync(Guid legalEntityId);
 
     /// <summary>
     /// Updates the editable operational settings on an existing payroll context:
-    /// OT weekly threshold and workweek start day.
+    /// OT weekly threshold, workweek start day, and OT review threshold (Phase 12.7b).
     /// </summary>
-    Task UpdateContextSettingsAsync(Guid payrollContextId, decimal otWeeklyThresholdHours, int workweekStartDay, Guid updatedBy);
+    Task UpdateContextSettingsAsync(Guid payrollContextId, decimal otWeeklyThresholdHours, int workweekStartDay, decimal? otReviewThresholdHours, Guid updatedBy);
 }

@@ -3,6 +3,7 @@ using System.Threading.Channels;
 using Autofac;
 using AllWorkHRIS.Core.Events;
 using AllWorkHRIS.Core.Lookups;
+using AllWorkHRIS.Core.Pipeline;
 using AllWorkHRIS.Core.Temporal;
 using AllWorkHRIS.Module.Payroll.Domain.Results;
 using AllWorkHRIS.Module.Payroll.Domain.ResultSet;
@@ -502,6 +503,8 @@ public sealed class PayrollRunJob : BackgroundService
         var accumulatorRepo = scope.Resolve<IAccumulatorRepository>();
         var accumulator     = scope.Resolve<IAccumulatorService>();
         var wallClock       = scope.Resolve<IWallClock>();
+        var hoursSource     = scope.Resolve<IPayrollHoursSource>();
+        var contextRepo     = scope.Resolve<IPayrollContextRepository>();
 
         var approvingStatus        = lookup.GetId(LookupTables.RunStatus, "APPROVING");
         var approvedStatus         = lookup.GetId(LookupTables.RunStatus, "APPROVED");
@@ -568,6 +571,23 @@ public sealed class PayrollRunJob : BackgroundService
                         RunStatus = "APPROVING", UpdatedAt = wallClock.UtcNow
                     });
                 }
+            }
+
+            // Phase 12.7 — lock-on-approve: "commit YTD AND lock the hours that produced it."
+            // Lock this run's payable employees' APPROVED entries within the period to the run, so a
+            // later run over the same dates can't re-sum them. The population is every non-failed
+            // result (CALCULATED about-to-post OR already-APPROVED) — NOT just the freshly-CALCULATED
+            // ones, so a retry of a partially-posted run (results already flipped to APPROVED) still
+            // locks. The lock itself is idempotent (APPROVED → LOCKED only). No-op when T&A absent.
+            var period = await contextRepo.GetPeriodByIdAsync(run.PeriodId);
+            if (period is not null)
+            {
+                var employmentIds = allResults
+                    .Where(r => r.ResultStatusId == calculatedResultStatus
+                             || r.ResultStatusId == approvedResultStatus)
+                    .Select(r => r.EmploymentId).Distinct().ToList();
+                await hoursSource.LockHoursForRunAsync(
+                    run.RunId, employmentIds, period.PeriodStartDate, period.PeriodEndDate, ct);
             }
 
             await runRepo.UpdateStatusAsync(run.RunId, approvedStatus, fresh.LastUpdatedBy);

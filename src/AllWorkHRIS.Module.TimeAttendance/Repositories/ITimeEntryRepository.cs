@@ -14,8 +14,22 @@ public interface ITimeEntryRepository
     Task<Guid>                    InsertAsync(TimeEntry entry, IUnitOfWork uow);
     Task                          UpdateStatusAsync(Guid timeEntryId, string status, Guid actorId, IUnitOfWork uow);
     Task                          UpdateStatusWithReasonAsync(Guid timeEntryId, string status, Guid actorId, string reason, IUnitOfWork uow);
+
+    // Phase 12.7b — approval at scale.
+    /// <summary>Batch-approve SUBMITTED/CORRECTED entries (by id) to APPROVED; returns the count actually transitioned.</summary>
+    Task<int>                     ApproveEntriesAsync(IReadOnlyList<Guid> timeEntryIds, Guid approvedBy, IUnitOfWork uow);
+    /// <summary>Per-LE config: whether IMPORT-method time entries auto-approve on submit.</summary>
+    Task<bool>                    GetAutoApproveImportedTimeAsync(Guid legalEntityId);
     Task                          LockAsync(Guid timeEntryId, Guid payrollRunId, DateTimeOffset lockedAt, IUnitOfWork uow);
     Task                          ReclassifyAsync(Guid timeEntryId, string timeCategory, IUnitOfWork uow);
+
+    // Phase 12.7 — lock-on-approve / unlock-on-cancel. These wrap their own unit of work since
+    // they are driven from the payroll approval/cancel path via the Core IPayrollHoursSource seam.
+    /// <summary>Locks the APPROVED entries of the given employments within the period range to the
+    /// run (APPROVED → LOCKED + run id). Idempotent; returns the number of entries locked.</summary>
+    Task<int>                     LockHoursForRunAsync(Guid payrollRunId, IReadOnlyList<Guid> employmentIds, DateOnly periodStart, DateOnly periodEnd, CancellationToken ct = default);
+    /// <summary>Releases every entry locked to the run (LOCKED → APPROVED, clear run id). Returns the count.</summary>
+    Task<int>                     UnlockHoursForRunAsync(Guid payrollRunId, CancellationToken ct = default);
     Task<bool>                    EmploymentExistsAsync(Guid employmentId);
     Task<string?>                 GetPeriodStatusAsync(Guid payrollPeriodId);
     Task<string?>                 GetFlsaStatusAsync(Guid employmentId);
@@ -27,5 +41,5 @@ public interface ITimeEntryRepository
     /// overtime for non-exempt employees.
     /// </summary>
     Task<IReadOnlyList<(DateOnly WorkDate, decimal Hours)>> GetApprovedHoursByEmploymentAndPeriodAsync(
-        Guid employmentId, DateOnly periodStart, DateOnly periodEnd);
+        Guid employmentId, DateOnly periodStart, DateOnly periodEnd, Guid payrollRunId);
 }

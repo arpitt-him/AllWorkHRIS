@@ -245,6 +245,7 @@ public sealed record CreateOrgUnitCommand
     public string?           StateOfIncorporation   { get; init; }
     public string?           CountryCode            { get; init; }
     public decimal?          OtWeeklyThresholdHours   { get; init; }
+    public decimal?          OtReviewThresholdHours   { get; init; }
     public int?              DefaultWorkweekStartDay  { get; init; }
     public required DateOnly EffectiveStartDate       { get; init; }
     public required Guid     InitiatedBy              { get; init; }
@@ -260,6 +261,7 @@ public sealed record UpdateOrgUnitCommand
     public string?           StateOfIncorporation     { get; init; }
     public string?           CountryCode              { get; init; }
     public decimal?          OtWeeklyThresholdHours   { get; init; }
+    public decimal?          OtReviewThresholdHours   { get; init; }
     public int?              DefaultWorkweekStartDay  { get; init; }
     public required Guid     UpdatedBy                { get; init; }
 }

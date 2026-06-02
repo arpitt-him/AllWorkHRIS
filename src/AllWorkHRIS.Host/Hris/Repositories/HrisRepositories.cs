@@ -1062,7 +1062,7 @@ public sealed class OrgUnitRepository : IOrgUnitRepository
                 org_unit_id, org_unit_type_id, org_unit_code, org_unit_name, parent_org_unit_id,
                 legal_entity_id, org_status_id, effective_start_date, effective_end_date,
                 tax_registration_number, country_code, state_of_incorporation, legal_entity_type_id,
-                ot_weekly_threshold_hours, default_workweek_start_day,
+                ot_weekly_threshold_hours, ot_review_threshold_hours, default_workweek_start_day,
                 address_line_1, address_line_2, city, state_code, postal_code, locality_code,
                 work_location_type_id,
                 created_by, creation_timestamp, last_updated_by, last_update_timestamp
@@ -1070,7 +1070,7 @@ public sealed class OrgUnitRepository : IOrgUnitRepository
                 @OrgUnitId, @OrgUnitTypeId, @OrgUnitCode, @OrgUnitName, @ParentOrgUnitId,
                 @LegalEntityId, @OrgStatusId, @EffectiveStartDate, @EffectiveEndDate,
                 @TaxRegistrationNumber, @CountryCode, @StateOfIncorporation, @LegalEntityTypeId,
-                @OtWeeklyThresholdHours, @DefaultWorkweekStartDay,
+                @OtWeeklyThresholdHours, @OtReviewThresholdHours, @DefaultWorkweekStartDay,
                 @AddressLine1, @AddressLine2, @City, @StateCode, @PostalCode, @LocalityCode,
                 @WorkLocationTypeId,
                 @CreatedBy, @CreationTimestamp, @LastUpdatedBy, @LastUpdateTimestamp
@@ -1091,6 +1091,7 @@ public sealed class OrgUnitRepository : IOrgUnitRepository
                 state_of_incorporation    = @StateOfIncorporation,
                 country_code              = @CountryCode,
                 ot_weekly_threshold_hours    = @OtWeeklyThresholdHours,
+                ot_review_threshold_hours    = @OtReviewThresholdHours,
                 default_workweek_start_day   = @DefaultWorkweekStartDay,
                 last_updated_by              = @UpdatedBy,
                 last_update_timestamp     = now()

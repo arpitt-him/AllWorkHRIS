@@ -20,6 +20,7 @@ public sealed record PayrollContext
     public int          CutoffOffsetDays           { get; init; } = 3;
     public string       ExtraPeriodPolicy          { get; init; } = "EXTRA_SPECIAL";
     public decimal      OtWeeklyThresholdHours     { get; init; } = 40.00m;
+    public decimal?     OtReviewThresholdHours     { get; init; }   // Phase 12.7b — null = OT never flagged on hours
     public int          WorkweekStartDay           { get; init; } = 1;
     public Guid         CreatedBy                  { get; init; }
     public DateTimeOffset CreationTimestamp        { get; init; }
