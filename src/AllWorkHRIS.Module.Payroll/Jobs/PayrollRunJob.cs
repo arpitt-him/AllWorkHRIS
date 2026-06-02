@@ -235,31 +235,32 @@ public sealed class PayrollRunJob : BackgroundService
             var period         = await contextRepo.GetPeriodByIdAsync(run.PeriodId)
                                  ?? throw new InvalidOperationException($"Period {run.PeriodId} not found for run {runId}");
 
-            // Resolve the employee population + blocked set for this run. A full-context run
+            // Resolve the employee population + excluded set for this run. A full-context run
             // pays all active+cleared employees and flags every blocked employee; a scoped
-            // run (Phase 12.6) narrows both to its validated target list.
-            var (population, blocked) = await ResolvePopulationAsync(run, profileRepo, runRepo, lookup);
+            // run (Phase 12.6) narrows both to its validated target list, and additionally drops
+            // any target already paid for the period (ToDo #43 — no additive double-pay).
+            var (population, excluded) = await ResolvePopulationAsync(run, profileRepo, runRepo, resultRepo, lookup);
             var total = population.Count;
-            if (blocked.Count > 0)
+            if (excluded.Count > 0)
             {
                 var exceptionTime = TdoNow();
-                foreach (var blockedId in blocked)
+                foreach (var ex in excluded)
                 {
                     await runRepo.InsertRunExceptionAsync(new PayrollRunException
                     {
                         RunExceptionId   = Guid.NewGuid(),
                         RunId            = runId,
-                        EmploymentId     = blockedId,
-                        ExceptionCode    = "BLOCKING_TASKS_INCOMPLETE",
-                        ExceptionMessage = "Employee excluded: onboarding blocking tasks not yet complete.",
+                        EmploymentId     = ex.EmploymentId,
+                        ExceptionCode    = ex.ExceptionCode,
+                        ExceptionMessage = ex.ExceptionMessage,
                         CreatedTimestamp = exceptionTime
                     });
                     _logger.LogWarning(
-                        "Run {RunId}: employment {EmploymentId} excluded — BLOCKING_TASKS_INCOMPLETE",
-                        runId, blockedId);
+                        "Run {RunId}: employment {EmploymentId} excluded — {ExceptionCode}",
+                        runId, ex.EmploymentId, ex.ExceptionCode);
                 }
-                _logger.LogWarning("Run {RunId}: {Blocked} employee(s) excluded — BLOCKING_TASKS_INCOMPLETE",
-                    runId, blocked.Count);
+                _logger.LogWarning("Run {RunId}: {Excluded} employee(s) excluded",
+                    runId, excluded.Count);
             }
 
             _logger.LogInformation("Run {RunId}: calculating {Total} employees", runId, total);
@@ -399,18 +400,18 @@ public sealed class PayrollRunJob : BackgroundService
             await runRepo.SetRunTimestampsAsync(runId, startTime, TdoNow(), run.InitiatedBy);
             await resultSetRepo.UpdateStatusAsync(resultSet.PayrollRunResultSetId, lookup.GetId(LookupTables.ResultSetStatus, "CALCULATED"));
 
-            var blockedMsg = blocked.Count > 0 ? $", {blocked.Count} blocked (onboarding)" : "";
+            var excludedMsg = excluded.Count > 0 ? $", {excluded.Count} excluded" : "";
             await _progress.UpdateAsync(new RunProgress
             {
                 RunId = runId, PercentComplete = 100, Processed = processed,
                 Total = total, Failed = failed,
-                StatusMessage = $"Complete — {processed} calculated, {failed} failed{blockedMsg}",
+                StatusMessage = $"Complete — {processed} calculated, {failed} failed{excludedMsg}",
                 RunStatus = failed == total && total > 0 ? "FAILED" : "CALCULATED",
                 UpdatedAt = wallClock.UtcNow
             });
             _logger.LogInformation(
-                "Run {RunId}: complete — {Processed} calculated, {Failed} failed, {Blocked} blocked (onboarding)",
-                runId, processed, failed, blocked.Count);
+                "Run {RunId}: complete — {Processed} calculated, {Failed} failed, {Excluded} excluded",
+                runId, processed, failed, excluded.Count);
         }
         catch (OperationCanceledException)
         {
@@ -424,19 +425,35 @@ public sealed class PayrollRunJob : BackgroundService
         }
     }
 
-    // Resolves the run's employee population and the blocked set to flag as exceptions.
+    // An employee dropped from a run's paid population, with the reason to record as an exception.
+    private readonly record struct EmploymentExclusion(Guid EmploymentId, string ExceptionCode, string ExceptionMessage);
+
+    private const string OnboardingExcludedMessage =
+        "Employee excluded: onboarding blocking tasks not yet complete.";
+    private const string AlreadyPaidExcludedMessage =
+        "Employee excluded: already has approved pay for this period — a scoped run is additive, " +
+        "so re-paying would double-count. Use a correction (reverse + re-post) instead.";
+
+    // Resolves the run's employee population and the excluded set to flag as exceptions.
     // Full-context run: pay all active+cleared employees and flag every blocked employee in the
     // context (unchanged). Scoped run (Phase 12.6): narrow both to the run_scope's validated
     // target list — a supplemental/catch-up run pays only its chosen stragglers, never the whole
     // context. Targets are validated to belong to the run's payroll context (legal-entity scoping).
-    private static async Task<(IReadOnlyList<Guid> Population, IReadOnlyList<Guid> Blocked)> ResolvePopulationAsync(
-        PayrollRun run, IPayrollProfileRepository profileRepo, IPayrollRunRepository runRepo, ILookupCache lookup)
+    // ToDo #43: a scoped run additionally drops any target already paid for the period (standing
+    // posted result), so an additive re-run can't double-pay. This is the hard invariant that also
+    // catches the race the creation-time guard can't see — a Regular run approved after this
+    // supplemental was drafted but before it executes.
+    private static async Task<(IReadOnlyList<Guid> Population, IReadOnlyList<EmploymentExclusion> Excluded)> ResolvePopulationAsync(
+        PayrollRun run, IPayrollProfileRepository profileRepo, IPayrollRunRepository runRepo,
+        IEmployeePayrollResultRepository resultRepo, ILookupCache lookup)
     {
         var eligible = await profileRepo.GetActiveEmploymentIdsByContextAsync(run.PayrollContextId);
         var blocked  = await profileRepo.GetActiveBlockedEmploymentIdsByContextAsync(run.PayrollContextId);
 
         if (run.RunScopeId is not Guid scopeId)
-            return (eligible, blocked);  // full-context run — unchanged behaviour
+            // Full-context run — unchanged behaviour. (A second full Regular run is already
+            // prevented by the one-Regular-run-per-period guard, so no already-paid check here.)
+            return (eligible, blocked.Select(Onboarding).ToList());
 
         var scope = await runRepo.GetRunScopeAsync(scopeId)
             ?? throw new InvalidOperationException(
@@ -454,10 +471,31 @@ public sealed class PayrollRunJob : BackgroundService
                 $"in payroll context {run.PayrollContextId}: {string.Join(", ", outsiders.Take(5))}" +
                 (outsiders.Count > 5 ? " …" : ""));
 
-        var targetSet = targets.ToHashSet();
-        return (eligible.Where(targetSet.Contains).ToList(),
-                blocked.Where(targetSet.Contains).ToList());
+        var targetSet  = targets.ToHashSet();
+        var population = eligible.Where(targetSet.Contains).ToList();
+
+        // ToDo #43 — drop already-paid targets (standing posted result for the period).
+        var alreadyPaid = (await resultRepo.GetPaidEmploymentIdsForPeriodAsync(run.PeriodId, PaidStatusIds(lookup)))
+            .ToHashSet();
+
+        var excluded = blocked.Where(targetSet.Contains).Select(Onboarding).ToList();
+        excluded.AddRange(population.Where(alreadyPaid.Contains)
+            .Select(id => new EmploymentExclusion(id, "ALREADY_PAID_THIS_PERIOD", AlreadyPaidExcludedMessage)));
+
+        return (population.Where(id => !alreadyPaid.Contains(id)).ToList(), excluded);
+
+        static EmploymentExclusion Onboarding(Guid id) =>
+            new(id, "BLOCKING_TASKS_INCOMPLETE", OnboardingExcludedMessage);
     }
+
+    // The employee-result statuses that represent a *standing posted* payment (impacts on the
+    // ledger that haven't been reversed/superseded). REVERSED / CORRECTED are deliberately absent.
+    private static int[] PaidStatusIds(ILookupCache lookup) =>
+        [
+            lookup.GetId(LookupTables.EmployeeResultStatus, "APPROVED"),
+            lookup.GetId(LookupTables.EmployeeResultStatus, "RELEASED"),
+            lookup.GetId(LookupTables.EmployeeResultStatus, "FINALIZED"),
+        ];
 
     // EXPLICIT / EXCEPTION population methods carry a JSON array of employment_id strings (the
     // resolved target list). QUERY-method scopes aren't produced by the current UI / unsupported.

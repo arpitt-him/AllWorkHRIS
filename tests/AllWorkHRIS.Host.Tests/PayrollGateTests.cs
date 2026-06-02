@@ -119,15 +119,14 @@ public sealed class PayrollGateTests : IDisposable
         var contextRepo = new PayrollContextRepository(_connectionFactory, auditService);
         var queue       = Channel.CreateUnbounded<Guid>();
 
-        // resultRepo / accumulatorRepo / resultLineRepo / accumulatorSvc no longer
-        // wired into PayrollRunService (ADR-017 removed the cancel-time reversal
-        // path). Retained as local vars in case future tests need them.
-        _ = new EmployeePayrollResultRepository(_connectionFactory);
+        // resultRepo re-wired into PayrollRunService for the ToDo #43 already-paid guard.
+        // accumulatorRepo / resultLineRepo retained as locals in case future tests need them.
+        var resultRepo = new EmployeePayrollResultRepository(_connectionFactory);
         _ = new AccumulatorRepository(_connectionFactory);
         _ = new ResultLineRepository(_connectionFactory);
 
         _runService = new PayrollRunService(
-            _runRepo, contextRepo, queue,
+            _runRepo, contextRepo, resultRepo, queue,
             temporalCtx, NullLogger<PayrollRunService>.Instance, auditService, _lookupCache,
             new StandardHoursPayrollHoursSource());
     }

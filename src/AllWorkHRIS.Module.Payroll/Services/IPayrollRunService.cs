@@ -32,6 +32,9 @@ public interface IPayrollRunService
     /// <summary>The distinct employment ids flagged as exceptions on the period's Regular run —
     /// pre-fills the picker for the "carry over this period's exceptions" catch-up case. Empty if none.</summary>
     Task<IReadOnlyList<Guid>> GetCarryoverEmploymentIdsAsync(Guid periodId);
+    /// <summary>ToDo #43 — employment ids already paid (standing posted result) for the period, so
+    /// the picker can badge / block them: an additive scoped run must not re-pay an already-paid EE.</summary>
+    Task<IReadOnlyList<Guid>> GetAlreadyPaidEmploymentIdsAsync(Guid periodId);
     /// <summary>The run_scope for a scoped run (for "Scoped: N EEs" surfacing), or null.</summary>
     Task<RunScope?> GetRunScopeAsync(Guid runScopeId);
 }

@@ -13,32 +13,35 @@ namespace AllWorkHRIS.Module.Payroll.Services;
 
 public sealed class PayrollRunService : IPayrollRunService
 {
-    // IEmployeePayrollResultRepository and IAccumulatorService were dependencies
-    // of the old cancel-from-Calculated reversal path. ADR-017 (Phase 12.5.3)
-    // removed that path — cancel-from-Calculated is now a clean discard since
-    // calculation no longer posts to the ledger. Re-add these deps if/when an
-    // explicit "reverse an approved run" surface is built (separate from cancel).
-    private readonly IPayrollRunRepository       _runRepo;
-    private readonly IPayrollContextRepository   _contextRepo;
-    private readonly Channel<Guid>               _queue;
-    private readonly ITemporalContext            _temporal;
-    private readonly ILogger<PayrollRunService>  _logger;
-    private readonly IAuditService               _auditService;
-    private readonly ILookupCache                _lookup;
-    private readonly IPayrollHoursSource         _hoursSource;
+    // IAccumulatorService was a dependency of the old cancel-from-Calculated reversal path.
+    // ADR-017 (Phase 12.5.3) removed that path — cancel-from-Calculated is now a clean discard
+    // since calculation no longer posts to the ledger. Re-add it if/when an explicit "reverse an
+    // approved run" surface is built (separate from cancel). IEmployeePayrollResultRepository was
+    // re-added (ToDo #43) for the scoped-run already-paid guard below.
+    private readonly IPayrollRunRepository             _runRepo;
+    private readonly IPayrollContextRepository         _contextRepo;
+    private readonly IEmployeePayrollResultRepository  _resultRepo;
+    private readonly Channel<Guid>                     _queue;
+    private readonly ITemporalContext                  _temporal;
+    private readonly ILogger<PayrollRunService>        _logger;
+    private readonly IAuditService                     _auditService;
+    private readonly ILookupCache                      _lookup;
+    private readonly IPayrollHoursSource               _hoursSource;
 
     public PayrollRunService(
-        IPayrollRunRepository       runRepo,
-        IPayrollContextRepository   contextRepo,
-        Channel<Guid>               queue,
-        ITemporalContext            temporal,
-        ILogger<PayrollRunService>  logger,
-        IAuditService               auditService,
-        ILookupCache                lookup,
-        IPayrollHoursSource         hoursSource)
+        IPayrollRunRepository             runRepo,
+        IPayrollContextRepository         contextRepo,
+        IEmployeePayrollResultRepository  resultRepo,
+        Channel<Guid>                     queue,
+        ITemporalContext                  temporal,
+        ILogger<PayrollRunService>        logger,
+        IAuditService                     auditService,
+        ILookupCache                      lookup,
+        IPayrollHoursSource               hoursSource)
     {
         _runRepo      = runRepo;
         _contextRepo  = contextRepo;
+        _resultRepo   = resultRepo;
         _queue        = queue;
         _temporal     = temporal;
         _logger       = logger;
@@ -115,6 +118,21 @@ public sealed class PayrollRunService : IPayrollRunService
             parentRunId ??= parent.RunId;
 
             var distinctTargets = targets.Distinct().ToList();
+
+            // ToDo #43 — block creating a scoped run that targets an already-paid employee. A
+            // scoped run is additive (re-target + re-post, no correction logic), so paying an
+            // employee who already has a standing posted result for this period would double-count.
+            // The genuine re-pay path is a correction (reverse + re-post), which isn't built yet.
+            // The engine's population resolver enforces the same invariant as a safety net (and
+            // catches the create→approve race); this is the early, user-facing guard.
+            var alreadyPaid = (await _resultRepo.GetPaidEmploymentIdsForPeriodAsync(command.PeriodId, PaidStatusIds()))
+                .ToHashSet();
+            var paidTargets = distinctTargets.Where(alreadyPaid.Contains).ToList();
+            if (paidTargets.Count > 0)
+                throw new InvalidOperationException(
+                    $"{paidTargets.Count} of the selected employee(s) already have approved pay for this period " +
+                    "and would be paid again. A scoped run is additive, not a correction — deselect them to proceed " +
+                    "(re-paying requires a correction that reverses and re-posts, which isn't available yet).");
             var scope = new RunScope
             {
                 RunScopeId           = Guid.NewGuid(),
@@ -321,6 +339,21 @@ public sealed class PayrollRunService : IPayrollRunService
         var exceptions = await _runRepo.GetRunExceptionsAsync(parent.RunId);
         return exceptions.Select(e => e.EmploymentId).Distinct().ToList();
     }
+
+    // ToDo #43 — employees already paid (standing posted result) for the period. The New Run
+    // picker uses this to badge / block already-paid targets at selection time; the creation guard
+    // below and the engine resolver enforce the same invariant as safety nets.
+    public async Task<IReadOnlyList<Guid>> GetAlreadyPaidEmploymentIdsAsync(Guid periodId)
+        => await _resultRepo.GetPaidEmploymentIdsForPeriodAsync(periodId, PaidStatusIds());
+
+    // The employee-result statuses that represent a *standing posted* payment. REVERSED /
+    // CORRECTED are deliberately absent — those are what a correction produces, not a payment.
+    private int[] PaidStatusIds() =>
+        [
+            _lookup.GetId(LookupTables.EmployeeResultStatus, "APPROVED"),
+            _lookup.GetId(LookupTables.EmployeeResultStatus, "RELEASED"),
+            _lookup.GetId(LookupTables.EmployeeResultStatus, "FINALIZED"),
+        ];
 
     public Task<RunScope?> GetRunScopeAsync(Guid runScopeId)
         => _runRepo.GetRunScopeAsync(runScopeId);

@@ -146,9 +146,25 @@
                             <GridColumn Type="ColumnType.CheckBox" Width="50" />
                             <GridColumn Field="@nameof(RunTargetEmployee.EmploymentId)" IsPrimaryKey="true" Visible="false" />
                             <GridColumn Field="@nameof(RunTargetEmployee.EmployeeNumber)" HeaderText="EE #" Width="120" />
-                            <GridColumn Field="@nameof(RunTargetEmployee.Name)" HeaderText="Employee" />
+                            <GridColumn Field="@nameof(RunTargetEmployee.Name)" HeaderText="Employee">
+                                <Template>
+                                    @{ var emp = (RunTargetEmployee)context; }
+                                    @emp.Name
+                                    @if (_alreadyPaidIds.Contains(emp.EmploymentId))
+                                    {
+                                        <span class="already-paid-badge" title="Already has approved pay for this period — re-paying would double-count. Use a correction instead.">Already paid</span>
+                                    }
+                                </Template>
+                            </GridColumn>
                         </GridColumns>
                     </SfGrid>
+                    @if (_alreadyPaidIds.Count > 0)
+                    {
+                        <p class="text-muted text-sm" style="margin:.4rem 0 0;">
+                            Employees marked <span class="already-paid-badge">Already paid</span> already have approved pay for this period.
+                            A scoped run is additive, so selecting them would pay them again — deselect them (re-paying needs a correction).
+                        </p>
+                    }
                 </div>
             }
 
@@ -284,6 +300,12 @@
     .stat-card--pending   { border-top: 4px solid var(--color-warning); }
     .stat-card--last-pay  { border-top: 4px solid var(--color-success); }
     .stat-card--next-pay  { border-top: 4px solid var(--aw-teal); }
+    .already-paid-badge {
+        display: inline-block; margin-left: .4rem; padding: 1px 7px;
+        border-radius: 999px; font-size: .7rem; font-weight: 600;
+        background: #fee2e2; color: #991b1b; border: 1px solid #fecaca;
+        vertical-align: middle;
+    }
 </style>
 
 @code {
@@ -327,6 +349,7 @@
     private int                         _carryoverCount;
     private bool                        _carryoverUsed;
     private IReadOnlyList<Guid>?        _pendingTargets;
+    private HashSet<Guid>               _alreadyPaidIds = [];   // ToDo #43 — paid this period; badged + blocked in the picker
     private bool IsRegularType => _newRun.RunTypeId == _regularRunTypeId;
 
     private record PeriodOption(Guid PeriodId, string PeriodLabel);
@@ -474,6 +497,7 @@
         _carryoverCount      = 0;
         _carryoverUsed       = false;
         _pendingTargets      = null;
+        _alreadyPaidIds      = [];
     }
 
     private async Task LoadTargetingDataAsync()
@@ -487,6 +511,9 @@
         _carryoverCount      = _newRun.PeriodId == Guid.Empty
             ? 0
             : (await RunService.GetCarryoverEmploymentIdsAsync(_newRun.PeriodId)).Count;
+        _alreadyPaidIds      = _newRun.PeriodId == Guid.Empty
+            ? []
+            : (await RunService.GetAlreadyPaidEmploymentIdsAsync(_newRun.PeriodId)).ToHashSet();
         _carryoverUsed       = false;
     }
 
@@ -500,7 +527,11 @@
     {
         _newRun.PeriodId = args.Value;
         if (!IsRegularType)
+        {
             _carryoverCount = (await RunService.GetCarryoverEmploymentIdsAsync(_newRun.PeriodId)).Count;
+            // ToDo #43 — already-paid targets for this period: badge them and block selecting them.
+            _alreadyPaidIds = (await RunService.GetAlreadyPaidEmploymentIdsAsync(_newRun.PeriodId)).ToHashSet();
+        }
     }
 
     private async Task CarryOverExceptionsAsync()
@@ -508,9 +539,10 @@
         if (_targetGrid is null || _newRun.PeriodId == Guid.Empty) return;
         var ids = (await RunService.GetCarryoverEmploymentIdsAsync(_newRun.PeriodId)).ToHashSet();
         if (ids.Count == 0) return;
+        // ToDo #43 — never carry over an already-paid employee (would re-pay).
         var indices = _targetableEmployees
             .Select((e, i) => (e, i))
-            .Where(t => ids.Contains(t.e.EmploymentId))
+            .Where(t => ids.Contains(t.e.EmploymentId) && !_alreadyPaidIds.Contains(t.e.EmploymentId))
             .Select(t => t.i)
             .ToArray();
         await _targetGrid.SelectRowsAsync(indices);
@@ -543,6 +575,20 @@
             if (string.IsNullOrWhiteSpace(_newRun.TriggerReason))
             {
                 _newRunError = "A trigger reason is required for a targeted run.";
+                return;
+            }
+            // ToDo #43 — block already-paid targets here, named, before the run is created. The
+            // service + engine resolver enforce the same invariant as safety nets.
+            var paidSelected = targetIds.Where(_alreadyPaidIds.Contains).ToList();
+            if (paidSelected.Count > 0)
+            {
+                var named = _targetableEmployees
+                    .Where(e => paidSelected.Contains(e.EmploymentId))
+                    .Select(e => $"{e.EmployeeNumber} ({e.Name})");
+                _newRunError =
+                    "These selected employees already have approved pay for this period and would be paid again — "
+                    + "deselect them (re-paying requires a correction, not yet available): "
+                    + string.Join(", ", named) + ".";
                 return;
             }
             _pendingTargets = targetIds;

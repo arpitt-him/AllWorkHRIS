@@ -427,6 +427,36 @@ public sealed class EmployeePayrollResultRepository : IEmployeePayrollResultRepo
         return (await conn.QueryAsync<EmployeePayrollResult>(sql, new { RunId = runId })).ToList();
     }
 
+    // ToDo #43 — already-paid guard. DBMS-agnostic IN-list built via DynamicParameters
+    // (this stack does not wire Dapper list-expansion; `IN @ids` emits a Postgres-specific
+    // placeholder and fails with 42601). Matches on execution_period_id — the period the pay
+    // is recognised for.
+    public async Task<IReadOnlyList<Guid>> GetPaidEmploymentIdsForPeriodAsync(
+        Guid periodId, IReadOnlyCollection<int> paidStatusIds)
+    {
+        if (paidStatusIds.Count == 0) return [];
+
+        var p = new DynamicParameters();
+        p.Add("PeriodId", periodId);
+        var names = new List<string>();
+        var i = 0;
+        foreach (var statusId in paidStatusIds)
+        {
+            var name = $"st{i++}";
+            p.Add(name, statusId);
+            names.Add($"@{name}");
+        }
+
+        var sql = $"""
+            SELECT DISTINCT employment_id
+            FROM employee_payroll_result
+            WHERE execution_period_id = @PeriodId
+              AND result_status_id IN ({string.Join(",", names)})
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        return (await conn.QueryAsync<Guid>(sql, p)).ToList();
+    }
+
     public async Task<Guid> InsertAsync(EmployeePayrollResult result)
     {
         const string sql = """
