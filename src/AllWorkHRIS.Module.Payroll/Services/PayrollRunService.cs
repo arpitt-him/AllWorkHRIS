@@ -27,6 +27,7 @@ public sealed class PayrollRunService : IPayrollRunService
     private readonly IAuditService                     _auditService;
     private readonly ILookupCache                      _lookup;
     private readonly IPayrollHoursSource               _hoursSource;
+    private readonly IPayrollCorrectionService         _correctionService;
 
     public PayrollRunService(
         IPayrollRunRepository             runRepo,
@@ -37,17 +38,19 @@ public sealed class PayrollRunService : IPayrollRunService
         ILogger<PayrollRunService>        logger,
         IAuditService                     auditService,
         ILookupCache                      lookup,
-        IPayrollHoursSource               hoursSource)
+        IPayrollHoursSource               hoursSource,
+        IPayrollCorrectionService         correctionService)
     {
-        _runRepo      = runRepo;
-        _contextRepo  = contextRepo;
-        _resultRepo   = resultRepo;
-        _queue        = queue;
-        _temporal     = temporal;
-        _logger       = logger;
-        _auditService = auditService;
-        _lookup       = lookup;
-        _hoursSource  = hoursSource;
+        _runRepo           = runRepo;
+        _contextRepo       = contextRepo;
+        _resultRepo        = resultRepo;
+        _queue             = queue;
+        _temporal          = temporal;
+        _logger            = logger;
+        _auditService      = auditService;
+        _lookup            = lookup;
+        _hoursSource       = hoursSource;
+        _correctionService = correctionService;
     }
 
     // Status-id helpers — keep the cache call out of the hot path and give the
@@ -319,6 +322,16 @@ public sealed class PayrollRunService : IPayrollRunService
             AfterJson:       JsonSerializer.Serialize(new { run_status = "CANCELLED", reason = command.Reason })
         ));
     }
+
+    // ADR-027: UI/command path for reverse-an-approved-run — a thin delegator to the standalone,
+    // reusable correction service (the same primitive the future re-pay / true-up / EWA paths call).
+    public Task<ReversalOutcome> ReverseRunAsync(ReversePayrollRunCommand command)
+        => _correctionService.ReverseRunAsync(new ReverseRunRequest
+        {
+            RunId      = command.RunId,
+            ReversedBy = command.ReversedBy,
+            Reason     = command.Reason
+        });
 
     public Task<PayrollRun?> GetRunByIdAsync(Guid runId)
         => _runRepo.GetByIdAsync(runId);

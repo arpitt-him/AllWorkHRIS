@@ -142,7 +142,14 @@
             {
                 <div class="panel-card" style="margin-bottom:1.5rem;">
                     <h3 class="panel-title">Run Totals</h3>
-                    <div class="detail-grid">
+                    @if (_run.RunStatusId == _reversedStatus)
+                    {
+                        <div style="font-size:var(--font-size-sm);color:#B45309;margin:-4px 0 var(--space-3);">
+                            ↩ <strong>Reversed</strong> — these amounts were contra-posted; net effect on YTD is zero.
+                            Shown as the historical record of what was reversed.
+                        </div>
+                    }
+                    <div class="detail-grid" style="@(_run.RunStatusId == _reversedStatus ? "opacity:0.55;" : "")">
                         <div class="detail-field">
                             <span class="detail-label">Employees</span>
                             <span class="detail-value">@_results.Count</span>
@@ -188,6 +195,10 @@
                                 <button class="btn-primary" @onclick="ReleaseAsync" disabled="@_submitting">
                                     @(_submitting ? "Working…" : "Release")
                                 </button>
+                                <button class="btn-danger" style="border:1px solid var(--color-danger);border-radius:var(--radius-md);padding:var(--space-2) var(--space-4);"
+                                        @onclick="() => _showReverseConfirm = true" disabled="@_submitting">
+                                    Reverse Run
+                                </button>
                             }
                             @if (_run.RunStatusId == _draftStatus || _run.RunStatusId == _calculatedStatus)
                             {
@@ -219,6 +230,28 @@
                                 <span style="font-size:var(--font-size-sm);color:#6B7280;">No actions available for this status.</span>
                             }
                         </div>
+
+                        @* ADR-027 — reverse an approved run (inline confirm + required reason) *@
+                        @if (_showReverseConfirm)
+                        {
+                            <div style="margin-top:var(--space-3);border-top:1px solid #e5e7eb;padding-top:var(--space-3)">
+                                <div style="font-weight:var(--font-weight-medium);margin-bottom:var(--space-2)">Reverse this approved run?</div>
+                                <div style="font-size:var(--font-size-sm);color:#6B7280;max-width:640px;margin-bottom:var(--space-2)">
+                                    Contra-posts every employee result's accumulator impacts (YTD restored to pre-run) and
+                                    marks the run <strong>Reversed</strong>; the period reopens for a fresh Regular run.
+                                    Originals are kept, not deleted. Use this for an approved-but-not-yet-released run.
+                                </div>
+                                <textarea @bind="_reverseReason" rows="2" placeholder="Reason (required)"
+                                          style="width:100%;max-width:640px;margin-bottom:var(--space-2)"></textarea>
+                                <div class="form-actions">
+                                    <button class="btn-danger" style="border:1px solid var(--color-danger);border-radius:var(--radius-md);padding:var(--space-2) var(--space-4);"
+                                            @onclick="ReverseAsync" disabled="@(_submitting || string.IsNullOrWhiteSpace(_reverseReason))">
+                                        @(_submitting ? "Reversing…" : "Confirm Reverse")
+                                    </button>
+                                    <button class="btn-secondary" @onclick="@(() => { _showReverseConfirm = false; _reverseReason = string.Empty; })">Cancel</button>
+                                </div>
+                            </div>
+                        }
                     </div>
                 </Authorized>
             </AuthorizeView>
@@ -343,7 +376,7 @@
     // Codes are the stable contract; the auto-incremented ids are an internal
     // detail of the seed and must not be hard-coded in conditionals.
     private int _draftStatus, _calculatingStatus, _calculatedStatus,
-                _approvingStatus, _approvedStatus, _releasingStatus;
+                _approvingStatus, _approvedStatus, _releasingStatus, _reversedStatus;
 
     // Label/badge resolution by id, code-keyed so it survives seed reordering
     // (ADR-017 / Phase 12.5.3). ids are an auto-incremented internal detail.
@@ -397,6 +430,7 @@
         _approvingStatus   = Status("APPROVING");
         _approvedStatus    = Status("APPROVED");
         _releasingStatus   = Status("RELEASING");
+        _reversedStatus    = Status("REVERSED");
         _statusById        = LookupCache.GetAll(LookupTables.RunStatus).ToDictionary(e => e.Id);
         _resultStatusById  = LookupCache.GetAll(LookupTables.EmployeeResultStatus).ToDictionary(e => e.Id);
 
@@ -506,6 +540,27 @@
         finally { _submitting = false; }
     }
 
+    // ADR-027 — reverse an approved run (delegates to the correction service via the run service).
+    private bool   _showReverseConfirm;
+    private string _reverseReason = string.Empty;
+
+    private async Task ReverseAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_reverseReason)) return;
+        _submitting   = true;
+        _errorMessage = null;
+        try
+        {
+            await RunService.ReverseRunAsync(new ReversePayrollRunCommand
+                { RunId = RunId, ReversedBy = _currentUserId, Reason = _reverseReason.Trim() });
+            _showReverseConfirm = false;
+            _reverseReason      = string.Empty;
+            await LoadRunAsync();
+        }
+        catch (Exception ex) { _errorMessage = ex.Message; }
+        finally { _submitting = false; }
+    }
+
     private void StartPolling()
     {
         if (_pollCts is not null) return;
@@ -568,6 +623,7 @@
             "CALCULATED" or "APPROVED"                  => "badge-teal",
             "RELEASED"                                  => "badge-success",
             "UNDER_REVIEW"                              => "badge-warning",
+            "REVERSED"                                  => "badge-warning",
             "FAILED"                                    => "badge-error",
             _                                           => "badge-neutral"
         };

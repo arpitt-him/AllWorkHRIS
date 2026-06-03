@@ -67,15 +67,15 @@ public sealed class PayrollRunRepository : IPayrollRunRepository
     public async Task<PayrollRun?> GetActiveRegularRunForPeriodAsync(Guid periodId)
     {
         // ADR-017 §4b: one Regular run per period. Match a REGULAR-type run for
-        // this period in any status except CANCELLED/FAILED (a cancelled or
-        // failed regular run leaves the period open for a fresh one). Type and
-        // status are matched by code — resilient to seed re-ordering.
+        // this period in any status except CANCELLED/FAILED/REVERSED (a cancelled,
+        // failed, or reversed regular run leaves the period open for a fresh one —
+        // ADR-027). Type and status are matched by code — resilient to seed re-ordering.
         const string sql = """
             SELECT r.* FROM payroll_run r
             WHERE r.period_id = @PeriodId
               AND r.run_type_id = (SELECT id FROM lkp_run_type WHERE code = 'REGULAR')
               AND r.run_status_id NOT IN (
-                  SELECT id FROM lkp_run_status WHERE code IN ('CANCELLED', 'FAILED')
+                  SELECT id FROM lkp_run_status WHERE code IN ('CANCELLED', 'FAILED', 'REVERSED')
               )
             ORDER BY r.creation_timestamp DESC
             FETCH FIRST 1 ROWS ONLY

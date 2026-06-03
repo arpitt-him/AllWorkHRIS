@@ -17,6 +17,12 @@ public interface IPayrollRunService
     Task CancelRunAsync(CancelPayrollRunCommand command);
 
     /// <summary>
+    /// Reverse an APPROVED run (ADR-027): the UI/command path — delegates to the standalone
+    /// <see cref="IPayrollCorrectionService"/>. Returns the structured reversal outcome.
+    /// </summary>
+    Task<ReversalOutcome> ReverseRunAsync(ReversePayrollRunCommand command);
+
+    /// <summary>
     /// Re-enqueue a run stuck in an idempotent transient state (APPROVING or
     /// RELEASING) so the background job picks it up again without a host
     /// restart. The on-demand twin of PayrollRunJob's startup recovery.

@@ -129,7 +129,7 @@ public sealed class PayrollGateTests : IDisposable
         _runService = new PayrollRunService(
             _runRepo, contextRepo, resultRepo, queue,
             temporalCtx, NullLogger<PayrollRunService>.Instance, auditService, _lookupCache,
-            new StandardHoursPayrollHoursSource());
+            new StandardHoursPayrollHoursSource(), new NullPayrollCorrectionService());
     }
 
     // ---------------------------------------------------------------------------

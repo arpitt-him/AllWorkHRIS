@@ -334,6 +334,7 @@
         new("ACTIVE",    "Active"),
         new("ALL",       "All"),
         new("RELEASED",  "Released"),
+        new("REVERSED",  "Reversed"),
         new("CANCELLED", "Cancelled"),
         new("FAILED",    "Failed"),
     ];
@@ -363,7 +364,7 @@
     private int _draftStatus, _calculatingStatus, _calculatedStatus,
                 _approvingStatus, _approvedStatus,
                 _releasingStatus, _releasedStatus,
-                _failedStatus, _cancelledStatus;
+                _failedStatus, _cancelledStatus, _reversedStatus;
     private HashSet<int> _terminalStatuses = new();
     private HashSet<int> _openStatuses     = new();
     private Dictionary<int, LookupEntry> _statusById = new();
@@ -380,8 +381,10 @@
         _releasedStatus    = S("RELEASED");
         _failedStatus      = S("FAILED");
         _cancelledStatus   = S("CANCELLED");
+        _reversedStatus    = S("REVERSED");
         // ADR-017 §4a: RELEASED is terminal at the run level (no run-level CLOSED).
-        _terminalStatuses  = [_releasedStatus, _failedStatus, _cancelledStatus];
+        // ADR-027: REVERSED is terminal too (a reversed run leaves the period open for a fresh one).
+        _terminalStatuses  = [_releasedStatus, _failedStatus, _cancelledStatus, _reversedStatus];
         // "Open" = anything from Draft through Approved (i.e., everything pre-Releasing)
         _openStatuses      = [_draftStatus,     S("OPEN"),         _calculatingStatus,
                               _calculatedStatus, S("UNDER_REVIEW"), _approvingStatus,
@@ -399,6 +402,7 @@
     {
         "ACTIVE"    => _runs.Where(r => !_terminalStatuses.Contains(r.RunStatusId)).ToList(),
         "RELEASED"  => _runs.Where(r => r.RunStatusId == _releasedStatus).ToList(),
+        "REVERSED"  => _runs.Where(r => r.RunStatusId == _reversedStatus).ToList(),
         "CANCELLED" => _runs.Where(r => r.RunStatusId == _cancelledStatus).ToList(),
         "FAILED"    => _runs.Where(r => r.RunStatusId == _failedStatus).ToList(),
         _           => _runs
@@ -736,6 +740,7 @@
             "CALCULATED" or "APPROVED"                  => "badge-teal",
             "RELEASED"                                  => "badge-success",
             "UNDER_REVIEW"                              => "badge-warning",
+            "REVERSED"                                  => "badge-warning",
             "FAILED"                                    => "badge-error",
             _                                           => "badge-neutral"
         };
