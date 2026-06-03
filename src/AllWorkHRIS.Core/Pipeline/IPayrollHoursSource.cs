@@ -20,9 +20,16 @@ public interface IPayrollHoursSource
     /// are APPROVED (not yet committed to any run) or already LOCKED to <em>this</em> run; excludes
     /// hours LOCKED to a <em>different</em> run, so a second run over the same date range can't
     /// re-sum hours an earlier approved run already consumed (Phase 12.7).
+    ///
+    /// Phase 12.13.4 / ADR-024: <paramref name="otEligibleCategoryIds"/> is the resolved per-context,
+    /// effective-dated OT-eligible set. When non-empty, the worked/OT basis is membership in that set
+    /// instead of the <c>is_worked_time</c> flag; when <b>empty</b>, falls back to <c>is_worked_time</c>
+    /// (today's behavior). The backfilled default set equals the is_worked_time categories, so the two
+    /// are identical until a CBA-style override is configured.
     /// </summary>
     Task<IReadOnlyList<(DateOnly WorkDate, decimal Hours)>> GetApprovedHoursByEmploymentAndPeriodAsync(
-        Guid employmentId, DateOnly periodStart, DateOnly periodEnd, Guid payrollRunId);
+        Guid employmentId, DateOnly periodStart, DateOnly periodEnd, Guid payrollRunId,
+        IReadOnlyCollection<int> otEligibleCategoryIds);
 
     /// <summary>
     /// Returns the total <b>non-worked but payable</b> hours (paid-leave categories — PTO, holiday,
@@ -30,9 +37,16 @@ public interface IPayrollHoursSource
     /// pay-period date range, under the same APPROVED / LOCKED-to-this-run rule as
     /// <see cref="GetApprovedHoursByEmploymentAndPeriodAsync"/>. These are paid at straight time and
     /// do <b>not</b> count toward the FLSA overtime threshold; <c>UNPAID</c> is excluded. (Phase 12.12.)
+    ///
+    /// Phase 12.13.4 / ADR-024: the straight-time bucket is the complement of
+    /// <paramref name="otEligibleCategoryIds"/> over the payable categories — payable categories NOT
+    /// in the set. When the set is <b>empty</b>, falls back to "payable and not <c>is_worked_time</c>"
+    /// (today's behavior). Leave stays paid either way; the set only moves whether a category counts
+    /// toward OT.
     /// </summary>
     Task<decimal> GetApprovedNonWorkedPayableHoursByEmploymentAndPeriodAsync(
-        Guid employmentId, DateOnly periodStart, DateOnly periodEnd, Guid payrollRunId);
+        Guid employmentId, DateOnly periodStart, DateOnly periodEnd, Guid payrollRunId,
+        IReadOnlyCollection<int> otEligibleCategoryIds);
 
     /// <summary>
     /// Phase 12.7 — lock-on-approve: when a run is approved, lock the APPROVED time entries that

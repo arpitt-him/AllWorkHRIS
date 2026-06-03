@@ -9,11 +9,13 @@ namespace AllWorkHRIS.Core.Pipeline;
 public sealed class NullPayrollHoursSource : IPayrollHoursSource
 {
     public Task<IReadOnlyList<(DateOnly WorkDate, decimal Hours)>> GetApprovedHoursByEmploymentAndPeriodAsync(
-        Guid employmentId, DateOnly periodStart, DateOnly periodEnd, Guid payrollRunId)
+        Guid employmentId, DateOnly periodStart, DateOnly periodEnd, Guid payrollRunId,
+        IReadOnlyCollection<int> otEligibleCategoryIds)
         => Task.FromResult<IReadOnlyList<(DateOnly WorkDate, decimal Hours)>>([]);
 
     public Task<decimal> GetApprovedNonWorkedPayableHoursByEmploymentAndPeriodAsync(
-        Guid employmentId, DateOnly periodStart, DateOnly periodEnd, Guid payrollRunId)
+        Guid employmentId, DateOnly periodStart, DateOnly periodEnd, Guid payrollRunId,
+        IReadOnlyCollection<int> otEligibleCategoryIds)
         => Task.FromResult(0m);
 
     public Task LockHoursForRunAsync(

@@ -23,6 +23,9 @@ public sealed record CalculationInput
     public IReadOnlyDictionary<DateOnly, decimal> WeeklyThresholdByWeekStart { get; init; } = new Dictionary<DateOnly, decimal>();
     public decimal  OtFallbackThresholdHours { get; init; } = 40.00m;
     public int      WorkWeekStartDay         { get; init; } = 1;
+    // Phase 12.13.4 / ADR-024: resolved per-context OT-eligible time-category set (as-of period
+    // start). Empty = no override → the hours source falls back to the is_worked_time flag.
+    public IReadOnlyCollection<int> OtEligibleCategoryIds { get; init; } = [];
     public int      PeriodsPerYear           { get; init; }
 
     // Pay period boundaries — passed through to the benefit step provider for proration

@@ -293,14 +293,19 @@ public sealed class TimeEntryRepository : ITimeEntryRepository
     }
 
     public async Task<IReadOnlyList<(DateOnly WorkDate, decimal Hours)>> GetApprovedHoursByEmploymentAndPeriodAsync(
-        Guid employmentId, DateOnly periodStart, DateOnly periodEnd, Guid payrollRunId)
+        Guid employmentId, DateOnly periodStart, DateOnly periodEnd, Guid payrollRunId,
+        IReadOnlyCollection<int> otEligibleCategoryIds)
     {
         // Phase 12.7: a run consumes hours that are APPROVED (not yet committed to any run) or
         // already LOCKED to *this* run — but never hours LOCKED to a *different* run, so a second
         // run over the same date range can't re-sum hours an earlier approved run already took.
-        // Phase 12.12 / ADR-023: only WORKED hours (is_worked_time) count toward the FLSA OT
-        // threshold; paid leave is summed separately (see below) and paid at straight time.
-        const string sql = """
+        // Phase 12.12 / ADR-023: only OT-ELIGIBLE hours count toward the FLSA OT threshold; paid
+        // leave is summed separately (see below) and paid at straight time.
+        // Phase 12.13.4 / ADR-024: the OT basis is membership in the resolved per-context eligible
+        // set; an empty set falls back to the is_worked_time flag (today's behavior).
+        var hasSet = otEligibleCategoryIds.Count > 0;
+        var eligiblePredicate = hasSet ? "c.id IN @EligibleIds" : "c.is_worked_time = true";
+        var sql = $"""
             SELECT te.work_date, SUM(te.duration) AS hours
             FROM   time_entry          te
             JOIN   lkp_time_entry_status s ON s.id = te.status_id
@@ -308,7 +313,7 @@ public sealed class TimeEntryRepository : ITimeEntryRepository
             WHERE  te.employment_id = @EmploymentId
               AND  te.work_date >= @PeriodStart
               AND  te.work_date <= @PeriodEnd
-              AND  c.is_worked_time = true
+              AND  {eligiblePredicate}
               AND  (s.code = 'APPROVED'
                     OR (s.code = 'LOCKED' AND te.payroll_run_id = @PayrollRunId))
             GROUP BY te.work_date
@@ -321,19 +326,25 @@ public sealed class TimeEntryRepository : ITimeEntryRepository
             EmploymentId = employmentId,
             PeriodStart  = periodStart.ToDateTime(TimeOnly.MinValue),
             PeriodEnd    = periodEnd.ToDateTime(TimeOnly.MinValue),
-            PayrollRunId = payrollRunId
+            PayrollRunId = payrollRunId,
+            EligibleIds  = otEligibleCategoryIds
         });
 
         return rows.Select(r => (r.WorkDate, r.Hours)).ToList();
     }
 
     public async Task<decimal> GetApprovedNonWorkedPayableHoursByEmploymentAndPeriodAsync(
-        Guid employmentId, DateOnly periodStart, DateOnly periodEnd, Guid payrollRunId)
+        Guid employmentId, DateOnly periodStart, DateOnly periodEnd, Guid payrollRunId,
+        IReadOnlyCollection<int> otEligibleCategoryIds)
     {
-        // Phase 12.12: paid leave (payable categories that are NOT is_worked_time — PTO/holiday/
-        // sick) is still paid (at straight time) but does not count toward the OT threshold.
-        // Same APPROVED / LOCKED-to-this-run rule as the worked-hours query; UNPAID excluded.
-        const string sql = """
+        // Phase 12.12: paid leave (payable categories that are NOT OT-eligible — PTO/holiday/sick)
+        // is still paid (at straight time) but does not count toward the OT threshold. Same
+        // APPROVED / LOCKED-to-this-run rule as the worked-hours query; UNPAID excluded.
+        // Phase 12.13.4: the non-eligible bucket is the complement of the resolved set over payable
+        // categories; an empty set falls back to "payable and not is_worked_time" (today's behavior).
+        var hasSet = otEligibleCategoryIds.Count > 0;
+        var nonEligiblePredicate = hasSet ? "c.id NOT IN @EligibleIds" : "c.is_worked_time = false";
+        var sql = $"""
             SELECT COALESCE(SUM(te.duration), 0)
             FROM   time_entry          te
             JOIN   lkp_time_entry_status s ON s.id = te.status_id
@@ -341,7 +352,7 @@ public sealed class TimeEntryRepository : ITimeEntryRepository
             WHERE  te.employment_id = @EmploymentId
               AND  te.work_date >= @PeriodStart
               AND  te.work_date <= @PeriodEnd
-              AND  c.is_worked_time = false
+              AND  {nonEligiblePredicate}
               AND  c.payable        = true
               AND  (s.code = 'APPROVED'
                     OR (s.code = 'LOCKED' AND te.payroll_run_id = @PayrollRunId))
@@ -353,7 +364,8 @@ public sealed class TimeEntryRepository : ITimeEntryRepository
             EmploymentId = employmentId,
             PeriodStart  = periodStart.ToDateTime(TimeOnly.MinValue),
             PeriodEnd    = periodEnd.ToDateTime(TimeOnly.MinValue),
-            PayrollRunId = payrollRunId
+            PayrollRunId = payrollRunId,
+            EligibleIds  = otEligibleCategoryIds
         });
     }
 

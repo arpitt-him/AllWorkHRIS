@@ -190,7 +190,8 @@ public sealed class TimeAttendanceQueryService
         // FLSA WORKWEEK (anchor at period start) by the shared resolver — the same one payroll uses —
         // so display matches pay, including across a mid-period policy change. TotalHours is unchanged
         // (all non-rejected hours). Worked-time = lkp_time_category.is_worked_time — the FLSA OT basis.
-        var periodOt = await GetPeriodOtConfigAsync(periodId);
+        var periodOt   = await GetPeriodOtConfigAsync(periodId);
+        var eligible   = await GetOtEligibleForPeriodAsync(periodId);
 
         using var conn = _connectionFactory.CreateConnection();
         var rows = (await conn.QueryAsync<TimecardEntryRaw>(
@@ -202,6 +203,7 @@ public sealed class TimeAttendanceQueryService
                 te.work_date,
                 te.duration,
                 s.code  AS status_code,
+                te.time_category_id,
                 c.is_worked_time
             FROM   time_entry te
             JOIN   lkp_time_entry_status s ON s.id = te.status_id
@@ -222,7 +224,7 @@ public sealed class TimeAttendanceQueryService
             {
                 var first = g.First();
                 var workedDaily = g
-                    .Where(r => r.IsWorkedTime && r.StatusCode != "REJECTED")
+                    .Where(r => IsOtEligible(r.TimeCategoryId, r.IsWorkedTime, eligible) && r.StatusCode != "REJECTED")
                     .GroupBy(r => r.WorkDate)
                     .Select(d => (d.Key, d.Sum(x => x.Duration)));
                 var split = OvertimeSplitCalculator.Compute(
@@ -252,7 +254,13 @@ public sealed class TimeAttendanceQueryService
         DateOnly WorkDate,
         decimal  Duration,
         string   StatusCode,
+        int      TimeCategoryId,
         bool     IsWorkedTime);
+
+    // Phase 12.13.4 / ADR-024: an hour counts toward OT if its category is in the resolved per-context
+    // eligible set; an empty set means "no override" → fall back to the is_worked_time flag.
+    private static bool IsOtEligible(int categoryId, bool isWorkedTime, IReadOnlyCollection<int> eligible)
+        => eligible.Count > 0 ? eligible.Contains(categoryId) : isWorkedTime;
 
     public async Task<IReadOnlyList<TimeEntryRow>> GetEntriesForEmploymentAsync(
         Guid employmentId, Guid periodId)
@@ -361,12 +369,13 @@ public sealed class TimeAttendanceQueryService
         // A period belongs to one payroll context; the OT threshold is resolved per FLSA workweek
         // (anchor + review trigger fixed at period start) — the same shared resolver payroll uses.
         var periodOt = await GetPeriodOtConfigAsync(periodId);
+        var eligible = await GetOtEligibleForPeriodAsync(periodId);
 
         using var conn = _connectionFactory.CreateConnection();
 
         // Per-entry base anomalies (zero/negative hours, incomplete punch) are computed in SQL. The
         // OT-review trigger is applied in C# below (ADR-023): OT is no longer a stored category to
-        // SUM — it is derived per employee from worked-time daily totals via the shared calculator.
+        // SUM — it is derived per employee from OT-eligible daily totals via the shared calculator.
         const string entriesSql = """
             SELECT te.time_entry_id,
                    te.employment_id,
@@ -375,6 +384,7 @@ public sealed class TimeAttendanceQueryService
                    te.work_date,
                    c.code      AS time_category_code,
                    te.duration,
+                   te.time_category_id,
                    c.is_worked_time,
                    CASE
                        WHEN te.duration <= 0 THEN 'Zero or negative hours'
@@ -403,7 +413,7 @@ public sealed class TimeAttendanceQueryService
         var otFlagged = new HashSet<Guid>();
         if (periodOt.ReviewThresholdHours is { } reviewTrigger)
         {
-            foreach (var emp in rows.Where(r => r.IsWorkedTime).GroupBy(r => r.EmploymentId))
+            foreach (var emp in rows.Where(r => IsOtEligible(r.TimeCategoryId, r.IsWorkedTime, eligible)).GroupBy(r => r.EmploymentId))
             {
                 var daily = emp.GroupBy(r => r.WorkDate).Select(d => (d.Key, d.Sum(x => x.Duration)));
                 var ot    = OvertimeSplitCalculator.Compute(daily, periodOt.WeeklyThresholdByWeekStart, periodOt.FallbackThresholdHours, periodOt.WorkweekStartDay);
@@ -414,7 +424,7 @@ public sealed class TimeAttendanceQueryService
 
         string? Reason(ExceptionEntryRaw r) =>
             !string.IsNullOrEmpty(r.Reason)                        ? r.Reason
-            : r.IsWorkedTime && otFlagged.Contains(r.EmploymentId) ? "Overtime at/over trigger"
+            : IsOtEligible(r.TimeCategoryId, r.IsWorkedTime, eligible) && otFlagged.Contains(r.EmploymentId) ? "Overtime at/over trigger"
             : null;
 
         var cleanIds  = rows.Where(r => string.IsNullOrEmpty(Reason(r))).Select(r => r.TimeEntryId).ToList();
@@ -454,7 +464,7 @@ public sealed class TimeAttendanceQueryService
 
     private sealed record ExceptionEntryRaw(
         Guid TimeEntryId, Guid EmploymentId, string EmployeeName, string EmployeeNumber,
-        DateOnly WorkDate, string TimeCategoryCode, decimal Duration, bool IsWorkedTime, string? Reason);
+        DateOnly WorkDate, string TimeCategoryCode, decimal Duration, int TimeCategoryId, bool IsWorkedTime, string? Reason);
 
     // The OT config operative for a period — resolved PER FLSA WORKWEEK via the shared effective-dated
     // resolver (the same one the engine uses), so display matches pay across a mid-period policy
@@ -470,6 +480,20 @@ public sealed class TimeAttendanceQueryService
 
         return await _payrollContextLookup.ResolveOtConfigForPeriodAsync(
             pp.PayrollContextId, pp.PeriodStartDate, pp.PeriodEndDate);
+    }
+
+    // Phase 12.13.4 / ADR-024: the OT-eligible time-category set for a period, resolved as-of period
+    // start (period-stable). Empty ⇒ "no override" → callers fall back to is_worked_time. Same shared
+    // resolver the engine uses, so display matches pay when a CBA-style override is configured.
+    private async Task<IReadOnlyCollection<int>> GetOtEligibleForPeriodAsync(Guid periodId)
+    {
+        using var conn = _connectionFactory.CreateConnection();
+        var pp = await conn.QueryFirstOrDefaultAsync<PeriodRangeRow>(
+            "SELECT pp.payroll_context_id, pp.period_start_date, pp.period_end_date FROM payroll_period pp WHERE pp.period_id = @PeriodId",
+            new { PeriodId = periodId });
+        if (pp is null) return [];
+
+        return await _payrollContextLookup.ResolveOtEligibleCategoriesAsync(pp.PayrollContextId, pp.PeriodStartDate);
     }
 
     private sealed record PeriodRangeRow(Guid PayrollContextId, DateOnly PeriodStartDate, DateOnly PeriodEndDate);
@@ -501,8 +525,10 @@ public sealed class TimeAttendanceQueryService
         // ADR-023: "Overtime Alerts" = employees with derived OT > 0 on APPROVED worked hours
         // (previously a count of stored OVERTIME-category rows). Derived via the shared calculator.
         var periodOt   = await GetPeriodOtConfigAsync(periodId);
+        var eligible   = await GetOtEligibleForPeriodAsync(periodId);
+        var eligibleFilter = eligible.Count > 0 ? "c.id IN @EligibleIds" : "c.is_worked_time = true";
         var workedRows = await conn.QueryAsync<WorkedDailyRow>(
-            """
+            $"""
             SELECT te.employment_id, te.work_date, SUM(te.duration) AS worked_hours
             FROM   time_entry te
             JOIN   lkp_time_entry_status s ON s.id = te.status_id
@@ -513,10 +539,10 @@ public sealed class TimeAttendanceQueryService
             WHERE  te.payroll_period_id = @PeriodId
               AND  ou.legal_entity_id   = @LegalEntityId
               AND  s.code = 'APPROVED'
-              AND  c.is_worked_time = true
+              AND  {eligibleFilter}
             GROUP  BY te.employment_id, te.work_date
             """,
-            new { PeriodId = periodId, LegalEntityId = legalEntityId });
+            new { PeriodId = periodId, LegalEntityId = legalEntityId, EligibleIds = eligible });
 
         var overtimeAlerts = workedRows
             .GroupBy(r => r.EmploymentId)
@@ -535,10 +561,12 @@ public sealed class TimeAttendanceQueryService
     public async Task<OvertimeSplit> GetPeriodOvertimeSplitForEmploymentAsync(Guid employmentId, Guid periodId)
     {
         var periodOt = await GetPeriodOtConfigAsync(periodId);
+        var eligible = await GetOtEligibleForPeriodAsync(periodId);
+        var eligibleFilter = eligible.Count > 0 ? "c.id IN @EligibleIds" : "c.is_worked_time = true";
 
         using var conn = _connectionFactory.CreateConnection();
         var daily = await conn.QueryAsync<WorkedDailyRow>(
-            """
+            $"""
             SELECT te.employment_id, te.work_date, SUM(te.duration) AS worked_hours
             FROM   time_entry te
             JOIN   lkp_time_entry_status s ON s.id = te.status_id
@@ -546,10 +574,10 @@ public sealed class TimeAttendanceQueryService
             WHERE  te.employment_id     = @EmploymentId
               AND  te.payroll_period_id = @PeriodId
               AND  s.code NOT IN ('VOID','DRAFT','REJECTED')
-              AND  c.is_worked_time = true
+              AND  {eligibleFilter}
             GROUP  BY te.employment_id, te.work_date
             """,
-            new { EmploymentId = employmentId, PeriodId = periodId });
+            new { EmploymentId = employmentId, PeriodId = periodId, EligibleIds = eligible });
 
         return OvertimeSplitCalculator.Compute(
             daily.Select(r => (r.WorkDate, r.WorkedHours)),

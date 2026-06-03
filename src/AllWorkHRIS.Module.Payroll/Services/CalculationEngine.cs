@@ -307,7 +307,7 @@ public sealed partial class CalculationEngine : ICalculationEngine
         // (cf. 29 CFR 778.218). The shared Core calculator (the same one T&A uses for display)
         // splits the worked hours, so pay and display can't diverge.
         var workedEntries = await _hoursSource.GetApprovedHoursByEmploymentAndPeriodAsync(
-            input.EmploymentId, input.PayPeriodStart, input.PayPeriodEnd, input.RunId);
+            input.EmploymentId, input.PayPeriodStart, input.PayPeriodEnd, input.RunId, input.OtEligibleCategoryIds);
 
         var (regWorkedHours, otHours) = OvertimeSplitCalculator.Compute(
             workedEntries, input.WeeklyThresholdByWeekStart, input.OtFallbackThresholdHours, input.WorkWeekStartDay);
@@ -316,7 +316,7 @@ public sealed partial class CalculationEngine : ICalculationEngine
         // outside the OT threshold. Lumped into the straight-time (REG) hours for now; itemized
         // leave earnings lines are a later enhancement. (UNPAID is excluded by the hours source.)
         var nonWorkedPayableHours = await _hoursSource.GetApprovedNonWorkedPayableHoursByEmploymentAndPeriodAsync(
-            input.EmploymentId, input.PayPeriodStart, input.PayPeriodEnd, input.RunId);
+            input.EmploymentId, input.PayPeriodStart, input.PayPeriodEnd, input.RunId, input.OtEligibleCategoryIds);
 
         var regHours = regWorkedHours + nonWorkedPayableHours;
 

@@ -39,13 +39,17 @@ public interface ITimeEntryRepository
     /// overtime for non-exempt employees.
     /// </summary>
     Task<IReadOnlyList<(DateOnly WorkDate, decimal Hours)>> GetApprovedHoursByEmploymentAndPeriodAsync(
-        Guid employmentId, DateOnly periodStart, DateOnly periodEnd, Guid payrollRunId);
+        Guid employmentId, DateOnly periodStart, DateOnly periodEnd, Guid payrollRunId,
+        IReadOnlyCollection<int> otEligibleCategoryIds);
 
     /// <summary>
     /// Total approved/locked <b>non-worked but payable</b> hours (paid leave — `payable` and NOT
-    /// `is_worked_time`) for an employment within the period; paid at straight time, excluded from
-    /// the FLSA overtime threshold (Phase 12.12). `UNPAID` is excluded.
+    /// OT-eligible) for an employment within the period; paid at straight time, excluded from the
+    /// FLSA overtime threshold (Phase 12.12). `UNPAID` is excluded. Phase 12.13.4: the non-eligible
+    /// set is the complement of <paramref name="otEligibleCategoryIds"/> over payable categories;
+    /// an empty set falls back to "payable and not `is_worked_time`".
     /// </summary>
     Task<decimal> GetApprovedNonWorkedPayableHoursByEmploymentAndPeriodAsync(
-        Guid employmentId, DateOnly periodStart, DateOnly periodEnd, Guid payrollRunId);
+        Guid employmentId, DateOnly periodStart, DateOnly periodEnd, Guid payrollRunId,
+        IReadOnlyCollection<int> otEligibleCategoryIds);
 }

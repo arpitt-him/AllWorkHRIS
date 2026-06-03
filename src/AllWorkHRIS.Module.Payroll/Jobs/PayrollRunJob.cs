@@ -244,6 +244,11 @@ public sealed class PayrollRunJob : BackgroundService
             var periodOt = await contextLookup.ResolveOtConfigForPeriodAsync(
                 run.PayrollContextId, period.PeriodStartDate, period.PeriodEndDate);
 
+            // Phase 12.13.4 / ADR-024: the OT-eligible time-category set, resolved as-of period start
+            // (period-stable, like the anchor). Empty ⇒ the hours source falls back to is_worked_time.
+            var otEligibleCategoryIds = await contextLookup.ResolveOtEligibleCategoriesAsync(
+                run.PayrollContextId, period.PeriodStartDate);
+
             // Resolve the employee population + excluded set for this run. A full-context run
             // pays all active+cleared employees and flags every blocked employee; a scoped
             // run (Phase 12.6) narrows both to its validated target list, and additionally drops
@@ -340,6 +345,7 @@ public sealed class PayrollRunJob : BackgroundService
                     WeeklyThresholdByWeekStart = periodOt.WeeklyThresholdByWeekStart,
                     OtFallbackThresholdHours   = periodOt.FallbackThresholdHours,
                     WorkWeekStartDay           = periodOt.WorkweekStartDay,
+                    OtEligibleCategoryIds      = otEligibleCategoryIds,
                     PeriodsPerYear          = periodsPerYear,
                     PayPeriodStart          = period.PeriodStartDate,
                     PayPeriodEnd            = period.PeriodEndDate

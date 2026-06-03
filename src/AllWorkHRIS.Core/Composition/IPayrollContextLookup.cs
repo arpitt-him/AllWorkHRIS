@@ -27,4 +27,14 @@ public interface IPayrollContextLookup
     /// resolver shared by payroll and T&amp;A; lets each workweek be split under its own threshold.
     /// </summary>
     Task<PeriodOtConfig> ResolveOtConfigForPeriodAsync(Guid payrollContextId, DateOnly periodStart, DateOnly periodEnd);
+
+    /// <summary>
+    /// Resolve the set of time-category ids that COUNT TOWARD overtime for a payroll context as-of a
+    /// date (ADR-024 / Phase 12.13.4) — the effective-dated, per-context override of the OT basis.
+    /// Resolved as-of period start (period-stable, like the anchor). An <b>empty</b> result means
+    /// "no override": callers fall back to the <c>lkp_time_category.is_worked_time</c> flag (today's
+    /// behavior). A non-empty set partitions payable hours — members feed the FLSA threshold, the
+    /// rest are paid at straight time.
+    /// </summary>
+    Task<IReadOnlyCollection<int>> ResolveOtEligibleCategoriesAsync(Guid payrollContextId, DateOnly asOf);
 }

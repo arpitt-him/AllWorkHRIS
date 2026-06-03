@@ -15,12 +15,14 @@ namespace AllWorkHRIS.Host.Tests.TestSupport;
 internal sealed class StandardHoursPayrollHoursSource : IPayrollHoursSource
 {
     public Task<IReadOnlyList<(DateOnly WorkDate, decimal Hours)>> GetApprovedHoursByEmploymentAndPeriodAsync(
-        Guid employmentId, DateOnly periodStart, DateOnly periodEnd, Guid payrollRunId)
+        Guid employmentId, DateOnly periodStart, DateOnly periodEnd, Guid payrollRunId,
+        IReadOnlyCollection<int> otEligibleCategoryIds)
         => Task.FromResult<IReadOnlyList<(DateOnly WorkDate, decimal Hours)>>([(periodStart, 40m)]);
 
     // No paid-leave hours in the gate fixture — worked hours only (Phase 12.12).
     public Task<decimal> GetApprovedNonWorkedPayableHoursByEmploymentAndPeriodAsync(
-        Guid employmentId, DateOnly periodStart, DateOnly periodEnd, Guid payrollRunId)
+        Guid employmentId, DateOnly periodStart, DateOnly periodEnd, Guid payrollRunId,
+        IReadOnlyCollection<int> otEligibleCategoryIds)
         => Task.FromResult(0m);
 
     public Task LockHoursForRunAsync(

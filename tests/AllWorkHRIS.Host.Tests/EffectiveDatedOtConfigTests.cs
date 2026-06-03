@@ -235,6 +235,73 @@ public sealed class EffectiveDatedOtConfigTests
 
     private sealed record DatedRow(DateOnly Effective, DateOnly? EndDate, decimal Threshold);
 
+    /// <summary>
+    /// Phase 12.13.4 (ADR-024): the OT-eligible category-set resolver reads its effective-dated rows
+    /// and returns empty when there are none (= "no override", callers fall back to is_worked_time).
+    /// A CBA-style override that adds HOLIDAY is resolved as-of a covering date but not before its
+    /// effective date. Inserts its own rows for a throwaway context, cleans up. Requires migration 049.
+    /// </summary>
+    [Fact]
+    public async Task ResolveOtEligibleCategories_ReadsDatedSet_EmptyWhenNoneOrBeforeEffective()
+    {
+        var contextId = Guid.NewGuid();
+        var stamp     = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+        using var conn = _connectionFactory.CreateConnection();
+        var cats = (await conn.QueryAsync<CatIdRow>(
+            "SELECT id, code FROM lkp_time_category WHERE code IN ('REGULAR','OVERTIME','HOLIDAY')"))
+            .ToDictionary(r => r.Code, r => r.Id);
+        Assert.True(cats.ContainsKey("REGULAR") && cats.ContainsKey("OVERTIME") && cats.ContainsKey("HOLIDAY"));
+
+        var lookup = new PayrollContextLookup(
+            new PayrollContextRepository(_connectionFactory, new NullAuditService()), _connectionFactory);
+
+        // No rows yet → empty (no override).
+        Assert.Empty(await lookup.ResolveOtEligibleCategoriesAsync(contextId, new DateOnly(2026, 1, 15)));
+
+        try
+        {
+            // CBA-style override effective 2026-01-01: REGULAR + OVERTIME + HOLIDAY all count toward OT.
+            foreach (var code in new[] { "REGULAR", "OVERTIME", "HOLIDAY" })
+                await InsertEligibleRowAsync(conn, contextId, new DateOnly(2026, 1, 1), null, cats[code], stamp);
+
+            var resolved = await lookup.ResolveOtEligibleCategoriesAsync(contextId, new DateOnly(2026, 1, 15));
+            Assert.Equal(3, resolved.Count);
+            Assert.Contains(cats["HOLIDAY"], resolved);   // the CBA addition is now OT-eligible
+
+            // Before the effective date → not yet in force (resolver returns empty → flag fallback).
+            Assert.Empty(await lookup.ResolveOtEligibleCategoriesAsync(contextId, new DateOnly(2025, 12, 31)));
+        }
+        finally
+        {
+            await conn.ExecuteAsync(
+                "DELETE FROM payroll_context_ot_eligible_category WHERE payroll_context_id = @Id", new { Id = contextId });
+        }
+    }
+
+    private sealed record CatIdRow(int Id, string Code);
+
+    static Task InsertEligibleRowAsync(
+        System.Data.IDbConnection conn, Guid contextId, DateOnly effective, DateOnly? end,
+        int timeCategoryId, DateTime stamp)
+        => conn.ExecuteAsync(
+            """
+            INSERT INTO payroll_context_ot_eligible_category (
+                payroll_context_ot_eligible_category_id, payroll_context_id, effective_date, end_date,
+                time_category_id, created_by, creation_timestamp)
+            VALUES (@Id, @ContextId, @Effective, @End, @CatId, @CreatedBy, @Stamp)
+            """,
+            new
+            {
+                Id        = Guid.NewGuid(),
+                ContextId = contextId,
+                Effective = effective,
+                End       = end,
+                CatId     = timeCategoryId,
+                CreatedBy = Guid.Empty,
+                Stamp     = stamp
+            });
+
     static Task InsertConfigRowAsync(
         System.Data.IDbConnection conn, Guid contextId, DateOnly effective, DateOnly? end,
         decimal weeklyThreshold, int workweekStartDay, DateTime stamp)

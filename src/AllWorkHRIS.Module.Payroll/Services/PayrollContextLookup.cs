@@ -72,5 +72,22 @@ public sealed class PayrollContextLookup : IPayrollContextLookup
         return new PeriodOtConfig(anchor, byWeek, atStart.WeeklyThresholdHours, atStart.ReviewThresholdHours);
     }
 
+    // ADR-024 / Phase 12.13.4: the OT-eligible time-category set as-of a date — every dated row
+    // covering asOf. Empty (no rows) ⇒ "no override", callers fall back to is_worked_time.
+    public async Task<IReadOnlyCollection<int>> ResolveOtEligibleCategoriesAsync(Guid payrollContextId, DateOnly asOf)
+    {
+        using var conn = _connectionFactory.CreateConnection();
+        var ids = await conn.QueryAsync<int>(
+            """
+            SELECT time_category_id
+            FROM   payroll_context_ot_eligible_category
+            WHERE  payroll_context_id = @ContextId
+              AND  effective_date <= @AsOf
+              AND  (end_date IS NULL OR end_date >= @AsOf)
+            """,
+            new { ContextId = payrollContextId, AsOf = asOf.ToDateTime(TimeOnly.MinValue) });
+        return ids.ToList();
+    }
+
     private sealed record OtConfigRow(decimal OtWeeklyThresholdHours, int WorkweekStartDay, decimal? OtReviewThresholdHours);
 }
