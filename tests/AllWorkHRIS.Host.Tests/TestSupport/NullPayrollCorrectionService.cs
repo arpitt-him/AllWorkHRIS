@@ -15,4 +15,12 @@ internal sealed class NullPayrollCorrectionService : IPayrollCorrectionService
             AlreadyReversed = false,
             ReversedResultIds = []
         });
+
+    public Task<ReversalOutcome> ReverseResultsAsync(ReverseResultsRequest request, CancellationToken ct = default)
+        => Task.FromResult(new ReversalOutcome
+        {
+            RunId = request.RunId,
+            AlreadyReversed = false,
+            ReversedResultIds = []
+        });
 }

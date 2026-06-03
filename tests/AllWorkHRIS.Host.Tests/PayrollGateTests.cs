@@ -577,6 +577,52 @@ public sealed class PayrollGateTests : IDisposable
     }
 
     // ---------------------------------------------------------------------------
+    // TC-PAY-REVERSE-2: ADR-027 2a — per-EE (result-level) reversal. Reversing one
+    // employee of a multi-employee run contra-posts ONLY that employee's impacts and
+    // marks ONLY that result REVERSED; the others stand and the run STAYS APPROVED
+    // (so the period is still covered). Requires migration 050.
+    // ---------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ReversePerEmployee_ReversesOnlySelected_RunStaysApproved()
+    {
+        var emp1   = await HireAndEnrollAsync("REV-A", blockingCleared: true);
+        var emp2   = await HireAndEnrollAsync("REV-B", blockingCleared: true);
+        var userId = Guid.NewGuid();
+
+        var runId = await CalculateAndApproveAsync(AcumPeriod2026A, userId);
+
+        using var conn = _connectionFactory.CreateConnection();
+        int StatusOf(Guid emp) => conn.ExecuteScalar<int>(
+            "SELECT result_status_id FROM employee_payroll_result WHERE payroll_run_id = @Run AND employment_id = @Emp",
+            new { Run = runId, Emp = emp });
+        decimal NetImpacts(Guid emp) => conn.ExecuteScalar<decimal>(
+            "SELECT COALESCE(SUM(delta_value), 0) FROM accumulator_impact WHERE payroll_run_id = @Run AND employment_id = @Emp",
+            new { Run = runId, Emp = emp });
+
+        var approvedResult = _lookupCache.GetId(LookupTables.EmployeeResultStatus, "APPROVED");
+        var reversedResult = _lookupCache.GetId(LookupTables.EmployeeResultStatus, "REVERSED");
+
+        // Reverse ONLY emp1.
+        var correction = BuildCorrectionService();
+        var outcome = await correction.ReverseResultsAsync(new ReverseResultsRequest
+            { RunId = runId, EmploymentIds = new[] { emp1 }, ReversedBy = userId, Reason = "per-EE test" });
+
+        Assert.Single(outcome.ReversedResultIds);
+        Assert.Equal(reversedResult, StatusOf(emp1));   // emp1 reversed
+        Assert.Equal(approvedResult, StatusOf(emp2));   // emp2 untouched
+
+        // The run stays APPROVED (emp2 still standing) — the period is NOT reopened.
+        var run = await _runRepo.GetByIdAsync(runId);
+        Assert.Equal(_lookupCache.GetId(LookupTables.RunStatus, "APPROVED"), run!.RunStatusId);
+        Assert.NotNull(await _runRepo.GetActiveRegularRunForPeriodAsync(AcumPeriod2026A));
+
+        // emp1's impacts net to zero (contra-posted); emp2's stand.
+        Assert.Equal(0m, NetImpacts(emp1));
+        Assert.True(NetImpacts(emp2) > 0m, "emp2's impacts should remain standing");
+    }
+
+    // ---------------------------------------------------------------------------
     // Helpers
     // ---------------------------------------------------------------------------
 

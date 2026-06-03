@@ -27,6 +27,16 @@ public interface IPayrollCorrectionService
     /// Returns the reversed result ids so a caller can chain a re-pay.
     /// </summary>
     Task<ReversalOutcome> ReverseRunAsync(ReverseRunRequest request, CancellationToken ct = default);
+
+    /// <summary>
+    /// Reverse a <b>subset</b> of an APPROVED run's results — the selected employees only (ADR-027,
+    /// per-EE granularity). Contra-posts just those results and marks them <c>REVERSED</c>; the run
+    /// <b>stays APPROVED</b> while any standing result remains (so the period is still covered by an
+    /// active Regular run and a scoped Supplemental can re-pay the reversed employees). If the
+    /// selection leaves no standing result, the run is marked REVERSED and its locks released —
+    /// i.e. <see cref="ReverseRunAsync"/> is exactly this with every employee selected. Idempotent.
+    /// </summary>
+    Task<ReversalOutcome> ReverseResultsAsync(ReverseResultsRequest request, CancellationToken ct = default);
 }
 
 /// <summary>Plain request for <see cref="IPayrollCorrectionService.ReverseRunAsync"/>.</summary>
@@ -35,6 +45,16 @@ public sealed record ReverseRunRequest
     public required Guid   RunId      { get; init; }
     public required Guid   ReversedBy { get; init; }
     public required string Reason     { get; init; }
+}
+
+/// <summary>Plain request for <see cref="IPayrollCorrectionService.ReverseResultsAsync"/> — reverse
+/// only the results belonging to <see cref="EmploymentIds"/> within the run.</summary>
+public sealed record ReverseResultsRequest
+{
+    public required Guid                     RunId         { get; init; }
+    public required IReadOnlyCollection<Guid> EmploymentIds { get; init; }
+    public required Guid                     ReversedBy    { get; init; }
+    public required string                   Reason        { get; init; }
 }
 
 /// <summary>Structured outcome — lets a caller chain (e.g. a re-pay over the reversed results).</summary>
