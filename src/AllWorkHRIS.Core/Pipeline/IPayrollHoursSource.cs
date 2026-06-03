@@ -12,13 +12,26 @@ namespace AllWorkHRIS.Core.Pipeline;
 public interface IPayrollHoursSource
 {
     /// <summary>
-    /// Returns total worked hours per calendar date for an employment within the pay-period
-    /// date range, for the run identified by <paramref name="payrollRunId"/>. Includes hours
-    /// that are APPROVED (not yet committed to any run) or already LOCKED to <em>this</em> run;
-    /// excludes hours LOCKED to a <em>different</em> run, so a second run over the same date
-    /// range can't re-sum hours an earlier approved run already consumed (Phase 12.7).
+    /// Returns total <b>worked</b> hours (categories flagged <c>is_worked_time</c>, e.g. REGULAR/
+    /// OVERTIME) per calendar date for an employment within the pay-period date range, for the run
+    /// identified by <paramref name="payrollRunId"/>. These are the hours that count toward the FLSA
+    /// weekly overtime threshold (Phase 12.12 / ADR-023); paid leave is excluded here and summed via
+    /// <see cref="GetApprovedNonWorkedPayableHoursByEmploymentAndPeriodAsync"/>. Includes hours that
+    /// are APPROVED (not yet committed to any run) or already LOCKED to <em>this</em> run; excludes
+    /// hours LOCKED to a <em>different</em> run, so a second run over the same date range can't
+    /// re-sum hours an earlier approved run already consumed (Phase 12.7).
     /// </summary>
     Task<IReadOnlyList<(DateOnly WorkDate, decimal Hours)>> GetApprovedHoursByEmploymentAndPeriodAsync(
+        Guid employmentId, DateOnly periodStart, DateOnly periodEnd, Guid payrollRunId);
+
+    /// <summary>
+    /// Returns the total <b>non-worked but payable</b> hours (paid-leave categories — PTO, holiday,
+    /// sick — flagged <c>payable</c> but not <c>is_worked_time</c>) for an employment within the
+    /// pay-period date range, under the same APPROVED / LOCKED-to-this-run rule as
+    /// <see cref="GetApprovedHoursByEmploymentAndPeriodAsync"/>. These are paid at straight time and
+    /// do <b>not</b> count toward the FLSA overtime threshold; <c>UNPAID</c> is excluded. (Phase 12.12.)
+    /// </summary>
+    Task<decimal> GetApprovedNonWorkedPayableHoursByEmploymentAndPeriodAsync(
         Guid employmentId, DateOnly periodStart, DateOnly periodEnd, Guid payrollRunId);
 
     /// <summary>

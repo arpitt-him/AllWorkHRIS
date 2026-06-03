@@ -250,12 +250,16 @@ public sealed class LeaveTypeConfigRepository : ILeaveTypeConfigRepository
     public async Task<LeaveTypeInfo?> GetByCodeAsync(string leaveTypeCode)
     {
         using var conn = _connectionFactory.CreateConnection();
+        // LEFT JOIN so a known, active leave type still resolves even if its payroll-impact
+        // mapping is unset — the caller can then distinguish "unknown type" (no row) from
+        // "known but not configured" (row with null payroll_impact_code) and message accurately
+        // (ToDo #49). With the seed second-pass populated, the impact is always present.
         return await conn.QueryFirstOrDefaultAsync<LeaveTypeInfo>(
             @"SELECT lt.id, lt.code, lt.is_accrued,
                      pit.code as payroll_impact_code,
                      pit.pay_percentage
               FROM lkp_leave_type lt
-              JOIN lkp_payroll_impact_type pit ON lt.payroll_impact_type_id = pit.id
+              LEFT JOIN lkp_payroll_impact_type pit ON lt.payroll_impact_type_id = pit.id
               WHERE lt.code = @Code AND lt.is_active = true",
             new { Code = leaveTypeCode });
     }

@@ -1,13 +1,22 @@
+using AllWorkHRIS.Core.Domain.Time;
+
 namespace AllWorkHRIS.Core.Composition;
 
 /// <summary>
-/// Thin discovery interface placed in Core so HRIS can ask "are there any payroll contexts?"
-/// without taking a direct dependency on the Payroll module.
-/// Implemented by the Payroll module; absent if the module is not loaded.
+/// Thin discovery interface placed in Core so HRIS / Time &amp; Attendance can reach payroll
+/// context data without taking a direct dependency on the Payroll module.
+/// Implemented by the Payroll module; absent (Null fallback) if the module is not loaded.
 /// </summary>
 public interface IPayrollContextLookup
 {
     Task<IReadOnlyList<(Guid Id, string Name)>> GetActiveContextsAsync();
     Task<IReadOnlyList<(Guid Id, string Name)>> GetActiveContextsByLegalEntityAsync(Guid legalEntityId);
-    Task<decimal> GetOtThresholdForEmploymentAsync(Guid employmentId);
+
+    /// <summary>
+    /// Resolve the effective-dated overtime configuration for a payroll context as-of a date
+    /// (ADR-024). The single resolver shared by payroll (pay) and T&amp;A (display). Returns the
+    /// dated row whose window covers <paramref name="asOf"/>; falls back to the system default
+    /// (40 hrs / Monday / no review trigger) if the context has no config row.
+    /// </summary>
+    Task<OtConfig> ResolveOtConfigAsync(Guid payrollContextId, DateOnly asOf);
 }

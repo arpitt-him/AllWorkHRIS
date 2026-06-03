@@ -33,6 +33,7 @@ namespace AllWorkHRIS.Host.Tests;
 /// TC-PAY-011  Batch of employees all receive result rows; progress reaches 100 %
 /// TC-PAY-020  HireEventHandler auto-creates payroll_profile with source AUTO_HIRE
 /// TC-PAY-022  Blocked employee is excluded (exception row); included after gate cleared
+/// TC-PAY-046  NON_EXEMPT worked+leave: OT computed on worked hours only; leave paid straight-time (ToDo #46)
 ///
 /// Requires allworkhris_dev running locally.
 /// </summary>
@@ -468,6 +469,59 @@ public sealed class PayrollGateTests : IDisposable
     }
 
     // ---------------------------------------------------------------------------
+    // TC-PAY-046: NON_EXEMPT with worked + paid-leave hours — OT is computed on the
+    // WORKED hours only (FLSA, cf. 29 CFR 778.218), while the paid leave is still PAID
+    // at straight time (folded into REG). Phase 12.12 / ToDo #46 / ADR-023.
+    // ---------------------------------------------------------------------------
+
+    [Fact]
+    public async Task PayrollJob_NonExemptWorkedPlusLeave_OvertimeOnWorkedOnly_LeavePaidStraightTime()
+    {
+        var employmentId = await HireAndEnrollAsync("PAY046", blockingCleared: true);
+
+        var runId = await _runService.InitiateRunAsync(new InitiatePayrollRunCommand
+        {
+            PayrollContextId = ContextId,
+            PeriodId         = PeriodId2,
+            RunTypeId        = 1,
+            InitiatedBy      = Guid.NewGuid()
+        });
+        _runIds.Add(runId);
+
+        // 44 worked + 8 paid-leave hours in one workweek. Expected (FLSA / Phase 12.12):
+        //   worked 44  → 40 REG-worked + 4 OT;  leave 8 → straight time, folded into REG.
+        //   ⇒ REG quantity = 48, OT quantity = 4.
+        // This single result discriminates against BOTH failure modes:
+        //   • dropping leave (naive is_worked_time filter on the sole pay path) → REG = 40
+        //   • counting leave toward OT (the pre-fix all-categories basis)       → OT  = 12
+        var hours = new FixedHoursPayrollHoursSource(
+            worked: [(new DateOnly(2024, 1, 15), 44m)],
+            nonWorkedPayableHours: 8m);
+
+        await RunJobAsync(runId, hours);
+
+        using var conn = _connectionFactory.CreateConnection();
+
+        var resultId = await conn.ExecuteScalarAsync<Guid?>(
+            """
+            SELECT employee_payroll_result_id FROM employee_payroll_result
+            WHERE payroll_run_id = @RunId AND employment_id = @EmpId
+            """,
+            new { RunId = runId, EmpId = employmentId });
+        Assert.NotNull(resultId);
+
+        var regQty = await conn.ExecuteScalarAsync<decimal?>(
+            "SELECT quantity FROM earnings_result_line WHERE employee_payroll_result_id = @Id AND earnings_code = 'REG'",
+            new { Id = resultId });
+        var otQty = await conn.ExecuteScalarAsync<decimal?>(
+            "SELECT quantity FROM earnings_result_line WHERE employee_payroll_result_id = @Id AND earnings_code = 'OT'",
+            new { Id = resultId });
+
+        Assert.Equal(48m, regQty);   // 40 worked-reg + 8 paid leave, at straight time (leave still paid)
+        Assert.Equal(4m,  otQty);    // OT only from the 44 worked hours (44 − 40); leave excluded from the threshold
+    }
+
+    // ---------------------------------------------------------------------------
     // Helpers
     // ---------------------------------------------------------------------------
 
@@ -545,7 +599,7 @@ public sealed class PayrollGateTests : IDisposable
             InitiatedBy          = Guid.NewGuid()
         };
 
-    private async Task<RunProgress> RunJobAsync(Guid runId)
+    private async Task<RunProgress> RunJobAsync(Guid runId, IPayrollHoursSource? hoursSource = null)
     {
         var channel = Channel.CreateBounded<Guid>(new BoundedChannelOptions(1)
         {
@@ -560,7 +614,7 @@ public sealed class PayrollGateTests : IDisposable
         // Shared composition (TestSupport/PayrollRunTestContainer) registers every
         // dependency PayrollRunJob/CalculationEngine pull, including the cross-module
         // collaborators stubbed for a payroll-only test. See ToDo #36.
-        await using var container = PayrollRunTestContainer.Build(_connectionFactory, _lookupCache);
+        await using var container = PayrollRunTestContainer.Build(_connectionFactory, _lookupCache, hoursSource);
 
         var job = new PayrollRunJob(
             channel,

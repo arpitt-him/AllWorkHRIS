@@ -250,11 +250,11 @@
                                     </div>
                                 }
 
-                                @if (entries.Any(e => e.TimeCategoryCode == "OVERTIME"))
+                                @if (row.OvertimeHours > 0)
                                 {
                                     <div class="ot-summary">
                                         <span>OT this period:</span>
-                                        <strong>@entries.Where(e => e.TimeCategoryCode == "OVERTIME").Sum(e => e.Duration).ToString("F2") hrs</strong>
+                                        <strong>@row.OvertimeHours.ToString("F2") hrs</strong>
                                     </div>
                                 }
                             }

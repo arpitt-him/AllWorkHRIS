@@ -1,6 +1,7 @@
 using Dapper;
 using AllWorkHRIS.Core.Composition;
 using AllWorkHRIS.Core.Data;
+using AllWorkHRIS.Core.Domain.Time;
 using AllWorkHRIS.Module.Payroll.Repositories;
 
 namespace AllWorkHRIS.Module.Payroll.Services;
@@ -30,17 +31,27 @@ public sealed class PayrollContextLookup : IPayrollContextLookup
                        .ToList();
     }
 
-    public async Task<decimal> GetOtThresholdForEmploymentAsync(Guid employmentId)
+    // ADR-024 / Phase 12.13: the shared, effective-dated OT-config resolver — one source for
+    // both pay (engine) and display (T&A). Returns the dated row whose window covers asOf
+    // (most-recent-effective wins, via ORDER BY + first row); system default if none.
+    public async Task<OtConfig> ResolveOtConfigAsync(Guid payrollContextId, DateOnly asOf)
     {
         using var conn = _connectionFactory.CreateConnection();
-        var threshold = await conn.ExecuteScalarAsync<decimal?>(
+        var row = await conn.QueryFirstOrDefaultAsync<OtConfigRow>(
             """
-            SELECT pc.ot_weekly_threshold_hours
-            FROM   payroll_profile pp
-            JOIN   payroll_context pc ON pc.payroll_context_id = pp.payroll_context_id
-            WHERE  pp.employment_id = @EmploymentId
+            SELECT ot_weekly_threshold_hours, workweek_start_day, ot_review_threshold_hours
+            FROM   payroll_context_ot_config
+            WHERE  payroll_context_id = @ContextId
+              AND  effective_date <= @AsOf
+              AND  (end_date IS NULL OR end_date >= @AsOf)
+            ORDER  BY effective_date DESC
             """,
-            new { EmploymentId = employmentId });
-        return threshold ?? 40m;
+            new { ContextId = payrollContextId, AsOf = asOf.ToDateTime(TimeOnly.MinValue) });
+
+        return row is null
+            ? new OtConfig(40m, 1, null)
+            : new OtConfig(row.OtWeeklyThresholdHours, row.WorkweekStartDay, row.OtReviewThresholdHours);
     }
+
+    private sealed record OtConfigRow(decimal OtWeeklyThresholdHours, int WorkweekStartDay, decimal? OtReviewThresholdHours);
 }

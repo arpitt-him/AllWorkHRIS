@@ -27,6 +27,10 @@ public sealed class TimeEntryPayrollHoursSource : IPayrollHoursSource
         Guid employmentId, DateOnly periodStart, DateOnly periodEnd, Guid payrollRunId)
         => _timeEntryRepo.GetApprovedHoursByEmploymentAndPeriodAsync(employmentId, periodStart, periodEnd, payrollRunId);
 
+    public Task<decimal> GetApprovedNonWorkedPayableHoursByEmploymentAndPeriodAsync(
+        Guid employmentId, DateOnly periodStart, DateOnly periodEnd, Guid payrollRunId)
+        => _timeEntryRepo.GetApprovedNonWorkedPayableHoursByEmploymentAndPeriodAsync(employmentId, periodStart, periodEnd, payrollRunId);
+
     public Task LockHoursForRunAsync(
         Guid payrollRunId, IReadOnlyList<Guid> employmentIds, DateOnly periodStart, DateOnly periodEnd, CancellationToken ct = default)
         => _timeEntryRepo.LockHoursForRunAsync(payrollRunId, employmentIds, periodStart, periodEnd, ct);

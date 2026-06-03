@@ -12,6 +12,10 @@ public sealed class NullPayrollHoursSource : IPayrollHoursSource
         Guid employmentId, DateOnly periodStart, DateOnly periodEnd, Guid payrollRunId)
         => Task.FromResult<IReadOnlyList<(DateOnly WorkDate, decimal Hours)>>([]);
 
+    public Task<decimal> GetApprovedNonWorkedPayableHoursByEmploymentAndPeriodAsync(
+        Guid employmentId, DateOnly periodStart, DateOnly periodEnd, Guid payrollRunId)
+        => Task.FromResult(0m);
+
     public Task LockHoursForRunAsync(
         Guid payrollRunId, IReadOnlyList<Guid> employmentIds, DateOnly periodStart, DateOnly periodEnd, CancellationToken ct = default)
         => Task.CompletedTask;

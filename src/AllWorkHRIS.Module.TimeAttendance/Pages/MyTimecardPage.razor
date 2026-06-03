@@ -302,7 +302,11 @@
             _employmentId.Value, _selectedPeriodId);
 
         _totalHours    = _entries.Sum(e => e.Duration);
-        _overtimeHours = _entries.Where(e => e.TimeCategoryCode == "OVERTIME").Sum(e => e.Duration);
+        // ADR-023: OT is derived, not stored — recompute it from worked-time daily totals via the
+        // shared Core calculator (same basis as the Timecards summary), not by summing OT-category rows.
+        var split      = await QueryService.GetPeriodOvertimeSplitForEmploymentAsync(
+                             _employmentId.Value, _selectedPeriodId);
+        _overtimeHours = split.OvertimeHours;
 
         _loading = false;
     }

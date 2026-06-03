@@ -106,8 +106,18 @@ public sealed class LeaveService : ILeaveService
         if (command.LeaveEndDate < command.LeaveStartDate)
             throw new ValidationException("Leave end date cannot be before start date.");
 
+        // "Unknown leave type" now means exactly that — no active lkp_leave_type with this code.
         var leaveTypeInfo = await _leaveTypeConfigRepository.GetByCodeAsync(command.LeaveType)
             ?? throw new ValidationException($"Unknown leave type: {command.LeaveType}");
+
+        // A known, active type that hasn't been mapped to a payroll impact can't be paid correctly
+        // (the impact drives the request's payroll treatment). Surface that as a configuration gap,
+        // not as "unknown." (ToDo #49 — the seed second-pass populates a global default, so this
+        // should not normally fire; the per-LE override is future.)
+        if (string.IsNullOrEmpty(leaveTypeInfo.PayrollImpactCode))
+            throw new ValidationException(
+                $"Leave type '{command.LeaveType}' has no payroll impact configured. " +
+                "Set its payroll treatment in leave-type configuration before it can be requested.");
 
         var overlapping = await _leaveRequestRepository.GetOverlappingAsync(
             command.EmploymentId, command.LeaveStartDate, command.LeaveEndDate,

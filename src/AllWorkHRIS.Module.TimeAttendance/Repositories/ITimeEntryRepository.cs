@@ -9,7 +9,6 @@ public interface ITimeEntryRepository
     Task<IEnumerable<TimeEntry>>  GetByEmploymentAndPeriodAsync(Guid employmentId, Guid payrollPeriodId);
     Task<IEnumerable<TimeEntry>>  GetPendingApprovalByManagerAsync(Guid managerEmploymentId, Guid payrollPeriodId);
     Task<IEnumerable<TimeEntry>>  GetApprovedForHandoffAsync(Guid payrollPeriodId);
-    Task<IEnumerable<TimeEntry>>  GetWorkweekEntriesAsync(Guid employmentId, DateOnly weekStart);
     Task<IEnumerable<TimeEntry>>  GetOpenByEmploymentAsync(Guid employmentId);
     Task<Guid>                    InsertAsync(TimeEntry entry, IUnitOfWork uow);
     Task                          UpdateStatusAsync(Guid timeEntryId, string status, Guid actorId, IUnitOfWork uow);
@@ -21,7 +20,6 @@ public interface ITimeEntryRepository
     /// <summary>Per-LE config: whether IMPORT-method time entries auto-approve on submit.</summary>
     Task<bool>                    GetAutoApproveImportedTimeAsync(Guid legalEntityId);
     Task                          LockAsync(Guid timeEntryId, Guid payrollRunId, DateTimeOffset lockedAt, IUnitOfWork uow);
-    Task                          ReclassifyAsync(Guid timeEntryId, string timeCategory, IUnitOfWork uow);
 
     // Phase 12.7 — lock-on-approve / unlock-on-cancel. These wrap their own unit of work since
     // they are driven from the payroll approval/cancel path via the Core IPayrollHoursSource seam.
@@ -41,5 +39,13 @@ public interface ITimeEntryRepository
     /// overtime for non-exempt employees.
     /// </summary>
     Task<IReadOnlyList<(DateOnly WorkDate, decimal Hours)>> GetApprovedHoursByEmploymentAndPeriodAsync(
+        Guid employmentId, DateOnly periodStart, DateOnly periodEnd, Guid payrollRunId);
+
+    /// <summary>
+    /// Total approved/locked <b>non-worked but payable</b> hours (paid leave — `payable` and NOT
+    /// `is_worked_time`) for an employment within the period; paid at straight time, excluded from
+    /// the FLSA overtime threshold (Phase 12.12). `UNPAID` is excluded.
+    /// </summary>
+    Task<decimal> GetApprovedNonWorkedPayableHoursByEmploymentAndPeriodAsync(
         Guid employmentId, DateOnly periodStart, DateOnly periodEnd, Guid payrollRunId);
 }

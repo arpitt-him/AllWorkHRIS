@@ -12,8 +12,6 @@ namespace AllWorkHRIS.Module.TimeAttendance.Services;
 public sealed class TimeEntryService : ITimeEntryService
 {
     private readonly ITimeEntryRepository      _repository;
-    private readonly IOvertimeDetectionService _overtimeService;
-    private readonly IWorkScheduleRepository   _workSchedules;
     private readonly IConnectionFactory        _connectionFactory;
     private readonly ILookupCache              _lookupCache;
     private readonly ITimeApprovalNotifier     _notifier;
@@ -22,8 +20,6 @@ public sealed class TimeEntryService : ITimeEntryService
 
     public TimeEntryService(
         ITimeEntryRepository       repository,
-        IOvertimeDetectionService  overtimeService,
-        IWorkScheduleRepository    workSchedules,
         IConnectionFactory         connectionFactory,
         ILookupCache               lookupCache,
         ITimeApprovalNotifier      notifier,
@@ -31,8 +27,6 @@ public sealed class TimeEntryService : ITimeEntryService
         ILogger<TimeEntryService>  logger)
     {
         _repository        = repository;
-        _overtimeService   = overtimeService;
-        _workSchedules     = workSchedules;
         _connectionFactory = connectionFactory;
         _lookupCache       = lookupCache;
         _notifier          = notifier;
@@ -92,24 +86,9 @@ public sealed class TimeEntryService : ITimeEntryService
         if (!command.AutoApprove)
             await _notifier.NotifyTimeApprovalAsync(entryId, command.EmploymentId);
 
-        // OT detection runs at submission so the manager sees REGULAR/OT split before approving
-        var anchor    = await _workSchedules.ResolveWorkweekAnchorAsync(command.PayrollPeriodId, command.EmploymentId);
-        var diff      = ((int)command.WorkDate.DayOfWeek - anchor + 7) % 7;
-        var weekStart = command.WorkDate.AddDays(-diff);
-        using var otUow = new UnitOfWork(_connectionFactory);
-        try
-        {
-            await _overtimeService.DetectAndReclassifyAsync(command.EmploymentId, weekStart, otUow);
-            otUow.Commit();
-        }
-        catch (Exception ex)
-        {
-            otUow.Rollback();
-            _logger.LogWarning(ex,
-                "Overtime detection failed after submitting entry {EntryId} — submission stands",
-                entryId);
-        }
-
+        // ADR-023: submission records the real event and nothing else. The regular/overtime split
+        // is no longer materialized here (no shrink-original + insert-punchless-OVERTIME-row); it is
+        // derived for display and computed for pay from the shared Core OvertimeSplitCalculator.
         return entryId;
     }
 

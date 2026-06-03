@@ -99,6 +99,39 @@ public sealed class LeaveStatusTransitionJob : BackgroundService
             }
         }
 
+        // IN_PROGRESS → COMPLETED: the end date has passed. Strict (`<`) keeps a leave active
+        // through its last day. Re-queries IN_PROGRESS so a TDO that jumps past a whole leave
+        // flows APPROVED → IN_PROGRESS → COMPLETED in one cycle. Manual ReturnFromLeaveAsync
+        // still handles EARLY return (before the end date).
+        var completedId        = lookupCache.GetId(LookupTables.LeaveStatus, "COMPLETED");
+        var inProgressRequests = await leaveRepo.GetByStatusAsync("IN_PROGRESS");
+
+        foreach (var req in inProgressRequests.Where(r => r.LeaveEndDate < operativeDate))
+        {
+            try
+            {
+                using var uow = new UnitOfWork(connectionFactory);
+                try
+                {
+                    await leaveRepo.UpdateStatusAsync(
+                        req.LeaveRequestId, completedId, systemActorId, uow);
+                    uow.Commit();
+                    _logger.LogInformation(
+                        "Leave {Id} transitioned to COMPLETED (end {Date}).",
+                        req.LeaveRequestId, req.LeaveEndDate);
+                }
+                catch
+                {
+                    uow.Rollback();
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to complete leave {Id}.", req.LeaveRequestId);
+            }
+        }
+
         _lastRunDate = operativeDate;
     }
 }

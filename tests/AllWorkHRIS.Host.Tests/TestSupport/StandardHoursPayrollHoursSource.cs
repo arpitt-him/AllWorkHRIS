@@ -18,6 +18,11 @@ internal sealed class StandardHoursPayrollHoursSource : IPayrollHoursSource
         Guid employmentId, DateOnly periodStart, DateOnly periodEnd, Guid payrollRunId)
         => Task.FromResult<IReadOnlyList<(DateOnly WorkDate, decimal Hours)>>([(periodStart, 40m)]);
 
+    // No paid-leave hours in the gate fixture — worked hours only (Phase 12.12).
+    public Task<decimal> GetApprovedNonWorkedPayableHoursByEmploymentAndPeriodAsync(
+        Guid employmentId, DateOnly periodStart, DateOnly periodEnd, Guid payrollRunId)
+        => Task.FromResult(0m);
+
     public Task LockHoursForRunAsync(
         Guid payrollRunId, IReadOnlyList<Guid> employmentIds, DateOnly periodStart, DateOnly periodEnd, CancellationToken ct = default)
         => Task.CompletedTask;

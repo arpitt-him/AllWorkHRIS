@@ -17,7 +17,7 @@ namespace AllWorkHRIS.Module.TimeAttendance;
 public sealed class TimeAttendanceModule : IPlatformModule
 {
     public string  ModuleName        => "TimeAttendance";
-    public string? ModuleDescription => "Time entry capture, approval, overtime detection, and payroll handoff.";
+    public string? ModuleDescription => "Time entry capture, approval, overtime derivation, and payroll handoff.";
 
     public void Register(ContainerBuilder builder)
     {
@@ -36,9 +36,9 @@ public sealed class TimeAttendanceModule : IPlatformModule
                .As<IWorkScheduleRepository>()
                .InstancePerLifetimeScope();
 
-        builder.RegisterType<OvertimeDetectionService>()
-               .As<IOvertimeDetectionService>()
-               .InstancePerLifetimeScope();
+        // ADR-023: OvertimeDetectionService removed — the OT split is no longer materialized at
+        // submit. It is derived for display (TimeAttendanceQueryService) and computed for pay
+        // (CalculationEngine) from the shared Core OvertimeSplitCalculator.
 
         builder.RegisterType<TimeEntryService>()
                .As<ITimeEntryService>()

@@ -1,5 +1,6 @@
 using Autofac;
 using AllWorkHRIS.Core.Audit;
+using AllWorkHRIS.Core.Composition;
 using AllWorkHRIS.Core.Data;
 using AllWorkHRIS.Core.Lookups;
 using AllWorkHRIS.Core.Pipeline;
@@ -32,7 +33,10 @@ namespace AllWorkHRIS.Host.Tests.TestSupport;
 /// </summary>
 internal static class PayrollRunTestContainer
 {
-    public static IContainer Build(IConnectionFactory connectionFactory, ILookupCache lookupCache)
+    public static IContainer Build(
+        IConnectionFactory connectionFactory,
+        ILookupCache lookupCache,
+        IPayrollHoursSource? hoursSource = null)
     {
         var builder = new ContainerBuilder();
 
@@ -49,7 +53,11 @@ internal static class PayrollRunTestContainer
         builder.RegisterInstance(new NullPayrollPipelineService()).As<IPayrollPipelineService>().SingleInstance();
         builder.RegisterInstance(new NullEmploymentJurisdictionLookup()).As<IEmploymentJurisdictionLookup>().SingleInstance();
         builder.RegisterInstance(new NoOpBenefitStepProvider()).As<IBenefitStepProvider>().SingleInstance();
-        builder.RegisterInstance(new StandardHoursPayrollHoursSource()).As<IPayrollHoursSource>().SingleInstance();
+        builder.RegisterInstance(hoursSource ?? new StandardHoursPayrollHoursSource()).As<IPayrollHoursSource>().SingleInstance();
+        // ADR-024 / 12.13.1: the engine now resolves OT config via IPayrollContextLookup. The Null
+        // impl returns the system default (40 hrs / Monday), which matches the gate fixtures —
+        // so the gate suite doesn't depend on the dated-config backfill being applied to the test DB.
+        builder.RegisterInstance(new NullPayrollContextLookup()).As<IPayrollContextLookup>().SingleInstance();
 
         // Repositories
         builder.RegisterType<PayrollRunRepository>().As<IPayrollRunRepository>().InstancePerLifetimeScope();

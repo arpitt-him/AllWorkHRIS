@@ -1,3 +1,5 @@
+using AllWorkHRIS.Core.Domain.Time;
+
 namespace AllWorkHRIS.Core.Composition;
 
 public sealed class NullPayrollContextLookup : IPayrollContextLookup
@@ -8,6 +10,6 @@ public sealed class NullPayrollContextLookup : IPayrollContextLookup
     public Task<IReadOnlyList<(Guid Id, string Name)>> GetActiveContextsByLegalEntityAsync(Guid legalEntityId)
         => Task.FromResult<IReadOnlyList<(Guid Id, string Name)>>([]);
 
-    public Task<decimal> GetOtThresholdForEmploymentAsync(Guid employmentId)
-        => Task.FromResult(40m);
+    public Task<OtConfig> ResolveOtConfigAsync(Guid payrollContextId, DateOnly asOf)
+        => Task.FromResult(new OtConfig(40m, 1, null));
 }

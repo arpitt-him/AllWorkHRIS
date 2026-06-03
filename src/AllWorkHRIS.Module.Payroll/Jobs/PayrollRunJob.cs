@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Threading.Channels;
 using Autofac;
+using AllWorkHRIS.Core.Composition;
 using AllWorkHRIS.Core.Events;
 using AllWorkHRIS.Core.Lookups;
 using AllWorkHRIS.Core.Pipeline;
@@ -140,6 +141,7 @@ public sealed class PayrollRunJob : BackgroundService
         var resultRepo    = scope.Resolve<IEmployeePayrollResultRepository>();
         var profileRepo   = scope.Resolve<IPayrollProfileRepository>();
         var contextRepo   = scope.Resolve<IPayrollContextRepository>();
+        var contextLookup = scope.Resolve<IPayrollContextLookup>();
         var compSnapshot  = scope.Resolve<IPayrollCompensationSnapshotRepository>();
         var engine        = scope.Resolve<ICalculationEngine>();
         var temporal      = scope.Resolve<ITemporalContext>();
@@ -227,13 +229,19 @@ public sealed class PayrollRunJob : BackgroundService
             };
             await resultSetRepo.InsertAsync(resultSet);
 
-            // Resolve pay frequency, OT threshold, and period dates (same for all employees in the run)
+            // Resolve pay frequency, OT config, and period dates (same for all employees in the run)
             var periodsPerYear = await contextRepo.GetPeriodsPerYearAsync(run.PayrollContextId);
-            var payrollContext  = await contextRepo.GetByIdAsync(run.PayrollContextId)
-                                  ?? throw new InvalidOperationException(
-                                      $"Payroll context {run.PayrollContextId} not found for run {runId}");
+            // Existence/validation: the context must exist for the run.
+            _ = await contextRepo.GetByIdAsync(run.PayrollContextId)
+                ?? throw new InvalidOperationException(
+                    $"Payroll context {run.PayrollContextId} not found for run {runId}");
             var period         = await contextRepo.GetPeriodByIdAsync(run.PeriodId)
                                  ?? throw new InvalidOperationException($"Period {run.PeriodId} not found for run {runId}");
+
+            // ADR-024 / Phase 12.13: resolve the effective-dated OT config via the shared resolver
+            // instead of reading the payroll_context scalar columns. Period-level for now (as-of the
+            // period start); 12.13.2 moves this to per-workweek. One backfilled row ⇒ today's values.
+            var otConfig = await contextLookup.ResolveOtConfigAsync(run.PayrollContextId, period.PeriodStartDate);
 
             // Resolve the employee population + excluded set for this run. A full-context run
             // pays all active+cleared employees and flags every blocked employee; a scoped
@@ -328,8 +336,8 @@ public sealed class PayrollRunJob : BackgroundService
                     BaseRate                = snapshot?.BaseRate ?? 0m,
                     FlsaStatusCode          = snapshot?.FlsaStatusCode,
                     RateTypeCode            = snapshot?.RateTypeCode,
-                    OtWeeklyThresholdHours  = payrollContext.OtWeeklyThresholdHours,
-                    WorkWeekStartDay        = payrollContext.WorkweekStartDay,
+                    OtWeeklyThresholdHours  = otConfig.WeeklyThresholdHours,
+                    WorkWeekStartDay        = otConfig.WorkweekStartDay,
                     PeriodsPerYear          = periodsPerYear,
                     PayPeriodStart          = period.PeriodStartDate,
                     PayPeriodEnd            = period.PeriodEndDate

@@ -190,12 +190,10 @@ public sealed class TimeAttendanceImportGateTests : IAsyncLifetime
         var temporal       = new AllWorkHRIS.Core.Temporal.SystemTemporalContext();
         var entryRepo      = new AllWorkHRIS.Module.TimeAttendance.Repositories.TimeEntryRepository(
                                  _connectionFactory, _lookupCache, temporal);
-        var workSchedules  = new AllWorkHRIS.Module.TimeAttendance.Repositories.WorkScheduleRepository(
-                                 _connectionFactory, temporal);
         var notifier       = new NullTimeApprovalNotifier();
-        var otService      = new OvertimeDetectionService(entryRepo, _connectionFactory,
-                                 _lookupCache, notifier, new AllWorkHRIS.Core.Composition.NullPayrollContextLookup(), temporal);
-        var entryService   = new TimeEntryService(entryRepo, otService, workSchedules, _connectionFactory,
+        // ADR-023: TimeEntryService no longer materializes the OT split at submit, so it no longer
+        // depends on the (removed) OvertimeDetectionService or the workweek-anchor resolver.
+        var entryService   = new TimeEntryService(entryRepo, _connectionFactory,
                                  _lookupCache, notifier, temporal, NullLogger<TimeEntryService>.Instance);
         return new TimeImportService(_connectionFactory, _lookupCache, entryService,
             temporal, NullLogger<TimeImportService>.Instance);

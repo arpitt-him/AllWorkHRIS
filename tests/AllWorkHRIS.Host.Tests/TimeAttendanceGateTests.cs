@@ -144,56 +144,9 @@ public sealed class TimeAttendanceGateTests : IAsyncLifetime
         Assert.NotEqual(original.TimeEntryId, correction.TimeEntryId);
     }
 
-    // -----------------------------------------------------------------------
-    // TC-TA-004 — OvertimeDetectionResult.NotApplicable() sets IsApplicable=false
-    //             and OvertimeDetected=false.
-    // -----------------------------------------------------------------------
-    [Fact]
-    public void TC_TA_004_OvertimeResult_NotApplicable()
-    {
-        var empId  = Guid.NewGuid();
-        var result = OvertimeDetectionResult.NotApplicable(empId);
-
-        Assert.Equal(empId, result.IsApplicableFor);
-        Assert.False(result.IsApplicable);
-        Assert.False(result.OvertimeDetected);
-        Assert.Equal(0m, result.TotalRegularHours);
-        Assert.Empty(result.ReclassifiedEntryIds);
-    }
-
-    // -----------------------------------------------------------------------
-    // TC-TA-005 — OvertimeDetectionResult.NoOvertime() has IsApplicable=true,
-    //             OvertimeDetected=false, and correct total hours.
-    // -----------------------------------------------------------------------
-    [Fact]
-    public void TC_TA_005_OvertimeResult_NoOvertime()
-    {
-        var empId  = Guid.NewGuid();
-        var result = OvertimeDetectionResult.NoOvertime(empId, 38.5m);
-
-        Assert.True(result.IsApplicable);
-        Assert.False(result.OvertimeDetected);
-        Assert.Equal(38.5m, result.TotalRegularHours);
-        Assert.Equal(0m, result.OvertimeHours);
-    }
-
-    // -----------------------------------------------------------------------
-    // TC-TA-006 — OvertimeDetectionResult.WithOvertime() sets OvertimeDetected=true
-    //             and records reclassified entry IDs.
-    // -----------------------------------------------------------------------
-    [Fact]
-    public void TC_TA_006_OvertimeResult_WithOvertime()
-    {
-        var empId           = Guid.NewGuid();
-        var reclassifiedIds = new[] { Guid.NewGuid(), Guid.NewGuid() };
-        var result          = OvertimeDetectionResult.WithOvertime(empId, 40m, 3m, reclassifiedIds);
-
-        Assert.True(result.IsApplicable);
-        Assert.True(result.OvertimeDetected);
-        Assert.Equal(40m, result.TotalRegularHours);
-        Assert.Equal(3m,  result.OvertimeHours);
-        Assert.Equal(2,   result.ReclassifiedEntryIds.Count);
-    }
+    // TC-TA-004/005/006 retired (ADR-023): OvertimeDetectionResult and the materializing
+    // OvertimeDetectionService were removed. The OT split is now derived from the shared Core
+    // OvertimeSplitCalculator (see OvertimeSplitCalculatorTests).
 
     // -----------------------------------------------------------------------
     // TC-TA-007 — TimeEntryStatus enum contains all required lifecycle values.

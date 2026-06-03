@@ -299,7 +299,11 @@
 
             var tasks = new List<Task<IEnumerable<WorkQueueItem>>>();
             if (roles.Contains("HrisAdmin")) tasks.Add(WorkQueueService.GetOpenByRoleAsync("HrisAdmin", entityId));
-            if (roles.Contains("Manager"))   tasks.Add(WorkQueueService.GetOpenByRoleAsync("Manager",   entityId));
+            // ToDo #52: HRIS-Admin override — admins also see Manager-routed items (e.g. leave
+            // approvals), so approvals never dead-end when no Manager-role user exists. Routing to
+            // the employee's *actual* manager (vs the generic Manager role) remains future.
+            if (roles.Contains("Manager") || roles.Contains("HrisAdmin"))
+                tasks.Add(WorkQueueService.GetOpenByRoleAsync("Manager", entityId));
 
             var results = await Task.WhenAll(tasks);
             _items = results.SelectMany(r => r)

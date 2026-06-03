@@ -96,21 +96,6 @@ public sealed class TimeEntryRepository : ITimeEntryRepository
             new { PeriodId = payrollPeriodId });
     }
 
-    public async Task<IEnumerable<TimeEntry>> GetWorkweekEntriesAsync(
-        Guid employmentId, DateOnly weekStart)
-    {
-        var weekEnd = weekStart.AddDays(6);
-        using var conn = _connectionFactory.CreateConnection();
-        return await conn.QueryAsync<TimeEntry>(
-            $"{SelectBase} WHERE te.employment_id = @EmploymentId AND te.work_date >= @WeekStart AND te.work_date <= @WeekEnd ORDER BY te.work_date",
-            new
-            {
-                EmploymentId = employmentId,
-                WeekStart    = weekStart.ToDateTime(TimeOnly.MinValue),
-                WeekEnd      = weekEnd.ToDateTime(TimeOnly.MinValue)
-            });
-    }
-
     public async Task<IEnumerable<TimeEntry>> GetOpenByEmploymentAsync(Guid employmentId)
     {
         using var conn = _connectionFactory.CreateConnection();
@@ -269,23 +254,6 @@ public sealed class TimeEntryRepository : ITimeEntryRepository
         }, uow.Transaction);
     }
 
-    public async Task ReclassifyAsync(Guid timeEntryId, string timeCategory, IUnitOfWork uow)
-    {
-        var categoryId = _lookupCache.GetId(TimeAttendanceLookupTables.TimeCategory, timeCategory);
-        const string sql = """
-            UPDATE time_entry
-            SET    time_category_id = @CategoryId,
-                   updated_at       = @Now
-            WHERE  time_entry_id    = @TimeEntryId
-            """;
-        await uow.Connection.ExecuteAsync(sql, new
-        {
-            CategoryId  = categoryId,
-            Now         = _temporal.GetOperativeNow(),
-            TimeEntryId = timeEntryId
-        }, uow.Transaction);
-    }
-
     public async Task<bool> EmploymentExistsAsync(Guid employmentId)
     {
         using var conn = _connectionFactory.CreateConnection();
@@ -330,13 +298,17 @@ public sealed class TimeEntryRepository : ITimeEntryRepository
         // Phase 12.7: a run consumes hours that are APPROVED (not yet committed to any run) or
         // already LOCKED to *this* run — but never hours LOCKED to a *different* run, so a second
         // run over the same date range can't re-sum hours an earlier approved run already took.
+        // Phase 12.12 / ADR-023: only WORKED hours (is_worked_time) count toward the FLSA OT
+        // threshold; paid leave is summed separately (see below) and paid at straight time.
         const string sql = """
             SELECT te.work_date, SUM(te.duration) AS hours
             FROM   time_entry          te
             JOIN   lkp_time_entry_status s ON s.id = te.status_id
+            JOIN   lkp_time_category     c ON c.id = te.time_category_id
             WHERE  te.employment_id = @EmploymentId
               AND  te.work_date >= @PeriodStart
               AND  te.work_date <= @PeriodEnd
+              AND  c.is_worked_time = true
               AND  (s.code = 'APPROVED'
                     OR (s.code = 'LOCKED' AND te.payroll_run_id = @PayrollRunId))
             GROUP BY te.work_date
@@ -353,6 +325,36 @@ public sealed class TimeEntryRepository : ITimeEntryRepository
         });
 
         return rows.Select(r => (r.WorkDate, r.Hours)).ToList();
+    }
+
+    public async Task<decimal> GetApprovedNonWorkedPayableHoursByEmploymentAndPeriodAsync(
+        Guid employmentId, DateOnly periodStart, DateOnly periodEnd, Guid payrollRunId)
+    {
+        // Phase 12.12: paid leave (payable categories that are NOT is_worked_time — PTO/holiday/
+        // sick) is still paid (at straight time) but does not count toward the OT threshold.
+        // Same APPROVED / LOCKED-to-this-run rule as the worked-hours query; UNPAID excluded.
+        const string sql = """
+            SELECT COALESCE(SUM(te.duration), 0)
+            FROM   time_entry          te
+            JOIN   lkp_time_entry_status s ON s.id = te.status_id
+            JOIN   lkp_time_category     c ON c.id = te.time_category_id
+            WHERE  te.employment_id = @EmploymentId
+              AND  te.work_date >= @PeriodStart
+              AND  te.work_date <= @PeriodEnd
+              AND  c.is_worked_time = false
+              AND  c.payable        = true
+              AND  (s.code = 'APPROVED'
+                    OR (s.code = 'LOCKED' AND te.payroll_run_id = @PayrollRunId))
+            """;
+
+        using var conn = _connectionFactory.CreateConnection();
+        return await conn.ExecuteScalarAsync<decimal>(sql, new
+        {
+            EmploymentId = employmentId,
+            PeriodStart  = periodStart.ToDateTime(TimeOnly.MinValue),
+            PeriodEnd    = periodEnd.ToDateTime(TimeOnly.MinValue),
+            PayrollRunId = payrollRunId
+        });
     }
 
     // ── Phase 12.7 — lock-on-approve / unlock-on-cancel ─────────────────────────

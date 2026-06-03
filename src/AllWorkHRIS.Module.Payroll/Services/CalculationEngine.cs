@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using Microsoft.Extensions.Logging;
 using AllWorkHRIS.Core;
+using AllWorkHRIS.Core.Domain.Time;
 using AllWorkHRIS.Core.Pipeline;
 using AllWorkHRIS.Core.Temporal;
 using AllWorkHRIS.Module.Payroll.Domain.Earnings;
@@ -301,47 +302,33 @@ public sealed partial class CalculationEngine : ICalculationEngine
     {
         if (input.FlsaStatusCode != "NON_EXEMPT") return null;
 
-        var entries = await _hoursSource.GetApprovedHoursByEmploymentAndPeriodAsync(
+        // Phase 12.12 / ADR-023: overtime is computed on hours ACTUALLY WORKED (is_worked_time) —
+        // paid leave (PTO/holiday/sick) does not count toward the FLSA weekly threshold
+        // (cf. 29 CFR 778.218). The shared Core calculator (the same one T&A uses for display)
+        // splits the worked hours, so pay and display can't diverge.
+        var workedEntries = await _hoursSource.GetApprovedHoursByEmploymentAndPeriodAsync(
             input.EmploymentId, input.PayPeriodStart, input.PayPeriodEnd, input.RunId);
 
-        var (regHours, otHours) = ComputeOtSplit(entries, input.OtWeeklyThresholdHours, input.WorkWeekStartDay);
+        var (regWorkedHours, otHours) = OvertimeSplitCalculator.Compute(
+            workedEntries, input.OtWeeklyThresholdHours, input.WorkWeekStartDay);
+
+        // Non-worked but payable hours (PTO/holiday/sick) are STILL PAID — at straight time, and
+        // outside the OT threshold. Lumped into the straight-time (REG) hours for now; itemized
+        // leave earnings lines are a later enhancement. (UNPAID is excluded by the hours source.)
+        var nonWorkedPayableHours = await _hoursSource.GetApprovedNonWorkedPayableHoursByEmploymentAndPeriodAsync(
+            input.EmploymentId, input.PayPeriodStart, input.PayPeriodEnd, input.RunId);
+
+        var regHours = regWorkedHours + nonWorkedPayableHours;
 
         // base_rate is always the operative hourly rate — set at hire/comp-change time.
         // For salaried non-exempt employees it is pre-computed as annual_equivalent ÷ 2080.
         var hourlyRate = input.BaseRate;
 
         _logger.LogDebug(
-            "NON_EXEMPT hours for employment {EmploymentId}: reg={RegHours:F4} ot={OtHours:F4} rate={Rate:F4}",
-            input.EmploymentId, regHours, otHours, hourlyRate);
+            "NON_EXEMPT hours for employment {EmploymentId}: regWorked={RegWorked:F4} leave={Leave:F4} ot={OtHours:F4} rate={Rate:F4}",
+            input.EmploymentId, regWorkedHours, nonWorkedPayableHours, otHours, hourlyRate);
 
         return new NonExemptPayData(regHours, otHours, hourlyRate);
-    }
-
-    private static (decimal RegHours, decimal OtHours) ComputeOtSplit(
-        IReadOnlyList<(DateOnly WorkDate, decimal Hours)> entries, decimal otThreshold, int weekStartDay)
-    {
-        var regHours = 0m;
-        var otHours  = 0m;
-
-        // Group by FLSA workweek using the context-configured anchor day
-        foreach (var weekTotal in entries
-                     .GroupBy(e => GetWeekStart(e.WorkDate, weekStartDay))
-                     .Select(g => g.Sum(e => e.Hours)))
-        {
-            regHours += Math.Min(weekTotal, otThreshold);
-            otHours  += Math.Max(weekTotal - otThreshold, 0m);
-        }
-
-        return (regHours, otHours);
-    }
-
-    // Returns the date of the anchor day that starts the FLSA workweek containing the given date.
-    // weekStartDay: 0=Sunday, 1=Monday, … 6=Saturday (matches DayOfWeek integer values).
-    private static DateOnly GetWeekStart(DateOnly date, int weekStartDay)
-    {
-        var dow  = (int)date.DayOfWeek;
-        var diff = ((dow - weekStartDay) + 7) % 7;
-        return date.AddDays(-diff);
     }
 
     private Task<IReadOnlyList<EarningsResultLine>> StepBaseEarningsAsync(
