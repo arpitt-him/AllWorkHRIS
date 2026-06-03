@@ -129,7 +129,7 @@
                         </div>
                         <div class="detail-field">
                             <span class="detail-label">Workweek Start</span>
-                            <span class="detail-value">@WorkweekDayLabel(_curOt.WorkweekStartDay)</span>
+                            <span class="detail-value">@WorkweekDayLabel(DerivedWorkweekStartDay)</span>
                         </div>
                     }
                 </div>
@@ -168,12 +168,11 @@
                         </div>
                         <div class="form-field">
                             <label class="form-label">Workweek Start Day</label>
-                            <SfDropDownList TValue="int" TItem="DayOption" DataSource="@_dayOptions"
-                                           @bind-Value="_editWorkweekStartDay" Width="100%">
-                                <DropDownListFieldSettings Value="Value" Text="Label" />
-                            </SfDropDownList>
+                            <div style="padding:6px 0;font-weight:var(--font-weight-medium)">@WorkweekDayLabel(DerivedWorkweekStartDay)</div>
                             <span style="font-size:var(--font-size-sm);color:#6B7280">
-                                FLSA workweek anchor — every non-exempt employee in this group uses this day.
+                                FLSA workweek anchor — <strong>locked to the pay-period start day</strong> (ADR-026). Changing the
+                                workweek requires re-cutting the pay calendar, so it's not an in-place edit; create a new context with
+                                the intended start day instead.
                             </span>
                         </div>
                         <div class="form-field">
@@ -1288,6 +1287,12 @@
         };
     }
 
+    // ADR-026 (D1): the FLSA workweek anchor IS the pay-period start day-of-week — it is derived from
+    // the context's Effective Start Date, not configured independently. System.DayOfWeek (Sun=0..Sat=6)
+    // matches the app's workweek_start_day convention. Displayed read-only; standalone anchor editing
+    // is disabled until the calendar re-cut + transition machinery (ADR-026 D2–D4) is built.
+    private int DerivedWorkweekStartDay => _context is null ? 1 : (int)_context.EffectiveStartDate.DayOfWeek;
+
     private void BeginEditSettings()
     {
         if (_context is null) return;
@@ -1296,12 +1301,14 @@
         var cur                = CurrentOtConfig();
         _editOtThreshold       = cur.OtWeeklyThresholdHours;
         _editOtReviewThreshold = cur.OtReviewThresholdHours;
-        _editWorkweekStartDay  = cur.WorkweekStartDay;
+        // ADR-026: the anchor is NOT editable here — it is derived from the pay-period start day and
+        // saved as-is, so an OT-config edit can never drift the workweek off the period boundary.
+        _editWorkweekStartDay  = DerivedWorkweekStartDay;
         // Default the effective date forward-looking: the next workweek start on/after today, so a
         // routine edit takes effect at a clean week boundary (D7). The user can pick earlier for a
         // retroactive correction.
         var today              = DateOnly.FromDateTime(TemporalContext.GetOperativeDate());
-        var ws                 = OvertimeSplitCalculator.GetWeekStart(today, cur.WorkweekStartDay);
+        var ws                 = OvertimeSplitCalculator.GetWeekStart(today, _editWorkweekStartDay);
         _editEffectiveDate     = ws == today ? ws : ws.AddDays(7);
         _lastSavedEffectiveDate = null;   // drop any prior save confirmation while editing
         _settingsError        = null;
