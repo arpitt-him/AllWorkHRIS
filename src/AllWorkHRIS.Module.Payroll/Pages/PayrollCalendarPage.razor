@@ -171,14 +171,11 @@
                         </div>
                         <div class="form-field">
                             <label class="form-label">Workweek Start Day</label>
-                            <SfDropDownList TValue="int" TItem="IntOption"
-                                            DataSource="@_weekdayOptions"
-                                            @bind-Value="_newCtx.WorkweekStartDay"
-                                            Width="100%">
-                                <DropDownListFieldSettings Value="Value" Text="Label" />
-                            </SfDropDownList>
+                            <div style="padding:6px 0;font-weight:var(--font-weight-medium)">@_newCtx.EffectiveStartDate.DayOfWeek</div>
                             <span style="font-size:var(--font-size-sm);color:#6B7280">
-                                Pre-populated from the legal entity default. FLSA workweek anchor — every non-exempt employee in this group uses this day.
+                                FLSA workweek anchor — <strong>locked to the Effective Start Date's day of week</strong> (ADR-026):
+                                every pay period starts on this day and holds whole workweeks. To use a different anchor, pick an
+                                Effective Start Date that falls on that day.
                             </span>
                         </div>
                     }
@@ -407,7 +404,10 @@
                 ExtraPeriodPolicy       = _newCtx.ExtraPeriodPolicy,
                 OtWeeklyThresholdHours  = _newCtx.OtWeeklyThresholdHours,
                 OtReviewThresholdHours  = _newCtx.OtReviewThresholdHours,
-                WorkweekStartDay        = _newCtx.WorkweekStartDay,
+                // ADR-026 (D1): the FLSA workweek anchor IS the pay-period start day — derived from the
+                // Effective Start Date, never set independently — so every weekly/biweekly period holds
+                // whole workweeks. System.DayOfWeek (Sun=0..Sat=6) matches the workweek_start_day convention.
+                WorkweekStartDay        = (int)_newCtx.EffectiveStartDate.DayOfWeek,
                 CreatedBy               = _currentUserId,
                 CreationTimestamp       = now,
                 LastUpdatedBy           = _currentUserId,
