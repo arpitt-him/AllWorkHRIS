@@ -23,6 +23,12 @@ public interface IPayrollRunService
     Task<ReversalOutcome> ReverseRunAsync(ReversePayrollRunCommand command);
 
     /// <summary>
+    /// Reverse a selected subset of an approved run's employees (ADR-027 2a.3) — delegates to the
+    /// standalone <see cref="IPayrollCorrectionService"/>. The run stays approved if others remain.
+    /// </summary>
+    Task<ReversalOutcome> ReverseEmploymentResultsAsync(ReverseEmploymentResultsCommand command);
+
+    /// <summary>
     /// Re-enqueue a run stuck in an idempotent transient state (APPROVING or
     /// RELEASING) so the background job picks it up again without a host
     /// restart. The on-demand twin of PayrollRunJob's startup recovery.

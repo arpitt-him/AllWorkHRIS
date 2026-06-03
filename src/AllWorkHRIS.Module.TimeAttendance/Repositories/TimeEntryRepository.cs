@@ -425,6 +425,29 @@ public sealed class TimeEntryRepository : ITimeEntryRepository
         });
     }
 
+    // ADR-027 2a.3 — per-employee unlock: release only the SELECTED employees' entries locked to this
+    // run (LOCKED → APPROVED, clear run id), so a per-EE reversal frees just those employees' hours.
+    public async Task<int> UnlockHoursForEmploymentsInRunAsync(
+        Guid payrollRunId, IReadOnlyCollection<Guid> employmentIds, CancellationToken ct = default)
+    {
+        if (employmentIds.Count == 0) return 0;
+        var p = new DynamicParameters();
+        p.Add("PayrollRunId", payrollRunId);
+        p.Add("Now",          _temporal.GetOperativeNow());
+        var inList = BuildInClause(p, "emp", employmentIds);
+        var sql = $"""
+            UPDATE time_entry
+            SET    status_id      = (SELECT id FROM lkp_time_entry_status WHERE code = 'APPROVED'),
+                   payroll_run_id = NULL,
+                   updated_at     = @Now
+            WHERE  status_id      = (SELECT id FROM lkp_time_entry_status WHERE code = 'LOCKED')
+              AND  payroll_run_id = @PayrollRunId
+              AND  employment_id  IN {inList}
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        return await conn.ExecuteAsync(sql, p);
+    }
+
     private sealed record WorkedDayRow
     {
         public DateOnly WorkDate { get; init; }

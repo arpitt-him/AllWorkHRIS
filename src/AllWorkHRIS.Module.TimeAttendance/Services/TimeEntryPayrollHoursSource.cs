@@ -39,4 +39,8 @@ public sealed class TimeEntryPayrollHoursSource : IPayrollHoursSource
 
     public Task UnlockHoursForRunAsync(Guid payrollRunId, CancellationToken ct = default)
         => _timeEntryRepo.UnlockHoursForRunAsync(payrollRunId, ct);
+
+    public Task UnlockHoursForEmploymentsInRunAsync(
+        Guid payrollRunId, IReadOnlyCollection<Guid> employmentIds, CancellationToken ct = default)
+        => _timeEntryRepo.UnlockHoursForEmploymentsInRunAsync(payrollRunId, employmentIds, ct);
 }

@@ -196,8 +196,11 @@
                                     @(_submitting ? "Working…" : "Release")
                                 </button>
                                 <button class="btn-danger" style="border:1px solid var(--color-danger);border-radius:var(--radius-md);padding:var(--space-2) var(--space-4);"
-                                        @onclick="() => _showReverseConfirm = true" disabled="@_submitting">
+                                        @onclick="() => { _showReverseConfirm = true; _showReverseEmployees = false; }" disabled="@_submitting">
                                     Reverse Run
+                                </button>
+                                <button class="btn-secondary" @onclick="BeginReverseEmployees" disabled="@_submitting">
+                                    Reverse Employees…
                                 </button>
                             }
                             @if (_run.RunStatusId == _draftStatus || _run.RunStatusId == _calculatedStatus)
@@ -249,6 +252,43 @@
                                         @(_submitting ? "Reversing…" : "Confirm Reverse")
                                     </button>
                                     <button class="btn-secondary" @onclick="@(() => { _showReverseConfirm = false; _reverseReason = string.Empty; })">Cancel</button>
+                                </div>
+                            </div>
+                        }
+
+                        @* ADR-027 2a.3 — reverse selected employees (per-EE; the run stays approved for the rest) *@
+                        @if (_showReverseEmployees)
+                        {
+                            <div style="margin-top:var(--space-3);border-top:1px solid #e5e7eb;padding-top:var(--space-3)">
+                                <div style="font-weight:var(--font-weight-medium);margin-bottom:var(--space-2)">Reverse selected employees</div>
+                                <div style="font-size:var(--font-size-sm);color:#6B7280;max-width:640px;margin-bottom:var(--space-2)">
+                                    Contra-posts only the selected employees' results (YTD restored to pre-run), marks them
+                                    <strong>Reversed</strong>, and returns their hours to the pool. The run stays
+                                    <strong>Approved</strong> for everyone else.
+                                </div>
+                                <div style="max-height:240px;overflow:auto;border:1px solid #E5E7EB;border-radius:4px;padding:var(--space-2);margin-bottom:var(--space-2);max-width:480px">
+                                    @foreach (var r in _results.Where(r => r.ResultStatusId == _approvedResultStatus))
+                                    {
+                                        <label style="display:flex;align-items:center;gap:8px;padding:2px 0;font-size:var(--font-size-sm)">
+                                            <input type="checkbox" checked="@_selectedReverseEmps.Contains(r.EmploymentId)"
+                                                   @onchange="e => ToggleReverseEmp(r.EmploymentId, (bool)e.Value!)" />
+                                            @GetEmployeeName(r.EmploymentId)
+                                        </label>
+                                    }
+                                    @if (!_results.Any(r => r.ResultStatusId == _approvedResultStatus))
+                                    {
+                                        <span style="font-size:var(--font-size-sm);color:#6B7280">No standing (approved) employee results to reverse.</span>
+                                    }
+                                </div>
+                                <textarea @bind="_reverseReason" rows="2" placeholder="Reason (required)"
+                                          style="width:100%;max-width:640px;margin-bottom:var(--space-2)"></textarea>
+                                <div class="form-actions">
+                                    <button class="btn-danger" style="border:1px solid var(--color-danger);border-radius:var(--radius-md);padding:var(--space-2) var(--space-4);"
+                                            @onclick="ReverseEmployeesAsync"
+                                            disabled="@(_submitting || _selectedReverseEmps.Count == 0 || string.IsNullOrWhiteSpace(_reverseReason))">
+                                        @(_submitting ? "Reversing…" : $"Reverse {_selectedReverseEmps.Count} Employee(s)")
+                                    </button>
+                                    <button class="btn-secondary" @onclick="CancelReverseEmployees">Cancel</button>
                                 </div>
                             </div>
                         }
@@ -433,6 +473,7 @@
         _reversedStatus    = Status("REVERSED");
         _statusById        = LookupCache.GetAll(LookupTables.RunStatus).ToDictionary(e => e.Id);
         _resultStatusById  = LookupCache.GetAll(LookupTables.EmployeeResultStatus).ToDictionary(e => e.Id);
+        _approvedResultStatus = LookupCache.GetId(LookupTables.EmployeeResultStatus, "APPROVED");
 
         var auth = await AuthState.GetAuthenticationStateAsync();
         var sub  = auth.User.FindFirst("sub")?.Value;
@@ -543,6 +584,50 @@
     // ADR-027 — reverse an approved run (delegates to the correction service via the run service).
     private bool   _showReverseConfirm;
     private string _reverseReason = string.Empty;
+
+    // ADR-027 2a.3 — reverse selected employees (per-EE).
+    private bool          _showReverseEmployees;
+    private HashSet<Guid> _selectedReverseEmps = [];
+    private int           _approvedResultStatus;
+
+    private void BeginReverseEmployees()
+    {
+        _selectedReverseEmps  = [];
+        _reverseReason        = string.Empty;
+        _showReverseConfirm   = false;   // mutually exclusive with the whole-run confirm
+        _showReverseEmployees = true;
+    }
+
+    private void CancelReverseEmployees()
+    {
+        _showReverseEmployees = false;
+        _selectedReverseEmps  = [];
+        _reverseReason        = string.Empty;
+    }
+
+    private void ToggleReverseEmp(Guid employmentId, bool selected)
+    {
+        if (selected) _selectedReverseEmps.Add(employmentId);
+        else          _selectedReverseEmps.Remove(employmentId);
+    }
+
+    private async Task ReverseEmployeesAsync()
+    {
+        if (_selectedReverseEmps.Count == 0 || string.IsNullOrWhiteSpace(_reverseReason)) return;
+        _submitting   = true;
+        _errorMessage = null;
+        try
+        {
+            await RunService.ReverseEmploymentResultsAsync(new ReverseEmploymentResultsCommand
+                { RunId = RunId, EmploymentIds = _selectedReverseEmps.ToList(), ReversedBy = _currentUserId, Reason = _reverseReason.Trim() });
+            _showReverseEmployees = false;
+            _selectedReverseEmps  = [];
+            _reverseReason        = string.Empty;
+            await LoadRunAsync();
+        }
+        catch (Exception ex) { _errorMessage = ex.Message; }
+        finally { _submitting = false; }
+    }
 
     private async Task ReverseAsync()
     {

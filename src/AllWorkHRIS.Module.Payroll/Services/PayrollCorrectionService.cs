@@ -81,6 +81,7 @@ public sealed class PayrollCorrectionService : IPayrollCorrectionService
         var results  = await _resultRepo.GetByRunIdAsync(runId);
         var targetSet = employmentIds?.ToHashSet();   // null ⇒ all
         var reversedIds = new List<Guid>();
+        var reversedEmployments = new List<Guid>();
 
         // Contra-post each *selected* standing (APPROVED) result. ReverseAsync inserts negating impact
         // rows and reverts balances to their pre-run value (forward-only — no deletes). Each call is
@@ -93,21 +94,29 @@ public sealed class PayrollCorrectionService : IPayrollCorrectionService
             await _accumulator.ReverseAsync(result.EmployeePayrollResultId, reversedBy, ct);
             await _resultRepo.UpdateStatusAsync(result.EmployeePayrollResultId, reversedResultId);
             reversedIds.Add(result.EmployeePayrollResultId);
+            reversedEmployments.Add(result.EmploymentId);
             ct.ThrowIfCancellationRequested();
         }
 
         // The run becomes REVERSED only when no standing (APPROVED) result remains — i.e. a full
-        // reverse (or a partial that happened to cover everyone). Then the period reopens and the
-        // run's locks release. A partial reversal leaves the run APPROVED (still covers the rest).
+        // reverse (or a partial that happened to cover everyone), and the period reopens. A partial
+        // reversal leaves the run APPROVED (it still covers the employees not reversed).
         var standingRemaining = results.Count(r =>
             r.ResultStatusId == approvedResultId &&
             (targetSet is null ? false : !targetSet.Contains(r.EmploymentId)));
         var fullyReversed = reversedIds.Count > 0 && standingRemaining == 0;
 
+        // Release time-entry locks so the reversed hours return to the pool for a re-pay. A full
+        // reverse releases the whole run (also any FAILED-result employees' locks); a partial reverse
+        // releases only the reversed employees, leaving the still-paid employees' hours locked.
         if (fullyReversed)
         {
             await _runRepo.UpdateStatusAsync(runId, reversedRunId, reversedBy);
             await _hoursSource.UnlockHoursForRunAsync(runId, ct);
+        }
+        else if (reversedEmployments.Count > 0)
+        {
+            await _hoursSource.UnlockHoursForEmploymentsInRunAsync(runId, reversedEmployments, ct);
         }
 
         _logger.LogInformation(

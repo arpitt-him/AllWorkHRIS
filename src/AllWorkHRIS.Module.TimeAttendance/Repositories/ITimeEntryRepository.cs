@@ -28,6 +28,11 @@ public interface ITimeEntryRepository
     Task<int>                     LockHoursForRunAsync(Guid payrollRunId, IReadOnlyList<Guid> employmentIds, DateOnly periodStart, DateOnly periodEnd, CancellationToken ct = default);
     /// <summary>Releases every entry locked to the run (LOCKED → APPROVED, clear run id). Returns the count.</summary>
     Task<int>                     UnlockHoursForRunAsync(Guid payrollRunId, CancellationToken ct = default);
+
+    /// <summary>ADR-027 2a.3 — release only the selected employees' entries locked to this run
+    /// (LOCKED → APPROVED), so a per-employee reversal frees just those employees' hours.</summary>
+    Task<int>                     UnlockHoursForEmploymentsInRunAsync(
+        Guid payrollRunId, IReadOnlyCollection<Guid> employmentIds, CancellationToken ct = default);
     Task<bool>                    EmploymentExistsAsync(Guid employmentId);
     Task<string?>                 GetPeriodStatusAsync(Guid payrollPeriodId);
     Task<string?>                 GetFlsaStatusAsync(Guid employmentId);

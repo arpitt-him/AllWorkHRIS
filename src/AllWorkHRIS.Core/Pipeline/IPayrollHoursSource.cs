@@ -63,4 +63,12 @@ public interface IPayrollHoursSource
     /// Closes the stranded-lock gap.
     /// </summary>
     Task UnlockHoursForRunAsync(Guid payrollRunId, CancellationToken ct = default);
+
+    /// <summary>
+    /// ADR-027 2a.3 — release only the selected employees' entries locked to the run (LOCKED →
+    /// APPROVED, clear the run id), so a per-employee reversal returns just those employees' hours
+    /// to the pool (vs <see cref="UnlockHoursForRunAsync"/>, which releases the whole run).
+    /// </summary>
+    Task UnlockHoursForEmploymentsInRunAsync(
+        Guid payrollRunId, IReadOnlyCollection<Guid> employmentIds, CancellationToken ct = default);
 }

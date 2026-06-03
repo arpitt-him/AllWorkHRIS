@@ -333,6 +333,15 @@ public sealed class PayrollRunService : IPayrollRunService
             Reason     = command.Reason
         });
 
+    public Task<ReversalOutcome> ReverseEmploymentResultsAsync(ReverseEmploymentResultsCommand command)
+        => _correctionService.ReverseResultsAsync(new ReverseResultsRequest
+        {
+            RunId         = command.RunId,
+            EmploymentIds = command.EmploymentIds,
+            ReversedBy    = command.ReversedBy,
+            Reason        = command.Reason
+        });
+
     public Task<PayrollRun?> GetRunByIdAsync(Guid runId)
         => _runRepo.GetByIdAsync(runId);
 

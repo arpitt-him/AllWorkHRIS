@@ -31,4 +31,8 @@ internal sealed class StandardHoursPayrollHoursSource : IPayrollHoursSource
 
     public Task UnlockHoursForRunAsync(Guid payrollRunId, CancellationToken ct = default)
         => Task.CompletedTask;
+
+    public Task UnlockHoursForEmploymentsInRunAsync(
+        Guid payrollRunId, IReadOnlyCollection<Guid> employmentIds, CancellationToken ct = default)
+        => Task.CompletedTask;
 }
