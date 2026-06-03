@@ -1567,6 +1567,113 @@ public sealed class PayrollContextRepository : IPayrollContextRepository
         return rows.ToList();
     }
 
+    // ── Phase 12.13.4b — OT-eligible category set editor ────────────────────────
+    public async Task<IReadOnlyList<OtCategoryOption>> GetSelectableOtCategoriesAsync()
+    {
+        // lkp_time_category is a shared reference table (Core LookupTables.TimeCategory). Only
+        // payable, active categories are candidates — OT eligibility on a non-payable category
+        // (e.g. UNPAID) is meaningless. is_worked_time marks the default-set members.
+        const string sql = """
+            SELECT id AS Id, code AS Code, label AS Label, is_worked_time AS IsWorkedTime
+            FROM   lkp_time_category
+            WHERE  payable = true AND is_active = true
+            ORDER  BY sort_order, code
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        var rows = await conn.QueryAsync<OtCategoryOption>(sql);
+        return rows.ToList();
+    }
+
+    public async Task<IReadOnlyList<DatedOtEligibleRow>> GetDatedOtEligibleHistoryAsync(Guid payrollContextId)
+    {
+        const string sql = """
+            SELECT e.effective_date AS EffectiveDate,
+                   e.end_date       AS EndDate,
+                   e.time_category_id AS TimeCategoryId,
+                   c.code           AS CategoryCode,
+                   c.label          AS CategoryLabel
+            FROM   payroll_context_ot_eligible_category e
+            JOIN   lkp_time_category c ON c.id = e.time_category_id
+            WHERE  e.payroll_context_id = @ContextId
+            ORDER  BY e.effective_date DESC, c.sort_order, c.code
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        var rows = await conn.QueryAsync<DatedOtEligibleRow>(sql, new { ContextId = payrollContextId });
+        return rows.ToList();
+    }
+
+    public async Task<DateOnly> SaveDatedOtEligibleSetAsync(
+        Guid payrollContextId, IReadOnlyCollection<int> categoryIds, int workweekStartDay,
+        DateOnly requestedEffectiveDate, DateOnly operativeToday, Guid updatedBy)
+    {
+        // D7: snap forward to the first workweek start on/after the requested date.
+        var weekStart = OvertimeSplitCalculator.GetWeekStart(requestedEffectiveDate, workweekStartDay);
+        var effective = weekStart == requestedEffectiveDate ? weekStart : weekStart.AddDays(7);
+
+        using var conn = _connectionFactory.CreateConnection();
+        using var tx   = conn.BeginTransaction();
+
+        // Replace any generation that already starts on this effective date (delete-then-insert).
+        await conn.ExecuteAsync(
+            "DELETE FROM payroll_context_ot_eligible_category WHERE payroll_context_id = @ContextId AND effective_date = @Effective",
+            new { ContextId = payrollContextId, Effective = effective }, tx);
+
+        // Bound the new generation by the next future generation (if any); else open-ended.
+        var nextEff = await conn.QueryFirstOrDefaultAsync<DateOnly?>(
+            """
+            SELECT MIN(effective_date) FROM payroll_context_ot_eligible_category
+            WHERE  payroll_context_id = @ContextId AND effective_date > @Effective
+            """,
+            new { ContextId = payrollContextId, Effective = effective }, tx);
+        DateOnly? newEnd = nextEff.HasValue ? nextEff.Value.AddDays(-1) : (DateOnly?)null;
+
+        // Close every currently-open generation that starts before this date at the day before.
+        await conn.ExecuteAsync(
+            """
+            UPDATE payroll_context_ot_eligible_category
+            SET    end_date = @CloseAt
+            WHERE  payroll_context_id = @ContextId
+              AND  effective_date < @Effective
+              AND  (end_date IS NULL OR end_date >= @Effective)
+            """,
+            new { ContextId = payrollContextId, Effective = effective, CloseAt = effective.AddDays(-1) }, tx);
+
+        // Open the new generation — one row per selected category. An empty selection inserts no
+        // rows ⇒ the resolved set is empty from here ⇒ consumers fall back to is_worked_time.
+        foreach (var categoryId in categoryIds.Distinct())
+        {
+            await conn.ExecuteAsync(
+                """
+                INSERT INTO payroll_context_ot_eligible_category (
+                    payroll_context_ot_eligible_category_id, payroll_context_id, effective_date, end_date,
+                    time_category_id, created_by, creation_timestamp)
+                VALUES (@Id, @ContextId, @Effective, @End, @CatId, @CreatedBy, CURRENT_TIMESTAMP)
+                """,
+                new
+                {
+                    Id = Guid.NewGuid(), ContextId = payrollContextId, Effective = effective, End = newEnd,
+                    CatId = categoryId, CreatedBy = updatedBy
+                }, tx);
+        }
+
+        tx.Commit();
+
+        await _auditService.LogAsync(new AuditEventRecord(
+            EventType:     "UPDATE",
+            EntityType:    "PayrollContext",
+            EntityId:      payrollContextId,
+            ModuleName:    "PAYROLL",
+            ChangeSummary: $"OT-eligible category set changed effective {effective:yyyy-MM-dd}: {(categoryIds.Count == 0 ? "reverted to default (is_worked_time)" : categoryIds.Count + " categories")}",
+            AfterJson:     JsonSerializer.Serialize(new
+            {
+                effective_date = effective.ToString("yyyy-MM-dd"),
+                category_ids   = categoryIds.Distinct().OrderBy(x => x).ToArray()
+            })
+        ));
+
+        return effective;
+    }
+
     public async Task<PayrollPeriod?> GetPeriodByIdAsync(Guid periodId)
     {
         const string sql = "SELECT * FROM payroll_period WHERE period_id = @PeriodId";

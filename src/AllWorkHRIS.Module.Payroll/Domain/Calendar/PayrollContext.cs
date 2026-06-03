@@ -38,3 +38,24 @@ public sealed record DatedOtConfigRow
     public int       WorkweekStartDay       { get; init; }
     public decimal?  OtReviewThresholdHours { get; init; }
 }
+
+// ADR-024 / Phase 12.13.4b: a selectable time category for the OT-eligible-set editor. IsWorkedTime
+// marks the default-set members (REGULAR/OVERTIME) so the UI can flag them.
+public sealed record OtCategoryOption
+{
+    public int    Id           { get; init; }
+    public string Code         { get; init; } = default!;
+    public string Label        { get; init; } = default!;
+    public bool   IsWorkedTime { get; init; }
+}
+
+// ADR-024 / Phase 12.13.4b: one row of the effective-dated OT-eligible set (a category within an
+// interval), joined to its category code/label for the timeline. The page groups by interval.
+public sealed record DatedOtEligibleRow
+{
+    public DateOnly  EffectiveDate { get; init; }
+    public DateOnly? EndDate       { get; init; }
+    public int       TimeCategoryId { get; init; }
+    public string    CategoryCode  { get; init; } = default!;
+    public string    CategoryLabel { get; init; } = default!;
+}

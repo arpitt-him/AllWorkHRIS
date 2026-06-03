@@ -303,8 +303,14 @@ public sealed class TimeEntryRepository : ITimeEntryRepository
         // leave is summed separately (see below) and paid at straight time.
         // Phase 12.13.4 / ADR-024: the OT basis is membership in the resolved per-context eligible
         // set; an empty set falls back to the is_worked_time flag (today's behavior).
-        var hasSet = otEligibleCategoryIds.Count > 0;
-        var eligiblePredicate = hasSet ? "c.id IN @EligibleIds" : "c.is_worked_time = true";
+        var p = new DynamicParameters();
+        p.Add("EmploymentId", employmentId);
+        p.Add("PeriodStart",  periodStart.ToDateTime(TimeOnly.MinValue));
+        p.Add("PeriodEnd",    periodEnd.ToDateTime(TimeOnly.MinValue));
+        p.Add("PayrollRunId", payrollRunId);
+        var eligiblePredicate = otEligibleCategoryIds.Count > 0
+            ? $"c.id IN {SqlInList.BuildInts(p, otEligibleCategoryIds, "elig")}"
+            : "c.is_worked_time = true";
         var sql = $"""
             SELECT te.work_date, SUM(te.duration) AS hours
             FROM   time_entry          te
@@ -321,14 +327,7 @@ public sealed class TimeEntryRepository : ITimeEntryRepository
             """;
 
         using var conn = _connectionFactory.CreateConnection();
-        var rows = await conn.QueryAsync<WorkedDayRow>(sql, new
-        {
-            EmploymentId = employmentId,
-            PeriodStart  = periodStart.ToDateTime(TimeOnly.MinValue),
-            PeriodEnd    = periodEnd.ToDateTime(TimeOnly.MinValue),
-            PayrollRunId = payrollRunId,
-            EligibleIds  = otEligibleCategoryIds
-        });
+        var rows = await conn.QueryAsync<WorkedDayRow>(sql, p);
 
         return rows.Select(r => (r.WorkDate, r.Hours)).ToList();
     }
@@ -342,8 +341,14 @@ public sealed class TimeEntryRepository : ITimeEntryRepository
         // APPROVED / LOCKED-to-this-run rule as the worked-hours query; UNPAID excluded.
         // Phase 12.13.4: the non-eligible bucket is the complement of the resolved set over payable
         // categories; an empty set falls back to "payable and not is_worked_time" (today's behavior).
-        var hasSet = otEligibleCategoryIds.Count > 0;
-        var nonEligiblePredicate = hasSet ? "c.id NOT IN @EligibleIds" : "c.is_worked_time = false";
+        var p = new DynamicParameters();
+        p.Add("EmploymentId", employmentId);
+        p.Add("PeriodStart",  periodStart.ToDateTime(TimeOnly.MinValue));
+        p.Add("PeriodEnd",    periodEnd.ToDateTime(TimeOnly.MinValue));
+        p.Add("PayrollRunId", payrollRunId);
+        var nonEligiblePredicate = otEligibleCategoryIds.Count > 0
+            ? $"c.id NOT IN {SqlInList.BuildInts(p, otEligibleCategoryIds, "elig")}"
+            : "c.is_worked_time = false";
         var sql = $"""
             SELECT COALESCE(SUM(te.duration), 0)
             FROM   time_entry          te
@@ -359,14 +364,7 @@ public sealed class TimeEntryRepository : ITimeEntryRepository
             """;
 
         using var conn = _connectionFactory.CreateConnection();
-        return await conn.ExecuteScalarAsync<decimal>(sql, new
-        {
-            EmploymentId = employmentId,
-            PeriodStart  = periodStart.ToDateTime(TimeOnly.MinValue),
-            PeriodEnd    = periodEnd.ToDateTime(TimeOnly.MinValue),
-            PayrollRunId = payrollRunId,
-            EligibleIds  = otEligibleCategoryIds
-        });
+        return await conn.ExecuteScalarAsync<decimal>(sql, p);
     }
 
     // ── Phase 12.7 — lock-on-approve / unlock-on-cancel ─────────────────────────

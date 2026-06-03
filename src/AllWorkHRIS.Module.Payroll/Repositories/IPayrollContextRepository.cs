@@ -62,4 +62,28 @@ public interface IPayrollContextRepository
     /// first — the history + any scheduled future change shown on the pay-calendar detail page.
     /// </summary>
     Task<IReadOnlyList<DatedOtConfigRow>> GetDatedOtConfigHistoryAsync(Guid payrollContextId);
+
+    /// <summary>
+    /// Payable, active time categories selectable for the OT-eligible set editor (Phase 12.13.4b),
+    /// ordered for display; <c>IsWorkedTime</c> marks the default-set members (REGULAR/OVERTIME).
+    /// </summary>
+    Task<IReadOnlyList<OtCategoryOption>> GetSelectableOtCategoriesAsync();
+
+    /// <summary>
+    /// The effective-dated OT-eligible-set rows for a context (Phase 12.13.4b), joined to category
+    /// code/label, newest interval first — the timeline of set "generations" shown on the page.
+    /// </summary>
+    Task<IReadOnlyList<DatedOtEligibleRow>> GetDatedOtEligibleHistoryAsync(Guid payrollContextId);
+
+    /// <summary>
+    /// Replace the OT-eligible time-category set as-of a date (Phase 12.13.4b): snap the requested
+    /// date forward to a workweek boundary (D7, using <paramref name="workweekStartDay"/>), close the
+    /// currently-open generation at the day before, and open a new generation with
+    /// <paramref name="categoryIds"/> (bounded by any later generation). An empty set means "revert
+    /// to default" — the resolver returns empty ⇒ consumers fall back to <c>is_worked_time</c>.
+    /// Returns the actual (snapped) effective date.
+    /// </summary>
+    Task<DateOnly> SaveDatedOtEligibleSetAsync(
+        Guid payrollContextId, IReadOnlyCollection<int> categoryIds, int workweekStartDay,
+        DateOnly requestedEffectiveDate, DateOnly operativeToday, Guid updatedBy);
 }

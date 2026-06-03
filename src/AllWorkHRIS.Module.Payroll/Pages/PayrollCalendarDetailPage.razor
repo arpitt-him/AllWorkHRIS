@@ -115,17 +115,21 @@
                     </div>
                     @if (!_isSalary)
                     {
+                        @* Show the value in force as-of the operative date (resolved from the dated
+                           rows), not the scalar cache — which is only re-synced on save and goes stale
+                           once a scheduled change's effective date passes (Phase 12.13.3). *@
+                        var _curOt = CurrentOtConfig();
                         <div class="detail-field">
                             <span class="detail-label">OT Threshold</span>
-                            <span class="detail-value">@_context.OtWeeklyThresholdHours.ToString("0.##") hrs / week</span>
+                            <span class="detail-value">@_curOt.OtWeeklyThresholdHours.ToString("0.##") hrs / week</span>
                         </div>
                         <div class="detail-field">
                             <span class="detail-label">OT Review Trigger</span>
-                            <span class="detail-value">@(_context.OtReviewThresholdHours.HasValue ? _context.OtReviewThresholdHours.Value.ToString("0.##") + " hrs" : "—")</span>
+                            <span class="detail-value">@(_curOt.OtReviewThresholdHours.HasValue ? _curOt.OtReviewThresholdHours.Value.ToString("0.##") + " hrs" : "—")</span>
                         </div>
                         <div class="detail-field">
                             <span class="detail-label">Workweek Start</span>
-                            <span class="detail-value">@WorkweekDayLabel(_context.WorkweekStartDay)</span>
+                            <span class="detail-value">@WorkweekDayLabel(_curOt.WorkweekStartDay)</span>
                         </div>
                     }
                 </div>
@@ -223,12 +227,23 @@
             @* ── Effective-dated OT-config history / scheduled changes ─────────── *@
             @if (!_isSalary && _otConfigHistory.Count > 0)
             {
-                var _todayHist = DateOnly.FromDateTime(TemporalContext.GetOperativeDate());
+                var _todayHist  = DateOnly.FromDateTime(TemporalContext.GetOperativeDate());
+                var _schedCount = _otConfigHistory.Count(r => r.EffectiveDate > _todayHist);
                 <div style="margin-top:var(--space-4)">
-                    <div style="font-size:var(--font-size-sm);font-weight:var(--font-weight-medium);color:#374151;margin-bottom:var(--space-2)">
-                        Overtime configuration timeline
-                    </div>
-                    <div style="width:62.5%;min-width:520px;border:1px solid #E3E8EF;border-radius:4px;background:#fff;overflow:hidden">
+                    <button type="button" @onclick="() => _otConfigTimelineExpanded = !_otConfigTimelineExpanded"
+                            style="background:none;border:none;padding:0;cursor:pointer;display:flex;align-items:center;gap:8px;text-align:left;color:inherit">
+                        <span style="color:#9CA3AF;font-size:12px;width:10px">@(_otConfigTimelineExpanded ? "▾" : "▸")</span>
+                        <span style="font-size:var(--font-size-sm);font-weight:var(--font-weight-medium);color:#374151">Overtime configuration timeline</span>
+                        @if (!_otConfigTimelineExpanded)
+                        {
+                            <span style="font-size:var(--font-size-sm);color:#6B7280">
+                                — @_otConfigHistory.Count entr@(_otConfigHistory.Count == 1 ? "y" : "ies")@(_schedCount > 0 ? $" · {_schedCount} scheduled" : "")
+                            </span>
+                        }
+                    </button>
+                    @if (_otConfigTimelineExpanded)
+                    {
+                    <div style="width:62.5%;min-width:520px;border:1px solid #E3E8EF;border-radius:4px;background:#fff;overflow:hidden;margin-top:var(--space-2)">
                         <table style="width:100%;border-collapse:collapse;font-size:var(--font-size-sm)">
                             <thead>
                                 <tr style="background:#F9FAFB;color:#6B7280;text-align:left">
@@ -277,6 +292,169 @@
                             </tbody>
                         </table>
                     </div>
+                    }
+                </div>
+            }
+
+            @* ── Phase 12.13.4b — OT-eligible category set (advanced) ───────────── *@
+            @if (!_isSalary)
+            {
+                var _curEligible = CurrentEligibleCategoryIds();
+                var _todayElig   = DateOnly.FromDateTime(TemporalContext.GetOperativeDate());
+                <div style="margin-top:var(--space-5);border-top:1px solid #e5e7eb;padding-top:var(--space-4)">
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:var(--space-3)">
+                        <button type="button" @onclick="() => _eligibleExpanded = !_eligibleExpanded"
+                                style="background:none;border:none;padding:0;cursor:pointer;display:flex;align-items:center;gap:8px;text-align:left;color:inherit">
+                            <span style="color:#9CA3AF;font-size:12px;width:10px">@(_eligibleExpanded ? "▾" : "▸")</span>
+                            <span style="font-size:var(--font-size-base);font-weight:var(--font-weight-medium)">
+                                Overtime-eligible categories
+                                <span style="font-weight:400;color:#9CA3AF;font-size:var(--font-size-sm)">· advanced</span>
+                            </span>
+                            @if (!_eligibleExpanded)
+                            {
+                                <span style="font-size:var(--font-size-sm);color:#6B7280">
+                                    — @(_curEligible.Count == 0 ? "worked time only" : string.Join(", ", _otCategories.Where(c => _curEligible.Contains(c.Id)).Select(c => c.Label)))
+                                </span>
+                            }
+                        </button>
+                        @if (_eligibleExpanded && !_showEditEligible && !_showEditSettings && !_showGenerateForm && !_showDeleteConfirm && !_showClearConfirm)
+                        {
+                            <button class="btn-secondary" style="white-space:nowrap" @onclick="BeginEditEligible">Edit</button>
+                        }
+                    </div>
+
+                    @if (_eligibleExpanded)
+                    {
+                    <div style="font-size:var(--font-size-sm);color:#6B7280;max-width:640px;margin-top:var(--space-2)">
+                        Which time categories count toward the FLSA overtime threshold. Default is worked time
+                        (Regular/Overtime); a union/CBA policy may add others (e.g. Holiday). Paid leave is always
+                        paid — this only changes whether a category counts toward OT.
+                    </div>
+
+                    <div style="margin-top:var(--space-2);font-size:var(--font-size-sm)">
+                        @if (_curEligible.Count == 0)
+                        {
+                            <span style="color:#6B7280">Default — <strong>worked time only</strong> (Regular / Overtime).</span>
+                        }
+                        else
+                        {
+                            @foreach (var c in _otCategories.Where(c => _curEligible.Contains(c.Id)))
+                            {
+                                <span style="display:inline-block;font-size:12px;padding:2px 8px;margin:0 4px 4px 0;border-radius:10px;background:#F3F4F6;border:1px solid #E5E7EB">@c.Label</span>
+                            }
+                        }
+                    </div>
+
+                    @if (_showEditEligible)
+                    {
+                        <div style="border-top:1px dashed #e5e7eb;padding-top:var(--space-3);margin-top:var(--space-3)">
+                            <div style="display:flex;flex-wrap:wrap;gap:8px 20px;margin-bottom:var(--space-3)">
+                                @foreach (var c in _otCategories)
+                                {
+                                    <label style="display:flex;align-items:center;gap:6px;font-size:var(--font-size-sm)">
+                                        <input type="checkbox" checked="@_editEligibleSelected.Contains(c.Id)"
+                                               @onchange="e => ToggleEligibleCategory(c.Id, (bool)e.Value!)" />
+                                        @c.Label
+                                        @if (c.IsWorkedTime) { <span style="color:#9CA3AF;font-size:11px">(default)</span> }
+                                    </label>
+                                }
+                            </div>
+                            <div class="form-field" style="max-width:240px;margin-bottom:var(--space-3)">
+                                <label class="form-label">Effective From</label>
+                                <SfDatePicker TValue="DateOnly" @bind-Value="_editEligibleEffectiveDate" Format="yyyy-MM-dd" Width="100%" />
+                            </div>
+                            @{
+                                var _snapE = SnappedEligibleEffectiveDate;
+                            }
+                            <div style="font-size:var(--font-size-sm);margin-bottom:var(--space-3);padding:var(--space-2) var(--space-3);border-radius:4px;background:#F9FAFB;border:1px solid #E5E7EB;color:#374151">
+                                @if (_snapE != _editEligibleEffectiveDate)
+                                {
+                                    <text>Snaps forward to the workweek start <strong>@_snapE.ToString("yyyy-MM-dd")</strong>. </text>
+                                }
+                                @if (_editEligibleSelected.Count == 0)
+                                {
+                                    <text>⚠️ No categories selected — reverts to the default (worked time only) from @_snapE.ToString("yyyy-MM-dd").</text>
+                                }
+                                else if (_snapE > _todayElig)
+                                {
+                                    <text>📅 <strong>Scheduled</strong> — @_editEligibleSelected.Count categories effective @_snapE.ToString("yyyy-MM-dd"); current set stays in force until then.</text>
+                                }
+                                else
+                                {
+                                    <text>✅ <strong>Effective now</strong> — applies from the current workweek (@_snapE.ToString("yyyy-MM-dd")).</text>
+                                }
+                            </div>
+                            @if (_eligibleError is not null)
+                            {
+                                <div class="alert-error" style="margin-bottom:var(--space-3)">@_eligibleError</div>
+                            }
+                            <div class="form-actions">
+                                <button class="btn-primary" @onclick="SaveEligibleSetAsync" disabled="@_submitting">
+                                    @(_submitting ? "Saving…" : "Save Categories")
+                                </button>
+                                <button class="btn-secondary" @onclick="CancelEditEligible">Cancel</button>
+                            </div>
+                        </div>
+                    }
+
+                    @if (_lastSavedEligibleEffectiveDate is { } _savedE && !_showEditEligible)
+                    {
+                        <div style="margin-top:var(--space-2);font-size:var(--font-size-sm);color:#047857">
+                            ✅ Saved — effective <strong>@_savedE.ToString("yyyy-MM-dd")</strong>.
+                        </div>
+                    }
+
+                    @if (_otEligibleHistory.Count > 0)
+                    {
+                        <div style="margin-top:var(--space-3)">
+                            <div style="font-size:var(--font-size-sm);font-weight:var(--font-weight-medium);color:#374151;margin-bottom:var(--space-2)">
+                                Eligibility timeline
+                            </div>
+                            <div style="width:62.5%;min-width:520px;border:1px solid #E3E8EF;border-radius:4px;background:#fff;overflow:hidden">
+                                <table style="width:100%;border-collapse:collapse;font-size:var(--font-size-sm)">
+                                    <thead>
+                                        <tr style="background:#F9FAFB;color:#6B7280;text-align:left">
+                                            <th style="padding:6px 12px;font-weight:var(--font-weight-medium)">Effective</th>
+                                            <th style="padding:6px 12px;font-weight:var(--font-weight-medium)">Until</th>
+                                            <th style="padding:6px 12px;font-weight:var(--font-weight-medium)">Categories</th>
+                                            <th style="padding:6px 12px;font-weight:var(--font-weight-medium)"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var gen in _otEligibleHistory
+                                            .GroupBy(r => (r.EffectiveDate, r.EndDate))
+                                            .OrderByDescending(g => g.Key.EffectiveDate))
+                                        {
+                                            var _isCur = gen.Key.EffectiveDate <= _todayElig && (gen.Key.EndDate is null || gen.Key.EndDate >= _todayElig);
+                                            var _isFut = gen.Key.EffectiveDate > _todayElig;
+                                            <tr style="border-top:1px solid #EEF1F5">
+                                                <td style="padding:6px 12px">
+                                                    @if (gen.Key.EffectiveDate.Year <= 1)
+                                                    {
+                                                        <text>@_context!.EffectiveStartDate.ToString("yyyy-MM-dd") <span style="color:#9CA3AF;font-size:11px">(initial)</span></text>
+                                                    }
+                                                    else { @gen.Key.EffectiveDate.ToString("yyyy-MM-dd") }
+                                                </td>
+                                                <td style="padding:6px 12px">@(gen.Key.EndDate?.ToString("yyyy-MM-dd") ?? "—")</td>
+                                                <td style="padding:6px 12px">@string.Join(", ", gen.Select(x => x.CategoryLabel))</td>
+                                                <td style="padding:6px 12px">
+                                                    @if (_isCur)
+                                                    {
+                                                        <span style="font-size:11px;padding:1px 8px;border-radius:10px;background:#ECFDF5;color:#047857;border:1px solid #A7F3D0">Current</span>
+                                                    }
+                                                    else if (_isFut)
+                                                    {
+                                                        <span style="font-size:11px;padding:1px 8px;border-radius:10px;background:#EFF6FF;color:#1D4ED8;border:1px solid #BFDBFE">Scheduled</span>
+                                                    }
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    }
+                    }
                 </div>
             }
         </div>
@@ -594,6 +772,7 @@
     private DateOnly  _editEffectiveDate;        // Phase 12.13.3b — requested effective date (picker)
     private DateOnly? _lastSavedEffectiveDate;   // Phase 12.13.3 — snapped effective date of last save
     private IReadOnlyList<DatedOtConfigRow> _otConfigHistory = [];
+    private bool _otConfigTimelineExpanded;   // collapsed by default to save screen space
 
     // D7: the date a change requested for _editEffectiveDate actually takes effect — the first
     // workweek start on/after it (using the anchor being saved). Mirrors the repo's snap so the
@@ -605,6 +784,39 @@
             var ws = OvertimeSplitCalculator.GetWeekStart(_editEffectiveDate, _editWorkweekStartDay);
             return ws == _editEffectiveDate ? ws : ws.AddDays(7);
         }
+    }
+
+    // Phase 12.13.4b — OT-eligible category set editor (advanced)
+    private IReadOnlyList<OtCategoryOption>  _otCategories      = [];
+    private IReadOnlyList<DatedOtEligibleRow> _otEligibleHistory = [];
+    private bool        _eligibleExpanded;   // collapsed by default to save screen space
+    private bool        _showEditEligible;
+    private HashSet<int> _editEligibleSelected = [];
+    private DateOnly    _editEligibleEffectiveDate;
+    private string?     _eligibleError;
+    private DateOnly?   _lastSavedEligibleEffectiveDate;
+
+    // Snap preview for the eligible-set editor — uses the context's current workweek anchor (the set
+    // editor doesn't change the anchor).
+    private DateOnly SnappedEligibleEffectiveDate
+    {
+        get
+        {
+            var anchor = _context?.WorkweekStartDay ?? 1;
+            var ws = OvertimeSplitCalculator.GetWeekStart(_editEligibleEffectiveDate, anchor);
+            return ws == _editEligibleEffectiveDate ? ws : ws.AddDays(7);
+        }
+    }
+
+    // The currently-effective OT-eligible category ids (the generation covering operative today).
+    // Empty ⇒ no override (the engine falls back to the is_worked_time default).
+    private HashSet<int> CurrentEligibleCategoryIds()
+    {
+        var today = DateOnly.FromDateTime(TemporalContext.GetOperativeDate());
+        return _otEligibleHistory
+            .Where(r => r.EffectiveDate <= today && (r.EndDate is null || r.EndDate >= today))
+            .Select(r => r.TimeCategoryId)
+            .ToHashSet();
     }
 
     // Inline run-date editing
@@ -639,6 +851,11 @@
             SessionState.Lock();
             await LoadPeriodsAsync();
             await LoadOtConfigHistoryAsync();
+            if (!_isSalary)
+            {
+                _otCategories = await ContextRepo.GetSelectableOtCategoriesAsync();
+                await LoadOtEligibleHistoryAsync();
+            }
         }
 
         _loading = false;
@@ -647,6 +864,60 @@
     // Phase 12.13.3b: the effective-dated OT-config intervals (newest first) for the history inset.
     private async Task LoadOtConfigHistoryAsync()
         => _otConfigHistory = await ContextRepo.GetDatedOtConfigHistoryAsync(ContextId);
+
+    // Phase 12.13.4b: the effective-dated OT-eligible-set rows (newest interval first).
+    private async Task LoadOtEligibleHistoryAsync()
+        => _otEligibleHistory = await ContextRepo.GetDatedOtEligibleHistoryAsync(ContextId);
+
+    private void BeginEditEligible()
+    {
+        if (_context is null) return;
+        // Pre-check the currently-effective set; if none configured, default to the is_worked_time
+        // members (the resolver's fallback) so "no override" still shows a sensible starting point.
+        var current = CurrentEligibleCategoryIds();
+        _editEligibleSelected = current.Count > 0
+            ? [.. current]
+            : [.. _otCategories.Where(c => c.IsWorkedTime).Select(c => c.Id)];
+
+        var today = DateOnly.FromDateTime(TemporalContext.GetOperativeDate());
+        var ws    = OvertimeSplitCalculator.GetWeekStart(today, _context.WorkweekStartDay);
+        _editEligibleEffectiveDate     = ws == today ? ws : ws.AddDays(7);
+        _lastSavedEligibleEffectiveDate = null;
+        _eligibleError    = null;
+        _eligibleExpanded = true;   // editing always opens the section
+        _showEditEligible = true;
+    }
+
+    private void CancelEditEligible()
+    {
+        _showEditEligible = false;
+        _eligibleError    = null;
+    }
+
+    private void ToggleEligibleCategory(int categoryId, bool selected)
+    {
+        if (selected) _editEligibleSelected.Add(categoryId);
+        else          _editEligibleSelected.Remove(categoryId);
+    }
+
+    private async Task SaveEligibleSetAsync()
+    {
+        if (_context is null) return;
+        _submitting    = true;
+        _eligibleError = null;
+        try
+        {
+            var operativeToday = DateOnly.FromDateTime(TemporalContext.GetOperativeDate());
+            _lastSavedEligibleEffectiveDate = await ContextRepo.SaveDatedOtEligibleSetAsync(
+                ContextId, [.. _editEligibleSelected], _context.WorkweekStartDay,
+                _editEligibleEffectiveDate, operativeToday, _currentUserId);
+
+            await LoadOtEligibleHistoryAsync();
+            _showEditEligible = false;
+        }
+        catch (Exception ex) { _eligibleError = ex.Message; }
+        finally { _submitting = false; }
+    }
 
     private async Task LoadPeriodsAsync()
     {
@@ -998,17 +1269,39 @@
         new LookupEntry { Id = 6, Code = "ANNUAL",       Label = "Annual"       },
     ];
 
+    // The OT config in force as-of the operative date, resolved from the dated rows (not the scalar
+    // cache, which only re-syncs on save and goes stale once a scheduled change's effective date
+    // passes). Falls back to the scalar cache if the dated history isn't loaded.
+    private DatedOtConfigRow CurrentOtConfig()
+    {
+        var today = DateOnly.FromDateTime(TemporalContext.GetOperativeDate());
+        var row = _otConfigHistory
+            .Where(r => r.EffectiveDate <= today && (r.EndDate is null || r.EndDate >= today))
+            .OrderByDescending(r => r.EffectiveDate)
+            .FirstOrDefault();
+        return row ?? new DatedOtConfigRow
+        {
+            EffectiveDate          = _context!.EffectiveStartDate,
+            OtWeeklyThresholdHours = _context.OtWeeklyThresholdHours,
+            WorkweekStartDay       = _context.WorkweekStartDay,
+            OtReviewThresholdHours = _context.OtReviewThresholdHours
+        };
+    }
+
     private void BeginEditSettings()
     {
         if (_context is null) return;
-        _editOtThreshold       = _context.OtWeeklyThresholdHours;
-        _editOtReviewThreshold = _context.OtReviewThresholdHours;
-        _editWorkweekStartDay  = _context.WorkweekStartDay;
+        // Prefill from the value in force NOW (resolved from the dated rows), so reopening Edit after
+        // a scheduled change has taken effect shows the correct current value, not the stale cache.
+        var cur                = CurrentOtConfig();
+        _editOtThreshold       = cur.OtWeeklyThresholdHours;
+        _editOtReviewThreshold = cur.OtReviewThresholdHours;
+        _editWorkweekStartDay  = cur.WorkweekStartDay;
         // Default the effective date forward-looking: the next workweek start on/after today, so a
         // routine edit takes effect at a clean week boundary (D7). The user can pick earlier for a
         // retroactive correction.
         var today              = DateOnly.FromDateTime(TemporalContext.GetOperativeDate());
-        var ws                 = OvertimeSplitCalculator.GetWeekStart(today, _context.WorkweekStartDay);
+        var ws                 = OvertimeSplitCalculator.GetWeekStart(today, cur.WorkweekStartDay);
         _editEffectiveDate     = ws == today ? ws : ws.AddDays(7);
         _lastSavedEffectiveDate = null;   // drop any prior save confirmation while editing
         _settingsError        = null;
@@ -1043,6 +1336,7 @@
             // Reload the context (currently-effective cache) + the dated-row history inset.
             _context          = await ContextRepo.GetByIdAsync(ContextId);
             await LoadOtConfigHistoryAsync();
+            _otConfigTimelineExpanded = true;   // reveal the timeline so the saved change is visible
             _showEditSettings = false;
         }
         catch (Exception ex) { _settingsError = ex.Message; }

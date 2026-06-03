@@ -2,6 +2,7 @@ using Dapper;
 using AllWorkHRIS.Core.Composition;
 using AllWorkHRIS.Core.Data;
 using AllWorkHRIS.Core.Domain.Time;
+using AllWorkHRIS.Module.TimeAttendance.Repositories;
 
 namespace AllWorkHRIS.Module.TimeAttendance.Queries;
 
@@ -526,7 +527,12 @@ public sealed class TimeAttendanceQueryService
         // (previously a count of stored OVERTIME-category rows). Derived via the shared calculator.
         var periodOt   = await GetPeriodOtConfigAsync(periodId);
         var eligible   = await GetOtEligibleForPeriodAsync(periodId);
-        var eligibleFilter = eligible.Count > 0 ? "c.id IN @EligibleIds" : "c.is_worked_time = true";
+        var statP = new DynamicParameters();
+        statP.Add("PeriodId", periodId);
+        statP.Add("LegalEntityId", legalEntityId);
+        var eligibleFilter = eligible.Count > 0
+            ? $"c.id IN {SqlInList.BuildInts(statP, eligible, "elig")}"
+            : "c.is_worked_time = true";
         var workedRows = await conn.QueryAsync<WorkedDailyRow>(
             $"""
             SELECT te.employment_id, te.work_date, SUM(te.duration) AS worked_hours
@@ -542,7 +548,7 @@ public sealed class TimeAttendanceQueryService
               AND  {eligibleFilter}
             GROUP  BY te.employment_id, te.work_date
             """,
-            new { PeriodId = periodId, LegalEntityId = legalEntityId, EligibleIds = eligible });
+            statP);
 
         var overtimeAlerts = workedRows
             .GroupBy(r => r.EmploymentId)
@@ -562,7 +568,12 @@ public sealed class TimeAttendanceQueryService
     {
         var periodOt = await GetPeriodOtConfigAsync(periodId);
         var eligible = await GetOtEligibleForPeriodAsync(periodId);
-        var eligibleFilter = eligible.Count > 0 ? "c.id IN @EligibleIds" : "c.is_worked_time = true";
+        var splitP = new DynamicParameters();
+        splitP.Add("EmploymentId", employmentId);
+        splitP.Add("PeriodId", periodId);
+        var eligibleFilter = eligible.Count > 0
+            ? $"c.id IN {SqlInList.BuildInts(splitP, eligible, "elig")}"
+            : "c.is_worked_time = true";
 
         using var conn = _connectionFactory.CreateConnection();
         var daily = await conn.QueryAsync<WorkedDailyRow>(
@@ -577,7 +588,7 @@ public sealed class TimeAttendanceQueryService
               AND  {eligibleFilter}
             GROUP  BY te.employment_id, te.work_date
             """,
-            new { EmploymentId = employmentId, PeriodId = periodId, EligibleIds = eligible });
+            splitP);
 
         return OvertimeSplitCalculator.Compute(
             daily.Select(r => (r.WorkDate, r.WorkedHours)),

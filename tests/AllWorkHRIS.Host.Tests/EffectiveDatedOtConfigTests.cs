@@ -4,6 +4,7 @@ using AllWorkHRIS.Core.Data;
 using AllWorkHRIS.Core.Domain.Time;
 using AllWorkHRIS.Module.Payroll.Repositories;
 using AllWorkHRIS.Module.Payroll.Services;
+using AllWorkHRIS.Module.TimeAttendance.Queries;
 using Xunit;
 
 namespace AllWorkHRIS.Host.Tests;
@@ -280,6 +281,37 @@ public sealed class EffectiveDatedOtConfigTests
     }
 
     private sealed record CatIdRow(int Id, string Code);
+
+    /// <summary>
+    /// Phase 12.13.4 regression: when the resolved OT-eligible set is NON-empty (e.g. the migration-049
+    /// backfill), the display/hours queries build a SQL IN-list. A bare <c>IN @ids</c> in this stack
+    /// emits a Postgres array placeholder and fails 42601 — the live error this guards against. Drives
+    /// the real <see cref="TimeAttendanceQueryService"/> path against a period whose context has the
+    /// backfilled set, proving the IN-list executes. Requires migration 049 + a payroll period.
+    /// </summary>
+    [Fact]
+    public async Task PeriodOvertimeSplit_WithBackfilledEligibleSet_ExecutesInClause()
+    {
+        using var conn = _connectionFactory.CreateConnection();
+        var periodId = await conn.QueryFirstOrDefaultAsync<Guid?>(
+            """
+            SELECT pp.period_id
+            FROM   payroll_period pp
+            JOIN   payroll_context_ot_eligible_category e ON e.payroll_context_id = pp.payroll_context_id
+            """);
+        Assert.True(periodId.HasValue,
+            "expected at least one payroll period whose context has a backfilled OT-eligible set (migration 049)");
+
+        var svc = new TimeAttendanceQueryService(
+            _connectionFactory,
+            new PayrollContextLookup(
+                new PayrollContextRepository(_connectionFactory, new NullAuditService()), _connectionFactory));
+
+        // A random employment yields an empty split, but the non-empty eligible set drives the IN-list
+        // query — which must EXECUTE (no 42601) for the assertion to be reached.
+        var split = await svc.GetPeriodOvertimeSplitForEmploymentAsync(Guid.NewGuid(), periodId!.Value);
+        Assert.Equal(0m, split.TotalHours);
+    }
 
     static Task InsertEligibleRowAsync(
         System.Data.IDbConnection conn, Guid contextId, DateOnly effective, DateOnly? end,
