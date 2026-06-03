@@ -522,12 +522,67 @@ public sealed class PayrollGateTests : IDisposable
     }
 
     // ---------------------------------------------------------------------------
+    // TC-PAY-REVERSE: ADR-027 Increment 1 — reversing an APPROVED run contra-posts
+    // its accumulator impacts (restoring the PRIOR-run YTD, not zero), marks the
+    // run/results REVERSED, reopens the period, nets the run's impacts to zero, and
+    // is idempotent. Requires migration 050 (REVERSED run status).
+    // ---------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ReverseApprovedRun_RestoresPriorYtd_ReopensPeriod_Idempotent()
+    {
+        var emp    = await HireAndEnrollAsync("REV-YTD", blockingCleared: true);
+        var userId = Guid.NewGuid();
+
+        using var conn = _connectionFactory.CreateConnection();
+        decimal Ytd() => conn.ExecuteScalar<decimal>(
+            "SELECT COALESCE(SUM(current_value), 0) FROM accumulator_balance WHERE participant_id = @Emp",
+            new { Emp = emp });
+
+        // Run 1 (2026 period A) → APPROVED. Its YTD is the "prior" a reversal of run 2 must restore.
+        await CalculateAndApproveAsync(AcumPeriod2026A, userId);
+        var ytdAfterRun1 = Ytd();
+        Assert.True(ytdAfterRun1 > 0m, "run 1 should post a positive YTD");
+
+        // Run 2 (2026 period B, same year — no reset) → APPROVED. YTD grows.
+        var run2 = await CalculateAndApproveAsync(AcumPeriod2026B, userId);
+        Assert.True(Ytd() > ytdAfterRun1, "run 2 should add to the YTD");
+
+        // Reverse run 2 via the real correction service.
+        var correction = BuildCorrectionService();
+        var outcome = await correction.ReverseRunAsync(
+            new ReverseRunRequest { RunId = run2, ReversedBy = userId, Reason = "integration test" });
+        Assert.False(outcome.AlreadyReversed);
+        Assert.NotEmpty(outcome.ReversedResultIds);
+
+        // The key proof: YTD falls back to run 1's value — the PRIOR cumulative, NOT zero
+        // (run 1's contribution survives; only run 2's per-period balance is reverted).
+        Assert.Equal(ytdAfterRun1, Ytd());
+
+        // Run 2 is REVERSED and its period reopens for a fresh Regular run.
+        var run2Row = await _runRepo.GetByIdAsync(run2);
+        Assert.Equal(_lookupCache.GetId(LookupTables.RunStatus, "REVERSED"), run2Row!.RunStatusId);
+        Assert.Null(await _runRepo.GetActiveRegularRunForPeriodAsync(AcumPeriod2026B));
+
+        // Run 2's impacts net to zero (original postings + their negating reversals — forward-only).
+        var netDelta = conn.ExecuteScalar<decimal>(
+            "SELECT COALESCE(SUM(delta_value), 0) FROM accumulator_impact WHERE payroll_run_id = @Id",
+            new { Id = run2 });
+        Assert.Equal(0m, netDelta);
+
+        // Idempotent — a second reverse is a no-op.
+        var again = await correction.ReverseRunAsync(
+            new ReverseRunRequest { RunId = run2, ReversedBy = userId, Reason = "again" });
+        Assert.True(again.AlreadyReversed);
+    }
+
+    // ---------------------------------------------------------------------------
     // Helpers
     // ---------------------------------------------------------------------------
 
     // Drives a run DRAFT → CALCULATED → APPROVED (the approve pass posts accumulators
     // and triggers reset detection). RunJobAsync processes whatever status the run is in.
-    private async Task CalculateAndApproveAsync(Guid periodId, Guid userId)
+    private async Task<Guid> CalculateAndApproveAsync(Guid periodId, Guid userId)
     {
         var runId = await _runService.InitiateRunAsync(new InitiatePayrollRunCommand
         {
@@ -538,6 +593,23 @@ public sealed class PayrollGateTests : IDisposable
         await RunJobAsync(runId);                                   // DRAFT → CALCULATED
         await _runService.ApproveRunAsync(new ApprovePayrollRunCommand { RunId = runId, ApprovedBy = userId });
         await RunJobAsync(runId);                                   // APPROVING → APPROVED (+ reset detection)
+        return runId;
+    }
+
+    // ADR-027 Increment 1: a real PayrollCorrectionService over the shared test composition (the gate's
+    // _runService uses a no-op correction double). Resolves the real AccumulatorService + repos so a
+    // reversal actually contra-posts against the DB.
+    private PayrollCorrectionService BuildCorrectionService()
+    {
+        var container = PayrollRunTestContainer.Build(_connectionFactory, _lookupCache);
+        return new PayrollCorrectionService(
+            container.Resolve<IPayrollRunRepository>(),
+            container.Resolve<IEmployeePayrollResultRepository>(),
+            container.Resolve<IAccumulatorService>(),
+            container.Resolve<IPayrollHoursSource>(),
+            _lookupCache,
+            new NullAuditService(),
+            NullLogger<PayrollCorrectionService>.Instance);
     }
 
     private async Task<Guid> HireAndEnrollAsync(string tag, bool blockingCleared)
