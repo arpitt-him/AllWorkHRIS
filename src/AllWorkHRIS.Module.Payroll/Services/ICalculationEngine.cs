@@ -18,9 +18,12 @@ public sealed record CalculationInput
     public decimal  BaseRate         { get; init; }
     public string?  FlsaStatusCode          { get; init; }
     public string?  RateTypeCode            { get; init; }
-    public decimal  OtWeeklyThresholdHours  { get; init; } = 40.00m;
-    public int      WorkWeekStartDay        { get; init; } = 1;
-    public int      PeriodsPerYear          { get; init; }
+    // ADR-024 / Phase 12.13.2: per-FLSA-week OT thresholds for the period (resolved as-of each
+    // workweek), with a fallback for any uncovered week. Replaces the single period-wide threshold.
+    public IReadOnlyDictionary<DateOnly, decimal> WeeklyThresholdByWeekStart { get; init; } = new Dictionary<DateOnly, decimal>();
+    public decimal  OtFallbackThresholdHours { get; init; } = 40.00m;
+    public int      WorkWeekStartDay         { get; init; } = 1;
+    public int      PeriodsPerYear           { get; init; }
 
     // Pay period boundaries — passed through to the benefit step provider for proration
     public DateOnly PayPeriodStart    { get; init; }

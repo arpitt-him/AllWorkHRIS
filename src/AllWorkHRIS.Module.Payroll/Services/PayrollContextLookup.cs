@@ -53,5 +53,24 @@ public sealed class PayrollContextLookup : IPayrollContextLookup
             : new OtConfig(row.OtWeeklyThresholdHours, row.WorkweekStartDay, row.OtReviewThresholdHours);
     }
 
+    // ADR-024 / Phase 12.13.2: resolve the whole period's OT config — anchor (resolved at period
+    // start, D7) + a per-FLSA-week threshold map. One backfilled row ⇒ every week the same value
+    // (parity); a mid-period dated change ⇒ weeks before/after get their respective thresholds.
+    public async Task<PeriodOtConfig> ResolveOtConfigForPeriodAsync(
+        Guid payrollContextId, DateOnly periodStart, DateOnly periodEnd)
+    {
+        var atStart = await ResolveOtConfigAsync(payrollContextId, periodStart);
+        var anchor  = atStart.WorkweekStartDay;
+
+        var byWeek = new Dictionary<DateOnly, decimal>();
+        for (var ws = OvertimeSplitCalculator.GetWeekStart(periodStart, anchor); ws <= periodEnd; ws = ws.AddDays(7))
+        {
+            var cfg = await ResolveOtConfigAsync(payrollContextId, ws);
+            byWeek[ws] = cfg.WeeklyThresholdHours;
+        }
+
+        return new PeriodOtConfig(anchor, byWeek, atStart.WeeklyThresholdHours, atStart.ReviewThresholdHours);
+    }
+
     private sealed record OtConfigRow(decimal OtWeeklyThresholdHours, int WorkweekStartDay, decimal? OtReviewThresholdHours);
 }

@@ -12,4 +12,7 @@ public sealed class NullPayrollContextLookup : IPayrollContextLookup
 
     public Task<OtConfig> ResolveOtConfigAsync(Guid payrollContextId, DateOnly asOf)
         => Task.FromResult(new OtConfig(40m, 1, null));
+
+    public Task<PeriodOtConfig> ResolveOtConfigForPeriodAsync(Guid payrollContextId, DateOnly periodStart, DateOnly periodEnd)
+        => Task.FromResult(new PeriodOtConfig(1, new Dictionary<DateOnly, decimal>(), 40m, null));
 }

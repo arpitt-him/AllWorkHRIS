@@ -310,7 +310,7 @@ public sealed partial class CalculationEngine : ICalculationEngine
             input.EmploymentId, input.PayPeriodStart, input.PayPeriodEnd, input.RunId);
 
         var (regWorkedHours, otHours) = OvertimeSplitCalculator.Compute(
-            workedEntries, input.OtWeeklyThresholdHours, input.WorkWeekStartDay);
+            workedEntries, input.WeeklyThresholdByWeekStart, input.OtFallbackThresholdHours, input.WorkWeekStartDay);
 
         // Non-worked but payable hours (PTO/holiday/sick) are STILL PAID — at straight time, and
         // outside the OT threshold. Lumped into the straight-time (REG) hours for now; itemized

@@ -19,4 +19,12 @@ public interface IPayrollContextLookup
     /// (40 hrs / Monday / no review trigger) if the context has no config row.
     /// </summary>
     Task<OtConfig> ResolveOtConfigAsync(Guid payrollContextId, DateOnly asOf);
+
+    /// <summary>
+    /// Resolve the OT configuration for an entire pay period (ADR-024 / Phase 12.13.2): the
+    /// (period-stable, D7) anchor resolved at period start, plus a per-FLSA-week threshold map
+    /// across <paramref name="periodStart"/>..<paramref name="periodEnd"/>. The single per-period
+    /// resolver shared by payroll and T&amp;A; lets each workweek be split under its own threshold.
+    /// </summary>
+    Task<PeriodOtConfig> ResolveOtConfigForPeriodAsync(Guid payrollContextId, DateOnly periodStart, DateOnly periodEnd);
 }

@@ -238,10 +238,11 @@ public sealed class PayrollRunJob : BackgroundService
             var period         = await contextRepo.GetPeriodByIdAsync(run.PeriodId)
                                  ?? throw new InvalidOperationException($"Period {run.PeriodId} not found for run {runId}");
 
-            // ADR-024 / Phase 12.13: resolve the effective-dated OT config via the shared resolver
-            // instead of reading the payroll_context scalar columns. Period-level for now (as-of the
-            // period start); 12.13.2 moves this to per-workweek. One backfilled row ⇒ today's values.
-            var otConfig = await contextLookup.ResolveOtConfigAsync(run.PayrollContextId, period.PeriodStartDate);
+            // ADR-024 / Phase 12.13.2: resolve the OT config per FLSA workweek across the period
+            // (anchor resolved at period start, D7). One backfilled row ⇒ every week the same value
+            // (parity); a mid-period dated change ⇒ each week split under its own threshold.
+            var periodOt = await contextLookup.ResolveOtConfigForPeriodAsync(
+                run.PayrollContextId, period.PeriodStartDate, period.PeriodEndDate);
 
             // Resolve the employee population + excluded set for this run. A full-context run
             // pays all active+cleared employees and flags every blocked employee; a scoped
@@ -336,8 +337,9 @@ public sealed class PayrollRunJob : BackgroundService
                     BaseRate                = snapshot?.BaseRate ?? 0m,
                     FlsaStatusCode          = snapshot?.FlsaStatusCode,
                     RateTypeCode            = snapshot?.RateTypeCode,
-                    OtWeeklyThresholdHours  = otConfig.WeeklyThresholdHours,
-                    WorkWeekStartDay        = otConfig.WorkweekStartDay,
+                    WeeklyThresholdByWeekStart = periodOt.WeeklyThresholdByWeekStart,
+                    OtFallbackThresholdHours   = periodOt.FallbackThresholdHours,
+                    WorkWeekStartDay           = periodOt.WorkweekStartDay,
                     PeriodsPerYear          = periodsPerYear,
                     PayPeriodStart          = period.PeriodStartDate,
                     PayPeriodEnd            = period.PeriodEndDate

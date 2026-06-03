@@ -186,11 +186,11 @@ public sealed class TimeAttendanceQueryService
         Guid legalEntityId, Guid periodId)
     {
         // ADR-023: reg/OT is no longer stored — it is derived here from worked-time daily totals via
-        // the shared Core OvertimeSplitCalculator. ADR-024 / 12.13.1: the weekly threshold + anchor
-        // come from the shared resolver (period's context, as-of period start), the same one payroll
-        // uses — so display matches pay. TotalHours is unchanged (all non-rejected hours). Worked-time
-        // = lkp_time_category.is_worked_time (REGULAR/OVERTIME) — the FLSA OT basis.
-        var otConfig = await GetOtConfigForPeriodAsync(periodId);
+        // the shared Core OvertimeSplitCalculator. ADR-024 / 12.13.2: the threshold is resolved PER
+        // FLSA WORKWEEK (anchor at period start) by the shared resolver — the same one payroll uses —
+        // so display matches pay, including across a mid-period policy change. TotalHours is unchanged
+        // (all non-rejected hours). Worked-time = lkp_time_category.is_worked_time — the FLSA OT basis.
+        var periodOt = await GetPeriodOtConfigAsync(periodId);
 
         using var conn = _connectionFactory.CreateConnection();
         var rows = (await conn.QueryAsync<TimecardEntryRaw>(
@@ -226,7 +226,7 @@ public sealed class TimeAttendanceQueryService
                     .GroupBy(r => r.WorkDate)
                     .Select(d => (d.Key, d.Sum(x => x.Duration)));
                 var split = OvertimeSplitCalculator.Compute(
-                    workedDaily, otConfig.WeeklyThreshold, otConfig.WorkweekStartDay);
+                    workedDaily, periodOt.WeeklyThresholdByWeekStart, periodOt.FallbackThresholdHours, periodOt.WorkweekStartDay);
 
                 return new TimecardSummaryRow(
                     EmploymentId:   first.EmploymentId,
@@ -352,14 +352,15 @@ public sealed class TimeAttendanceQueryService
     // ot_review_threshold_hours (pre-populated from the legal-entity default at context creation,
     // set on the pay-calendar/context page). NULL = overtime never flagged on hours for that group.
     public async Task<decimal?> GetOtReviewThresholdAsync(Guid periodId)
-        // ADR-024 / 12.13.1: via the shared resolver (consistent with the rest of the OT config).
-        => (await GetOtConfigForPeriodAsync(periodId)).ReviewThreshold;
+        // ADR-024 / 12.13.2: via the shared resolver (consistent with the rest of the OT config).
+        // Review trigger is a single per-context value (not per-week), taken as-of period start.
+        => (await GetPeriodOtConfigAsync(periodId)).ReviewThresholdHours;
 
     public async Task<ExceptionReviewResult> GetExceptionReviewAsync(Guid legalEntityId, Guid periodId)
     {
-        // A period belongs to one payroll context, so the weekly OT threshold, workweek anchor, and
-        // OT review trigger are single values for the whole call.
-        var otConfig = await GetOtConfigForPeriodAsync(periodId);
+        // A period belongs to one payroll context; the OT threshold is resolved per FLSA workweek
+        // (anchor + review trigger fixed at period start) — the same shared resolver payroll uses.
+        var periodOt = await GetPeriodOtConfigAsync(periodId);
 
         using var conn = _connectionFactory.CreateConnection();
 
@@ -400,12 +401,12 @@ public sealed class TimeAttendanceQueryService
         // OT-review trigger: an employee whose derived period OT hours reach/exceed the trigger has
         // their (otherwise-clean) worked-time entries held out of the auto-approve set for review.
         var otFlagged = new HashSet<Guid>();
-        if (otConfig.ReviewThreshold is { } reviewTrigger)
+        if (periodOt.ReviewThresholdHours is { } reviewTrigger)
         {
             foreach (var emp in rows.Where(r => r.IsWorkedTime).GroupBy(r => r.EmploymentId))
             {
                 var daily = emp.GroupBy(r => r.WorkDate).Select(d => (d.Key, d.Sum(x => x.Duration)));
-                var ot    = OvertimeSplitCalculator.Compute(daily, otConfig.WeeklyThreshold, otConfig.WorkweekStartDay);
+                var ot    = OvertimeSplitCalculator.Compute(daily, periodOt.WeeklyThresholdByWeekStart, periodOt.FallbackThresholdHours, periodOt.WorkweekStartDay);
                 if (ot.OvertimeHours >= reviewTrigger)
                     otFlagged.Add(emp.Key);
             }
@@ -455,26 +456,23 @@ public sealed class TimeAttendanceQueryService
         Guid TimeEntryId, Guid EmploymentId, string EmployeeName, string EmployeeNumber,
         DateOnly WorkDate, string TimeCategoryCode, decimal Duration, bool IsWorkedTime, string? Reason);
 
-    // The OT config operative for a period — read from its payroll context (the layer the engine
-    // reads; effective-dating is tracked as ToDo #45). Weekly threshold + anchor feed the OT split;
-    // the review threshold (nullable) is the approve-by-exception trigger.
-    private async Task<OtPeriodConfig> GetOtConfigForPeriodAsync(Guid periodId)
+    // The OT config operative for a period — resolved PER FLSA WORKWEEK via the shared effective-dated
+    // resolver (the same one the engine uses), so display matches pay across a mid-period policy
+    // change. Anchor + review trigger are fixed as-of period start (D7); the per-week threshold map
+    // feeds the OT split; the review threshold (nullable) is the approve-by-exception trigger.
+    private async Task<PeriodOtConfig> GetPeriodOtConfigAsync(Guid periodId)
     {
-        // ADR-024 / 12.13.1: resolve OT config via the shared effective-dated resolver (the same one
-        // payroll uses), not by reading payroll_context directly. Period-level (as-of period start)
-        // for now; 12.13.2 moves this to per-workweek.
         using var conn = _connectionFactory.CreateConnection();
-        var pc = await conn.QueryFirstOrDefaultAsync<PeriodContextRow>(
-            "SELECT pp.payroll_context_id, pp.period_start_date FROM payroll_period pp WHERE pp.period_id = @PeriodId",
+        var pp = await conn.QueryFirstOrDefaultAsync<PeriodRangeRow>(
+            "SELECT pp.payroll_context_id, pp.period_start_date, pp.period_end_date FROM payroll_period pp WHERE pp.period_id = @PeriodId",
             new { PeriodId = periodId });
-        if (pc is null) return new OtPeriodConfig(40m, 1, null);
+        if (pp is null) return new PeriodOtConfig(1, new Dictionary<DateOnly, decimal>(), 40m, null);
 
-        var cfg = await _payrollContextLookup.ResolveOtConfigAsync(pc.PayrollContextId, pc.PeriodStartDate);
-        return new OtPeriodConfig(cfg.WeeklyThresholdHours, cfg.WorkweekStartDay, cfg.ReviewThresholdHours);
+        return await _payrollContextLookup.ResolveOtConfigForPeriodAsync(
+            pp.PayrollContextId, pp.PeriodStartDate, pp.PeriodEndDate);
     }
 
-    private sealed record OtPeriodConfig(decimal WeeklyThreshold, int WorkweekStartDay, decimal? ReviewThreshold);
-    private sealed record PeriodContextRow(Guid PayrollContextId, DateOnly PeriodStartDate);
+    private sealed record PeriodRangeRow(Guid PayrollContextId, DateOnly PeriodStartDate, DateOnly PeriodEndDate);
 
     public async Task<(int PendingApproval, int OverTimeAlerts, int CutoffRisk)>
         GetStatCardsAsync(Guid legalEntityId, Guid periodId)
@@ -502,7 +500,7 @@ public sealed class TimeAttendanceQueryService
 
         // ADR-023: "Overtime Alerts" = employees with derived OT > 0 on APPROVED worked hours
         // (previously a count of stored OVERTIME-category rows). Derived via the shared calculator.
-        var otConfig   = await GetOtConfigForPeriodAsync(periodId);
+        var periodOt   = await GetPeriodOtConfigAsync(periodId);
         var workedRows = await conn.QueryAsync<WorkedDailyRow>(
             """
             SELECT te.employment_id, te.work_date, SUM(te.duration) AS worked_hours
@@ -524,7 +522,7 @@ public sealed class TimeAttendanceQueryService
             .GroupBy(r => r.EmploymentId)
             .Count(g => OvertimeSplitCalculator.Compute(
                 g.Select(r => (r.WorkDate, r.WorkedHours)),
-                otConfig.WeeklyThreshold, otConfig.WorkweekStartDay).OvertimeHours > 0m);
+                periodOt.WeeklyThresholdByWeekStart, periodOt.FallbackThresholdHours, periodOt.WorkweekStartDay).OvertimeHours > 0m);
 
         return (pendingApproval, overtimeAlerts, cutoffRisk);
     }
@@ -536,7 +534,7 @@ public sealed class TimeAttendanceQueryService
     // calculator, using the period context's weekly threshold + workweek anchor.
     public async Task<OvertimeSplit> GetPeriodOvertimeSplitForEmploymentAsync(Guid employmentId, Guid periodId)
     {
-        var otConfig = await GetOtConfigForPeriodAsync(periodId);
+        var periodOt = await GetPeriodOtConfigAsync(periodId);
 
         using var conn = _connectionFactory.CreateConnection();
         var daily = await conn.QueryAsync<WorkedDailyRow>(
@@ -555,7 +553,7 @@ public sealed class TimeAttendanceQueryService
 
         return OvertimeSplitCalculator.Compute(
             daily.Select(r => (r.WorkDate, r.WorkedHours)),
-            otConfig.WeeklyThreshold, otConfig.WorkweekStartDay);
+            periodOt.WeeklyThresholdByWeekStart, periodOt.FallbackThresholdHours, periodOt.WorkweekStartDay);
     }
 
     public async Task<IReadOnlyList<HandoffPreviewEntry>> GetEntriesForPeriodAsync(Guid periodId)
