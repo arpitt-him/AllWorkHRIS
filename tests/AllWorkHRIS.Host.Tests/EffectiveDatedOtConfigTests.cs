@@ -131,6 +131,110 @@ public sealed class EffectiveDatedOtConfigTests
         }
     }
 
+    /// <summary>
+    /// Phase 12.13.3 write path (ADR-024). An OT-config edit writes a NEW effective-dated row,
+    /// snapping the requested date forward to a workweek boundary (D7), closing the row it lands in,
+    /// and leaving the resolver to segment a spanning period. Inserts its own baseline + cleans up.
+    /// </summary>
+    [Fact]
+    public async Task SaveDatedOtConfig_SnapsToWorkweek_ClosesPriorRow_AndResolverSegments()
+    {
+        var contextId = Guid.NewGuid();
+        var stamp     = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+        using (var conn = _connectionFactory.CreateConnection())
+        {
+            // Open-ended baseline @ 40h, Monday anchor — like the migration-048 backfill row.
+            await InsertConfigRowAsync(conn, contextId, new DateOnly(1, 1, 1), null, 40m, 1, stamp);
+        }
+
+        try
+        {
+            var repo = new PayrollContextRepository(_connectionFactory, new NullAuditService());
+
+            // Request 35h effective a WEDNESDAY (2026-01-07); operativeToday is before it (future change).
+            var effective = await repo.SaveDatedOtConfigAsync(
+                contextId, 35m, 1, null, new DateOnly(2026, 1, 7), new DateOnly(2026, 1, 1), Guid.Empty);
+
+            // D7: snapped forward to the next Monday.
+            Assert.Equal(new DateOnly(2026, 1, 12), effective);
+
+            using var conn = _connectionFactory.CreateConnection();
+            var rows = (await conn.QueryAsync<DatedRow>(
+                """
+                SELECT effective_date AS Effective, end_date AS EndDate, ot_weekly_threshold_hours AS Threshold
+                FROM   payroll_context_ot_config WHERE payroll_context_id = @Id ORDER BY effective_date
+                """,
+                new { Id = contextId })).ToList();
+
+            // Two non-overlapping intervals: prior closed at effective-1, new row open-ended @ 35.
+            Assert.Equal(2, rows.Count);
+            Assert.Equal(new DateOnly(1, 1, 1),    rows[0].Effective);
+            Assert.Equal(new DateOnly(2026, 1, 11), rows[0].EndDate);
+            Assert.Equal(40m,                       rows[0].Threshold);
+            Assert.Equal(new DateOnly(2026, 1, 12), rows[1].Effective);
+            Assert.Null(rows[1].EndDate);
+            Assert.Equal(35m,                       rows[1].Threshold);
+
+            // The shared resolver segments a period spanning the boundary.
+            var lookup = new PayrollContextLookup(repo, _connectionFactory);
+            var periodOt = await lookup.ResolveOtConfigForPeriodAsync(
+                contextId, new DateOnly(2026, 1, 5), new DateOnly(2026, 1, 18));
+            Assert.Equal(40m, periodOt.WeeklyThresholdByWeekStart[new DateOnly(2026, 1, 5)]);
+            Assert.Equal(35m, periodOt.WeeklyThresholdByWeekStart[new DateOnly(2026, 1, 12)]);
+        }
+        finally
+        {
+            using var conn = _connectionFactory.CreateConnection();
+            await conn.ExecuteAsync(
+                "DELETE FROM payroll_context_ot_config WHERE payroll_context_id = @Id", new { Id = contextId });
+        }
+    }
+
+    /// <summary>
+    /// Phase 12.13.3: re-editing the same workweek updates the existing dated row in place rather
+    /// than creating a duplicate interval.
+    /// </summary>
+    [Fact]
+    public async Task SaveDatedOtConfig_SameEffectiveDate_UpdatesInPlace_NoDuplicate()
+    {
+        var contextId = Guid.NewGuid();
+        var stamp     = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        var monday    = new DateOnly(2026, 1, 12);
+
+        using (var conn = _connectionFactory.CreateConnection())
+            await InsertConfigRowAsync(conn, contextId, new DateOnly(1, 1, 1), null, 40m, 1, stamp);
+
+        try
+        {
+            var repo = new PayrollContextRepository(_connectionFactory, new NullAuditService());
+            await repo.SaveDatedOtConfigAsync(contextId, 35m, 1, null,  monday, new DateOnly(2026, 1, 1), Guid.Empty);
+            await repo.SaveDatedOtConfigAsync(contextId, 30m, 1, 50m,   monday, new DateOnly(2026, 1, 1), Guid.Empty);
+
+            using var conn = _connectionFactory.CreateConnection();
+            var sameDateCount = await conn.ExecuteScalarAsync<int>(
+                "SELECT COUNT(*) FROM payroll_context_ot_config WHERE payroll_context_id = @Id AND effective_date = @E",
+                new { Id = contextId, E = monday });
+            Assert.Equal(1, sameDateCount);   // re-edited, not duplicated
+
+            var row = await conn.QueryFirstOrDefaultAsync<DatedRow>(
+                """
+                SELECT effective_date AS Effective, end_date AS EndDate, ot_weekly_threshold_hours AS Threshold
+                FROM   payroll_context_ot_config WHERE payroll_context_id = @Id AND effective_date = @E
+                """,
+                new { Id = contextId, E = monday });
+            Assert.Equal(30m, row!.Threshold);   // latest save's values won
+        }
+        finally
+        {
+            using var conn = _connectionFactory.CreateConnection();
+            await conn.ExecuteAsync(
+                "DELETE FROM payroll_context_ot_config WHERE payroll_context_id = @Id", new { Id = contextId });
+        }
+    }
+
+    private sealed record DatedRow(DateOnly Effective, DateOnly? EndDate, decimal Threshold);
+
     static Task InsertConfigRowAsync(
         System.Data.IDbConnection conn, Guid contextId, DateOnly effective, DateOnly? end,
         decimal weeklyThreshold, int workweekStartDay, DateTime stamp)

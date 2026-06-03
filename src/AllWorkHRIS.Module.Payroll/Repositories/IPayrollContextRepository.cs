@@ -46,8 +46,20 @@ public interface IPayrollContextRepository
     Task<(decimal? OtWeeklyThresholdHours, int? WorkweekStartDay, decimal? OtReviewThresholdHours)> GetLegalEntityDefaultsAsync(Guid legalEntityId);
 
     /// <summary>
-    /// Updates the editable operational settings on an existing payroll context:
-    /// OT weekly threshold, workweek start day, and OT review threshold (Phase 12.7b).
+    /// Writes an effective-dated OT-config change (OT weekly threshold, workweek start day, OT
+    /// review threshold) to <c>payroll_context_ot_config</c> — the source of truth the shared
+    /// resolver reads (ADR-024 / Phase 12.13.3). The requested date is snapped forward to a workweek
+    /// boundary (D7); the dated interval is maintained (re-edit in place / close the covering row /
+    /// bound by the next change) and the scalar columns are re-synced to today's effective values.
+    /// Returns the actual (snapped) effective date.
     /// </summary>
-    Task UpdateContextSettingsAsync(Guid payrollContextId, decimal otWeeklyThresholdHours, int workweekStartDay, decimal? otReviewThresholdHours, Guid updatedBy);
+    Task<DateOnly> SaveDatedOtConfigAsync(
+        Guid payrollContextId, decimal otWeeklyThresholdHours, int workweekStartDay,
+        decimal? otReviewThresholdHours, DateOnly requestedEffectiveDate, DateOnly operativeToday, Guid updatedBy);
+
+    /// <summary>
+    /// The effective-dated OT-config intervals for a context (ADR-024 / Phase 12.13.3), newest
+    /// first — the history + any scheduled future change shown on the pay-calendar detail page.
+    /// </summary>
+    Task<IReadOnlyList<DatedOtConfigRow>> GetDatedOtConfigHistoryAsync(Guid payrollContextId);
 }

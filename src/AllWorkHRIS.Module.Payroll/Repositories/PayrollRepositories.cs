@@ -2,6 +2,7 @@ using System.Text.Json;
 using Dapper;
 using AllWorkHRIS.Core.Audit;
 using AllWorkHRIS.Core.Data;
+using AllWorkHRIS.Core.Domain.Time;
 using AllWorkHRIS.Module.Payroll.Domain.Accumulators;
 using AllWorkHRIS.Module.Payroll.Domain.Calendar;
 using AllWorkHRIS.Module.Payroll.Domain.Profile;
@@ -1415,40 +1416,155 @@ public sealed class PayrollContextRepository : IPayrollContextRepository
         ));
     }
 
-    public async Task UpdateContextSettingsAsync(Guid payrollContextId, decimal otWeeklyThresholdHours, int workweekStartDay, decimal? otReviewThresholdHours, Guid updatedBy)
+    // ADR-024 / Phase 12.13.3: an OT-config edit writes a NEW effective-dated row to
+    // payroll_context_ot_config (the source of truth the resolver reads), rather than overwriting
+    // the scalar columns in place. The requested date is snapped to a workweek boundary (D7 — a
+    // change takes effect on the first FLSA workweek beginning on/after it), the interval is
+    // maintained (re-edit in place / close the covering row / bound by the next change), and the
+    // payroll_context scalar columns are re-synced to the row effective as-of operative today so they
+    // remain the currently-effective cache (a future-dated change leaves "current" untouched).
+    // Returns the actual (snapped) effective date for the caller to surface.
+    public async Task<DateOnly> SaveDatedOtConfigAsync(
+        Guid payrollContextId, decimal otWeeklyThresholdHours, int workweekStartDay,
+        decimal? otReviewThresholdHours, DateOnly requestedEffectiveDate, DateOnly operativeToday, Guid updatedBy)
     {
-        const string sql = """
-            UPDATE payroll_context
-            SET ot_weekly_threshold_hours = @OtWeeklyThresholdHours,
-                workweek_start_day        = @WorkweekStartDay,
-                ot_review_threshold_hours = @OtReviewThresholdHours,
-                last_updated_by           = @UpdatedBy,
-                last_update_timestamp     = CURRENT_TIMESTAMP
-            WHERE payroll_context_id = @PayrollContextId
-            """;
+        // D7: snap forward to the first workweek start on/after the requested date. The new anchor
+        // defines the boundary (an anchor change's transition-week OT math is tracked as ToDo #50).
+        var weekStart = OvertimeSplitCalculator.GetWeekStart(requestedEffectiveDate, workweekStartDay);
+        var effective = weekStart == requestedEffectiveDate ? weekStart : weekStart.AddDays(7);
+
         using var conn = _connectionFactory.CreateConnection();
-        await conn.ExecuteAsync(sql, new
+        using var tx   = conn.BeginTransaction();
+
+        // Re-edit in place if a row already starts on this effective date (no duplicate intervals).
+        var existingId = await conn.QueryFirstOrDefaultAsync<Guid?>(
+            """
+            SELECT payroll_context_ot_config_id FROM payroll_context_ot_config
+            WHERE  payroll_context_id = @ContextId AND effective_date = @Effective
+            """,
+            new { ContextId = payrollContextId, Effective = effective }, tx);
+
+        if (existingId is { } id)
         {
-            PayrollContextId       = payrollContextId,
-            OtWeeklyThresholdHours = otWeeklyThresholdHours,
-            WorkweekStartDay       = workweekStartDay,
-            OtReviewThresholdHours = otReviewThresholdHours,
-            UpdatedBy              = updatedBy
-        });
+            await conn.ExecuteAsync(
+                """
+                UPDATE payroll_context_ot_config
+                SET ot_weekly_threshold_hours = @Threshold,
+                    workweek_start_day        = @Anchor,
+                    ot_review_threshold_hours = @Review
+                WHERE payroll_context_ot_config_id = @Id
+                """,
+                new { Threshold = otWeeklyThresholdHours, Anchor = workweekStartDay, Review = otReviewThresholdHours, Id = id }, tx);
+        }
+        else
+        {
+            // Bound the new row by the next future change (if any); otherwise it is open-ended.
+            var nextEff = await conn.QueryFirstOrDefaultAsync<DateOnly?>(
+                """
+                SELECT effective_date FROM payroll_context_ot_config
+                WHERE  payroll_context_id = @ContextId AND effective_date > @Effective
+                ORDER  BY effective_date ASC
+                """,
+                new { ContextId = payrollContextId, Effective = effective }, tx);
+            DateOnly? newEnd = nextEff.HasValue ? nextEff.Value.AddDays(-1) : (DateOnly?)null;
+
+            // Close the row that currently covers this effective date (the immediately-prior one).
+            var prev = await conn.QueryFirstOrDefaultAsync<PrevDatedRow>(
+                """
+                SELECT payroll_context_ot_config_id AS Id, end_date AS EndDate
+                FROM   payroll_context_ot_config
+                WHERE  payroll_context_id = @ContextId AND effective_date < @Effective
+                ORDER  BY effective_date DESC
+                """,
+                new { ContextId = payrollContextId, Effective = effective }, tx);
+            if (prev is not null && (prev.EndDate is null || prev.EndDate >= effective))
+            {
+                await conn.ExecuteAsync(
+                    "UPDATE payroll_context_ot_config SET end_date = @End WHERE payroll_context_ot_config_id = @Id",
+                    new { End = effective.AddDays(-1), Id = prev.Id }, tx);
+            }
+
+            await conn.ExecuteAsync(
+                """
+                INSERT INTO payroll_context_ot_config (
+                    payroll_context_ot_config_id, payroll_context_id, effective_date, end_date,
+                    ot_weekly_threshold_hours, workweek_start_day, ot_review_threshold_hours,
+                    created_by, creation_timestamp)
+                VALUES (@Id, @ContextId, @Effective, @End, @Threshold, @Anchor, @Review, @CreatedBy, CURRENT_TIMESTAMP)
+                """,
+                new
+                {
+                    Id = Guid.NewGuid(), ContextId = payrollContextId, Effective = effective, End = newEnd,
+                    Threshold = otWeeklyThresholdHours, Anchor = workweekStartDay, Review = otReviewThresholdHours,
+                    CreatedBy = updatedBy
+                }, tx);
+        }
+
+        // Re-sync the scalar cache to the row effective as-of operative today (currently-effective).
+        var current = await conn.QueryFirstOrDefaultAsync<OtCacheRow>(
+            """
+            SELECT ot_weekly_threshold_hours AS Threshold, workweek_start_day AS Anchor,
+                   ot_review_threshold_hours AS Review
+            FROM   payroll_context_ot_config
+            WHERE  payroll_context_id = @ContextId
+              AND  effective_date <= @Today
+              AND  (end_date IS NULL OR end_date >= @Today)
+            ORDER  BY effective_date DESC
+            """,
+            new { ContextId = payrollContextId, Today = operativeToday }, tx);
+        if (current is not null)
+        {
+            await conn.ExecuteAsync(
+                """
+                UPDATE payroll_context
+                SET ot_weekly_threshold_hours = @Threshold,
+                    workweek_start_day        = @Anchor,
+                    ot_review_threshold_hours = @Review,
+                    last_updated_by           = @UpdatedBy,
+                    last_update_timestamp     = CURRENT_TIMESTAMP
+                WHERE payroll_context_id = @ContextId
+                """,
+                new { current.Threshold, current.Anchor, current.Review, UpdatedBy = updatedBy, ContextId = payrollContextId }, tx);
+        }
+
+        tx.Commit();
 
         await _auditService.LogAsync(new AuditEventRecord(
             EventType:     "UPDATE",
             EntityType:    "PayrollContext",
             EntityId:      payrollContextId,
             ModuleName:    "PAYROLL",
-            ChangeSummary: $"OT threshold updated to {otWeeklyThresholdHours} hrs, workweek start {workweekStartDay}, OT review threshold {(otReviewThresholdHours.HasValue ? otReviewThresholdHours.Value + " hrs" : "off")}",
+            ChangeSummary: $"OT config change effective {effective:yyyy-MM-dd}: threshold {otWeeklyThresholdHours} hrs, workweek start {workweekStartDay}, OT review threshold {(otReviewThresholdHours.HasValue ? otReviewThresholdHours.Value + " hrs" : "off")}",
             AfterJson:     JsonSerializer.Serialize(new
             {
+                effective_date            = effective.ToString("yyyy-MM-dd"),
                 ot_weekly_threshold_hours = otWeeklyThresholdHours,
                 workweek_start_day        = workweekStartDay,
                 ot_review_threshold_hours = otReviewThresholdHours
             })
         ));
+
+        return effective;
+    }
+
+    private sealed record PrevDatedRow(Guid Id, DateOnly? EndDate);
+    private sealed record OtCacheRow(decimal Threshold, int Anchor, decimal? Review);
+
+    public async Task<IReadOnlyList<DatedOtConfigRow>> GetDatedOtConfigHistoryAsync(Guid payrollContextId)
+    {
+        const string sql = """
+            SELECT effective_date            AS EffectiveDate,
+                   end_date                  AS EndDate,
+                   ot_weekly_threshold_hours AS OtWeeklyThresholdHours,
+                   workweek_start_day        AS WorkweekStartDay,
+                   ot_review_threshold_hours AS OtReviewThresholdHours
+            FROM   payroll_context_ot_config
+            WHERE  payroll_context_id = @ContextId
+            ORDER  BY effective_date DESC
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        var rows = await conn.QueryAsync<DatedOtConfigRow>(sql, new { ContextId = payrollContextId });
+        return rows.ToList();
     }
 
     public async Task<PayrollPeriod?> GetPeriodByIdAsync(Guid periodId)

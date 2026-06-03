@@ -27,3 +27,14 @@ public sealed record PayrollContext
     public Guid         LastUpdatedBy              { get; init; }
     public DateTimeOffset LastUpdateTimestamp      { get; init; }
 }
+
+// ADR-024 / Phase 12.13.3: one effective-dated OT-config interval for a payroll context — the
+// history/scheduled rows shown on the pay-calendar detail page and read by the shared resolver.
+public sealed record DatedOtConfigRow
+{
+    public DateOnly  EffectiveDate          { get; init; }
+    public DateOnly? EndDate                { get; init; }
+    public decimal   OtWeeklyThresholdHours { get; init; }
+    public int       WorkweekStartDay       { get; init; }
+    public decimal?  OtReviewThresholdHours { get; init; }
+}

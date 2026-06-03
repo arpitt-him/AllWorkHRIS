@@ -16,6 +16,7 @@
 @using Syncfusion.Blazor.Inputs
 @using Syncfusion.Blazor.DropDowns
 @using Syncfusion.Blazor.Calendars
+@using AllWorkHRIS.Core.Domain.Time
 
 <PageTitle>Pay Calendar Detail — AllWork HRIS</PageTitle>
 
@@ -171,6 +172,33 @@
                                 FLSA workweek anchor — every non-exempt employee in this group uses this day.
                             </span>
                         </div>
+                        <div class="form-field">
+                            <label class="form-label">Effective From</label>
+                            <SfDatePicker TValue="DateOnly" @bind-Value="_editEffectiveDate"
+                                          Format="yyyy-MM-dd" Width="100%" />
+                            <span style="font-size:var(--font-size-sm);color:#6B7280">
+                                When this change takes effect. A change activates on a workweek boundary (D7);
+                                pick an earlier date only to correct an already-run week.
+                            </span>
+                        </div>
+                    </div>
+                    @{
+                        var _snap    = SnappedEffectiveDate;
+                        var _todayOp = DateOnly.FromDateTime(TemporalContext.GetOperativeDate());
+                    }
+                    <div style="font-size:var(--font-size-sm);margin-bottom:var(--space-3);padding:var(--space-2) var(--space-3);border-radius:4px;background:#F9FAFB;border:1px solid #E5E7EB;color:#374151">
+                        @if (_snap != _editEffectiveDate)
+                        {
+                            <text>Snaps forward to the workweek start <strong>@_snap.ToString("yyyy-MM-dd")</strong> (@WorkweekDayLabel(_editWorkweekStartDay)). </text>
+                        }
+                        @if (_snap > _todayOp)
+                        {
+                            <text>📅 <strong>Scheduled</strong> — takes effect @_snap.ToString("yyyy-MM-dd"); current settings stay in force until then.</text>
+                        }
+                        else
+                        {
+                            <text>✅ <strong>Effective now</strong> — applies from the current workweek (@_snap.ToString("yyyy-MM-dd")).</text>
+                        }
                     </div>
                     @if (_settingsError is not null)
                     {
@@ -181,6 +209,73 @@
                             @(_submitting ? "Saving…" : "Save Settings")
                         </button>
                         <button class="btn-secondary" @onclick="CancelEditSettings">Cancel</button>
+                    </div>
+                </div>
+            }
+
+            @if (_lastSavedEffectiveDate is { } _savedEff && !_showEditSettings)
+            {
+                <div style="margin-top:var(--space-3);font-size:var(--font-size-sm);color:#047857">
+                    ✅ Saved — change effective <strong>@_savedEff.ToString("yyyy-MM-dd")</strong>.
+                </div>
+            }
+
+            @* ── Effective-dated OT-config history / scheduled changes ─────────── *@
+            @if (!_isSalary && _otConfigHistory.Count > 0)
+            {
+                var _todayHist = DateOnly.FromDateTime(TemporalContext.GetOperativeDate());
+                <div style="margin-top:var(--space-4)">
+                    <div style="font-size:var(--font-size-sm);font-weight:var(--font-weight-medium);color:#374151;margin-bottom:var(--space-2)">
+                        Overtime configuration timeline
+                    </div>
+                    <div style="width:62.5%;min-width:520px;border:1px solid #E3E8EF;border-radius:4px;background:#fff;overflow:hidden">
+                        <table style="width:100%;border-collapse:collapse;font-size:var(--font-size-sm)">
+                            <thead>
+                                <tr style="background:#F9FAFB;color:#6B7280;text-align:left">
+                                    <th style="padding:6px 12px;font-weight:var(--font-weight-medium)">Effective</th>
+                                    <th style="padding:6px 12px;font-weight:var(--font-weight-medium)">Until</th>
+                                    <th style="padding:6px 12px;font-weight:var(--font-weight-medium)">OT Threshold</th>
+                                    <th style="padding:6px 12px;font-weight:var(--font-weight-medium)">Review Trigger</th>
+                                    <th style="padding:6px 12px;font-weight:var(--font-weight-medium)">Workweek Start</th>
+                                    <th style="padding:6px 12px;font-weight:var(--font-weight-medium)"></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var r in _otConfigHistory)
+                                {
+                                    var _isCurrent = r.EffectiveDate <= _todayHist && (r.EndDate is null || r.EndDate >= _todayHist);
+                                    var _isFuture  = r.EffectiveDate > _todayHist;
+                                    <tr style="border-top:1px solid #EEF1F5">
+                                        <td style="padding:6px 12px">
+                                            @* The backfilled baseline carries a far-past sentinel for gapless
+                                               coverage; show the context's own effective-from date instead. *@
+                                            @if (r.EffectiveDate.Year <= 1)
+                                            {
+                                                <text>@_context!.EffectiveStartDate.ToString("yyyy-MM-dd") <span style="color:#9CA3AF;font-size:11px">(initial)</span></text>
+                                            }
+                                            else
+                                            {
+                                                @r.EffectiveDate.ToString("yyyy-MM-dd")
+                                            }
+                                        </td>
+                                        <td style="padding:6px 12px">@(r.EndDate?.ToString("yyyy-MM-dd") ?? "—")</td>
+                                        <td style="padding:6px 12px">@r.OtWeeklyThresholdHours.ToString("0.##") hrs</td>
+                                        <td style="padding:6px 12px">@(r.OtReviewThresholdHours.HasValue ? r.OtReviewThresholdHours.Value.ToString("0.##") + " hrs" : "—")</td>
+                                        <td style="padding:6px 12px">@WorkweekDayLabel(r.WorkweekStartDay)</td>
+                                        <td style="padding:6px 12px">
+                                            @if (_isCurrent)
+                                            {
+                                                <span style="font-size:11px;padding:1px 8px;border-radius:10px;background:#ECFDF5;color:#047857;border:1px solid #A7F3D0">Current</span>
+                                            }
+                                            else if (_isFuture)
+                                            {
+                                                <span style="font-size:11px;padding:1px 8px;border-radius:10px;background:#EFF6FF;color:#1D4ED8;border:1px solid #BFDBFE">Scheduled</span>
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             }
@@ -496,6 +591,21 @@
     private decimal? _editOtReviewThreshold;   // Phase 12.7b — null = OT never flagged on hours
     private int      _editWorkweekStartDay;
     private string?  _settingsError;
+    private DateOnly  _editEffectiveDate;        // Phase 12.13.3b — requested effective date (picker)
+    private DateOnly? _lastSavedEffectiveDate;   // Phase 12.13.3 — snapped effective date of last save
+    private IReadOnlyList<DatedOtConfigRow> _otConfigHistory = [];
+
+    // D7: the date a change requested for _editEffectiveDate actually takes effect — the first
+    // workweek start on/after it (using the anchor being saved). Mirrors the repo's snap so the
+    // form can preview it live.
+    private DateOnly SnappedEffectiveDate
+    {
+        get
+        {
+            var ws = OvertimeSplitCalculator.GetWeekStart(_editEffectiveDate, _editWorkweekStartDay);
+            return ws == _editEffectiveDate ? ws : ws.AddDays(7);
+        }
+    }
 
     // Inline run-date editing
     private Guid?    _editRunDatePeriodId;
@@ -528,10 +638,15 @@
         {
             SessionState.Lock();
             await LoadPeriodsAsync();
+            await LoadOtConfigHistoryAsync();
         }
 
         _loading = false;
     }
+
+    // Phase 12.13.3b: the effective-dated OT-config intervals (newest first) for the history inset.
+    private async Task LoadOtConfigHistoryAsync()
+        => _otConfigHistory = await ContextRepo.GetDatedOtConfigHistoryAsync(ContextId);
 
     private async Task LoadPeriodsAsync()
     {
@@ -889,6 +1004,13 @@
         _editOtThreshold       = _context.OtWeeklyThresholdHours;
         _editOtReviewThreshold = _context.OtReviewThresholdHours;
         _editWorkweekStartDay  = _context.WorkweekStartDay;
+        // Default the effective date forward-looking: the next workweek start on/after today, so a
+        // routine edit takes effect at a clean week boundary (D7). The user can pick earlier for a
+        // retroactive correction.
+        var today              = DateOnly.FromDateTime(TemporalContext.GetOperativeDate());
+        var ws                 = OvertimeSplitCalculator.GetWeekStart(today, _context.WorkweekStartDay);
+        _editEffectiveDate     = ws == today ? ws : ws.AddDays(7);
+        _lastSavedEffectiveDate = null;   // drop any prior save confirmation while editing
         _settingsError        = null;
         _showEditSettings     = true;
     }
@@ -912,11 +1034,15 @@
         _settingsError = null;
         try
         {
-            await ContextRepo.UpdateContextSettingsAsync(
-                ContextId, _editOtThreshold, _editWorkweekStartDay, _editOtReviewThreshold, _currentUserId);
+            // Phase 12.13.3: write an effective-dated row (the repo snaps to a workweek boundary).
+            var operativeToday = DateOnly.FromDateTime(TemporalContext.GetOperativeDate());
+            _lastSavedEffectiveDate = await ContextRepo.SaveDatedOtConfigAsync(
+                ContextId, _editOtThreshold, _editWorkweekStartDay, _editOtReviewThreshold,
+                _editEffectiveDate, operativeToday, _currentUserId);
 
-            // Reload the context so the metadata panel reflects the saved values
+            // Reload the context (currently-effective cache) + the dated-row history inset.
             _context          = await ContextRepo.GetByIdAsync(ContextId);
+            await LoadOtConfigHistoryAsync();
             _showEditSettings = false;
         }
         catch (Exception ex) { _settingsError = ex.Message; }
