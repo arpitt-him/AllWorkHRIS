@@ -131,17 +131,30 @@
                                    Placeholder="Why this targeted run? e.g. catch up 2 EEs missed in the Regular run"
                                    Width="100%" />
                     </div>
-                    <div style="display:flex; align-items:center; gap:1rem; margin:0.75rem 0 0.5rem;">
+                    <div style="display:flex; align-items:center; gap:1rem; margin:0.75rem 0 0.5rem; flex-wrap:wrap;">
                         <span class="form-label" style="margin:0;">Target employees <span style="color:var(--color-danger,#dc2626)">*</span></span>
+                        @* ADR-027 2a.2 — default the picker to employees not yet paid for this period
+                           (reversed / excluded / never-run), the natural re-pay / catch-up set. *@
+                        <label style="display:flex; align-items:center; gap:6px; font-size:var(--font-size-sm); margin:0;">
+                            Show:
+                            <select value="@_targetFilter" @onchange="OnTargetFilterChanged" style="padding:2px 6px; border:1px solid #d1d5db; border-radius:4px;">
+                                <option value="UNPAID">Unpaid this Period</option>
+                                <option value="ALL">All</option>
+                            </select>
+                        </label>
                         <button class="btn-secondary" type="button" @onclick="CarryOverExceptionsAsync" disabled="@(_carryoverCount == 0)">
                             Carry over this period's exceptions@(_carryoverCount > 0 ? $" ({_carryoverCount})" : "")
                         </button>
-                        <span class="text-muted text-sm">@_targetableEmployees.Count active employee(s) in this context</span>
+                        <span class="text-sm" style="font-weight:600;">@_selectedTargetCount selected</span>
+                        <span class="text-muted text-sm">@_targetableShown.Count shown · @_targetableEmployees.Count active in context</span>
                     </div>
-                    <SfGrid @ref="_targetGrid" TValue="RunTargetEmployee" DataSource="@_targetableEmployees"
+                    <SfGrid @ref="_targetGrid" TValue="RunTargetEmployee" DataSource="@_targetableShown"
                             AllowPaging="true" AllowSorting="true" Height="260" CssClass="e-gridhover">
                         <GridPageSettings PageSize="10" />
                         <GridSelectionSettings Type="SelectionType.Multiple" CheckboxOnly="true" PersistSelection="true" />
+                        <GridEvents TValue="RunTargetEmployee"
+                                    RowSelected="OnTargetRowSelectedAsync"
+                                    RowDeselected="OnTargetRowDeselectedAsync" />
                         <GridColumns>
                             <GridColumn Type="ColumnType.CheckBox" Width="50" />
                             <GridColumn Field="@nameof(RunTargetEmployee.EmploymentId)" IsPrimaryKey="true" Visible="false" />
@@ -351,7 +364,37 @@
     private bool                        _carryoverUsed;
     private IReadOnlyList<Guid>?        _pendingTargets;
     private HashSet<Guid>               _alreadyPaidIds = [];   // ToDo #43 — paid this period; badged + blocked in the picker
+    private string                      _targetFilter    = "UNPAID";  // ADR-027 2a.2 — "Unpaid this Period" (default) / "All"
+    private List<RunTargetEmployee>     _targetableShown = [];        // the grid's DataSource under the Show filter
+    private int                         _selectedTargetCount;         // live count of checked employees in the picker
     private bool IsRegularType => _newRun.RunTypeId == _regularRunTypeId;
+
+    // Recompute the targeting grid for the current Show filter ("UNPAID" = employees with no standing
+    // paid result for the period — reversed / excluded / never-run; "ALL" = every active EE) and force
+    // the grid to re-read it. Bound to a STABLE field + explicit Refresh() because SfGrid does not
+    // reliably re-render when a per-render computed DataSource changes (see project SfGrid notes).
+    private async Task RefreshTargetingViewAsync()
+    {
+        _targetableShown = _targetFilter == "ALL"
+            ? [.. _targetableEmployees]
+            : _targetableEmployees.Where(e => !_alreadyPaidIds.Contains(e.EmploymentId)).ToList();
+        if (_targetGrid is not null) await _targetGrid.Refresh();
+        await RecomputeSelectedTargetCountAsync();   // selection persists across refresh — keep the count in sync
+    }
+
+    private async Task OnTargetFilterChanged(ChangeEventArgs e)
+    {
+        _targetFilter = e.Value?.ToString() ?? "UNPAID";
+        await RefreshTargetingViewAsync();
+    }
+
+    // Live "N selected" count off the grid's checkbox selection (persisted across paging/refresh).
+    private async Task OnTargetRowSelectedAsync(RowSelectEventArgs<RunTargetEmployee> _)
+        => await RecomputeSelectedTargetCountAsync();
+    private async Task OnTargetRowDeselectedAsync(RowDeselectEventArgs<RunTargetEmployee> _)
+        => await RecomputeSelectedTargetCountAsync();
+    private async Task RecomputeSelectedTargetCountAsync()
+        => _selectedTargetCount = _targetGrid is null ? 0 : (await _targetGrid.GetSelectedRecordsAsync()).Count;
 
     private record PeriodOption(Guid PeriodId, string PeriodLabel);
     private List<PeriodOption> PeriodOptions => _openPeriods
@@ -502,6 +545,8 @@
         _carryoverUsed       = false;
         _pendingTargets      = null;
         _alreadyPaidIds      = [];
+        _targetableShown     = [];
+        _selectedTargetCount = 0;
     }
 
     private async Task LoadTargetingDataAsync()
@@ -519,6 +564,7 @@
             ? []
             : (await RunService.GetAlreadyPaidEmploymentIdsAsync(_newRun.PeriodId)).ToHashSet();
         _carryoverUsed       = false;
+        await RefreshTargetingViewAsync();
     }
 
     private async Task OnRunTypeChangedAsync(ChangeEventArgs<int, IntOption> args)
@@ -535,6 +581,7 @@
             _carryoverCount = (await RunService.GetCarryoverEmploymentIdsAsync(_newRun.PeriodId)).Count;
             // ToDo #43 — already-paid targets for this period: badge them and block selecting them.
             _alreadyPaidIds = (await RunService.GetAlreadyPaidEmploymentIdsAsync(_newRun.PeriodId)).ToHashSet();
+            await RefreshTargetingViewAsync();
         }
     }
 
@@ -550,6 +597,7 @@
             .Select(t => t.i)
             .ToArray();
         await _targetGrid.SelectRowsAsync(indices);
+        await RecomputeSelectedTargetCountAsync();
         _carryoverUsed = true;
     }
 

@@ -196,7 +196,7 @@ public sealed class PayRegisterQueryService
             SELECT COALESCE(SUM(r.net_pay_amount), 0) AS total_net,
                    COUNT(DISTINCT r.employment_id)    AS employee_count
             FROM   employee_payroll_result r
-            WHERE  r.payroll_run_id = @RunId
+            WHERE  r.payroll_run_id = @RunId AND r.result_status_id <> (SELECT id FROM lkp_employee_result_status WHERE code = 'REVERSED')
             """, new { RunId = runId });
 
         var grossTotal = await conn.QueryFirstOrDefaultAsync<decimal>(
@@ -204,7 +204,7 @@ public sealed class PayRegisterQueryService
             SELECT COALESCE(SUM(el.calculated_amount), 0)
             FROM   earnings_result_line el
             JOIN   employee_payroll_result r ON r.employee_payroll_result_id = el.employee_payroll_result_id
-            WHERE  r.payroll_run_id = @RunId
+            WHERE  r.payroll_run_id = @RunId AND r.result_status_id <> (SELECT id FROM lkp_employee_result_status WHERE code = 'REVERSED')
             """, new { RunId = runId });
 
         var taxRows = (await conn.QueryAsync<dynamic>(
@@ -216,7 +216,7 @@ public sealed class PayRegisterQueryService
             FROM   tax_result_line tl
             JOIN   employee_payroll_result r ON r.employee_payroll_result_id = tl.employee_payroll_result_id
             LEFT   JOIN payroll_calculation_steps cs ON cs.step_code = tl.tax_code AND cs.is_active = TRUE
-            WHERE  r.payroll_run_id = @RunId
+            WHERE  r.payroll_run_id = @RunId AND r.result_status_id <> (SELECT id FROM lkp_employee_result_status WHERE code = 'REVERSED')
             GROUP  BY tl.tax_code, tl.employer_flag, cs.calculation_category, cs.step_name
             """, new { RunId = runId })).ToList();
 
@@ -225,7 +225,7 @@ public sealed class PayRegisterQueryService
             SELECT dl.deduction_code, COALESCE(SUM(dl.calculated_amount), 0) AS amount
             FROM   deduction_result_line dl
             JOIN   employee_payroll_result r ON r.employee_payroll_result_id = dl.employee_payroll_result_id
-            WHERE  r.payroll_run_id = @RunId
+            WHERE  r.payroll_run_id = @RunId AND r.result_status_id <> (SELECT id FROM lkp_employee_result_status WHERE code = 'REVERSED')
             GROUP  BY dl.deduction_code
             """, new { RunId = runId })).ToList();
 
@@ -234,7 +234,7 @@ public sealed class PayRegisterQueryService
             SELECT COALESCE(SUM(ecl.calculated_amount), 0)
             FROM   employer_contribution_result_line ecl
             JOIN   employee_payroll_result r ON r.employee_payroll_result_id = ecl.employee_payroll_result_id
-            WHERE  r.payroll_run_id = @RunId
+            WHERE  r.payroll_run_id = @RunId AND r.result_status_id <> (SELECT id FROM lkp_employee_result_status WHERE code = 'REVERSED')
             """, new { RunId = runId });
 
         var suppCount = await conn.QueryFirstOrDefaultAsync<long>(
@@ -242,7 +242,7 @@ public sealed class PayRegisterQueryService
             SELECT COUNT(DISTINCT r.employment_id)
             FROM   earnings_result_line el
             JOIN   employee_payroll_result r ON r.employee_payroll_result_id = el.employee_payroll_result_id
-            WHERE  r.payroll_run_id = @RunId
+            WHERE  r.payroll_run_id = @RunId AND r.result_status_id <> (SELECT id FROM lkp_employee_result_status WHERE code = 'REVERSED')
               AND  UPPER(el.earnings_code) LIKE '%SUPPLEMENT%'
             """, new { RunId = runId });
 
@@ -345,7 +345,7 @@ public sealed class PayRegisterQueryService
                        AND a.assignment_type_id   = (SELECT id FROM lkp_assignment_type   WHERE code = 'PRIMARY')
                        AND a.assignment_status_id = (SELECT id FROM lkp_assignment_status WHERE code = 'ACTIVE')
                 JOIN   org_unit ou ON ou.org_unit_id = a.department_id
-                WHERE  r.payroll_run_id = @RunId
+                WHERE  r.payroll_run_id = @RunId AND r.result_status_id <> (SELECT id FROM lkp_employee_result_status WHERE code = 'REVERSED')
             ),
             org_walk(org_unit_id, parent_org_unit_id, depth) AS (
                 SELECT org_unit_id, parent_org_unit_id, 0
@@ -390,14 +390,14 @@ public sealed class PayRegisterQueryService
                     SELECT r.employment_id, COALESCE(SUM(tl.calculated_amount),0) AS employer_tax_total
                     FROM   tax_result_line tl
                     JOIN   employee_payroll_result r ON r.employee_payroll_result_id = tl.employee_payroll_result_id
-                    WHERE  r.payroll_run_id = @RunId AND tl.employer_flag = TRUE
+                    WHERE  r.payroll_run_id = @RunId AND r.result_status_id <> (SELECT id FROM lkp_employee_result_status WHERE code = 'REVERSED') AND tl.employer_flag = TRUE
                     GROUP  BY r.employment_id
                 ),
                 er_benefit AS (
                     SELECT r.employment_id, COALESCE(SUM(ecl.calculated_amount),0) AS employer_benefit_total
                     FROM   employer_contribution_result_line ecl
                     JOIN   employee_payroll_result r ON r.employee_payroll_result_id = ecl.employee_payroll_result_id
-                    WHERE  r.payroll_run_id = @RunId
+                    WHERE  r.payroll_run_id = @RunId AND r.result_status_id <> (SELECT id FROM lkp_employee_result_status WHERE code = 'REVERSED')
                     GROUP  BY r.employment_id
                 ),
                 base AS (
@@ -415,7 +415,7 @@ public sealed class PayRegisterQueryService
                     {groupJoin}
                     LEFT   JOIN er_tax    et ON et.employment_id = r.employment_id
                     LEFT   JOIN er_benefit eb ON eb.employment_id = r.employment_id
-                    WHERE  r.payroll_run_id = @RunId
+                    WHERE  r.payroll_run_id = @RunId AND r.result_status_id <> (SELECT id FROM lkp_employee_result_status WHERE code = 'REVERSED')
                 )
                 SELECT grp_id, grp_name,
                        COUNT(DISTINCT employment_id)                         AS headcount,
@@ -440,14 +440,14 @@ public sealed class PayRegisterQueryService
                 SELECT r.employment_id, COALESCE(SUM(tl.calculated_amount),0) AS employer_tax_total
                 FROM   tax_result_line tl
                 JOIN   employee_payroll_result r ON r.employee_payroll_result_id = tl.employee_payroll_result_id
-                WHERE  r.payroll_run_id = @RunId AND tl.employer_flag = TRUE
+                WHERE  r.payroll_run_id = @RunId AND r.result_status_id <> (SELECT id FROM lkp_employee_result_status WHERE code = 'REVERSED') AND tl.employer_flag = TRUE
                 GROUP  BY r.employment_id
             ),
             er_benefit AS (
                 SELECT r.employment_id, COALESCE(SUM(ecl.calculated_amount),0) AS employer_benefit_total
                 FROM   employer_contribution_result_line ecl
                 JOIN   employee_payroll_result r ON r.employee_payroll_result_id = ecl.employee_payroll_result_id
-                WHERE  r.payroll_run_id = @RunId
+                WHERE  r.payroll_run_id = @RunId AND r.result_status_id <> (SELECT id FROM lkp_employee_result_status WHERE code = 'REVERSED')
                 GROUP  BY r.employment_id
             ),
             org_walk(employment_id, org_unit_id, org_unit_name, parent_org_unit_id, type_code, depth) AS (
@@ -462,7 +462,7 @@ public sealed class PayRegisterQueryService
                        AND a.assignment_status_id = (SELECT id FROM lkp_assignment_status WHERE code = 'ACTIVE')
                 LEFT   JOIN org_unit ou ON ou.org_unit_id = a.department_id
                 LEFT   JOIN lkp_org_unit_type t ON t.id  = ou.org_unit_type_id
-                WHERE  r.payroll_run_id = @RunId
+                WHERE  r.payroll_run_id = @RunId AND r.result_status_id <> (SELECT id FROM lkp_employee_result_status WHERE code = 'REVERSED')
                 UNION ALL
                 SELECT ow.employment_id,
                        p.org_unit_id, p.org_unit_name, p.parent_org_unit_id,
@@ -492,7 +492,7 @@ public sealed class PayRegisterQueryService
                 LEFT   JOIN emp_group  eg ON eg.employment_id = r.employment_id
                 LEFT   JOIN er_tax     et ON et.employment_id = r.employment_id
                 LEFT   JOIN er_benefit eb ON eb.employment_id = r.employment_id
-                WHERE  r.payroll_run_id = @RunId
+                WHERE  r.payroll_run_id = @RunId AND r.result_status_id <> (SELECT id FROM lkp_employee_result_status WHERE code = 'REVERSED')
             )
             SELECT grp_id, grp_name,
                    COUNT(DISTINCT employment_id)                         AS headcount,
@@ -525,7 +525,7 @@ public sealed class PayRegisterQueryService
                        AND a.assignment_type_id   = (SELECT id FROM lkp_assignment_type   WHERE code = 'PRIMARY')
                        AND a.assignment_status_id = (SELECT id FROM lkp_assignment_status WHERE code = 'ACTIVE')
                 LEFT   JOIN org_unit ou ON ou.org_unit_id = a.department_id
-                WHERE  r.payroll_run_id = @RunId
+                WHERE  r.payroll_run_id = @RunId AND r.result_status_id <> (SELECT id FROM lkp_employee_result_status WHERE code = 'REVERSED')
                 UNION ALL
                 SELECT ow.employment_id, p.org_unit_id, p.parent_org_unit_id, ow.depth + 1
                 FROM   org_walk ow
@@ -552,7 +552,7 @@ public sealed class PayRegisterQueryService
             JOIN   assignment a ON a.employment_id        = e.employment_id
                                AND a.assignment_type_id   = (SELECT id FROM lkp_assignment_type   WHERE code = 'PRIMARY')
                                AND a.assignment_status_id = (SELECT id FROM lkp_assignment_status WHERE code = 'ACTIVE')
-            WHERE  r.payroll_run_id = @RunId
+            WHERE  r.payroll_run_id = @RunId AND r.result_status_id <> (SELECT id FROM lkp_employee_result_status WHERE code = 'REVERSED')
               AND  a.job_id = @JobId
             """,
             new { RunId = runId, JobId = jobId });
@@ -570,7 +570,7 @@ public sealed class PayRegisterQueryService
             JOIN   assignment a ON a.employment_id        = e.employment_id
                                AND a.assignment_type_id   = (SELECT id FROM lkp_assignment_type   WHERE code = 'PRIMARY')
                                AND a.assignment_status_id = (SELECT id FROM lkp_assignment_status WHERE code = 'ACTIVE')
-            WHERE  r.payroll_run_id = @RunId
+            WHERE  r.payroll_run_id = @RunId AND r.result_status_id <> (SELECT id FROM lkp_employee_result_status WHERE code = 'REVERSED')
               AND  a.location_id = @LocationId
             """,
             new { RunId = runId, LocationId = locationId });
@@ -629,7 +629,7 @@ public sealed class PayRegisterQueryService
             LEFT   JOIN lkp_org_unit_type dt  ON dt.id    = d.org_unit_type_id
             LEFT   JOIN org_unit dp   ON dp.org_unit_id   = d.parent_org_unit_id
             LEFT   JOIN lkp_org_unit_type dpt ON dpt.id   = dp.org_unit_type_id
-            WHERE  r.payroll_run_id = @RunId
+            WHERE  r.payroll_run_id = @RunId AND r.result_status_id <> (SELECT id FROM lkp_employee_result_status WHERE code = 'REVERSED')
             ORDER  BY e.employee_number
             """, new { RunId = runId })).ToList();
 
@@ -645,7 +645,7 @@ public sealed class PayRegisterQueryService
             FROM   tax_result_line tl
             JOIN   employee_payroll_result r ON r.employee_payroll_result_id = tl.employee_payroll_result_id
             LEFT   JOIN payroll_calculation_steps cs ON cs.step_code = tl.tax_code AND cs.is_active = TRUE
-            WHERE  r.payroll_run_id = @RunId
+            WHERE  r.payroll_run_id = @RunId AND r.result_status_id <> (SELECT id FROM lkp_employee_result_status WHERE code = 'REVERSED')
             GROUP  BY tl.employee_payroll_result_id, tl.tax_code, tl.employer_flag, cs.calculation_category
             """, new { RunId = runId })).ToList();
 
@@ -656,7 +656,7 @@ public sealed class PayRegisterQueryService
                    COALESCE(SUM(dl.calculated_amount), 0) AS amount
             FROM   deduction_result_line dl
             JOIN   employee_payroll_result r ON r.employee_payroll_result_id = dl.employee_payroll_result_id
-            WHERE  r.payroll_run_id = @RunId
+            WHERE  r.payroll_run_id = @RunId AND r.result_status_id <> (SELECT id FROM lkp_employee_result_status WHERE code = 'REVERSED')
             GROUP  BY dl.employee_payroll_result_id, dl.deduction_code
             """, new { RunId = runId })).ToList();
 
@@ -667,7 +667,7 @@ public sealed class PayRegisterQueryService
                    COALESCE(SUM(ecl.calculated_amount), 0) AS amount
             FROM   employer_contribution_result_line ecl
             JOIN   employee_payroll_result r ON r.employee_payroll_result_id = ecl.employee_payroll_result_id
-            WHERE  r.payroll_run_id = @RunId
+            WHERE  r.payroll_run_id = @RunId AND r.result_status_id <> (SELECT id FROM lkp_employee_result_status WHERE code = 'REVERSED')
             GROUP  BY ecl.employee_payroll_result_id
             """, new { RunId = runId })).ToList();
 
