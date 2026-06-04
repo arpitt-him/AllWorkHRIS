@@ -111,7 +111,7 @@ public sealed class TimeAttendanceQueryService
             FROM   payroll_period pp
             JOIN   payroll_context pc ON pc.payroll_context_id = pp.payroll_context_id
             WHERE  pc.legal_entity_id = @LegalEntityId
-              AND  pp.calendar_status NOT IN ('CLOSED','FINALIZED')
+              AND  pp.calendar_status NOT IN ('CLOSED','FINALIZED','LOCKED')
             ORDER  BY pp.period_start_date ASC
             """,
             new { LegalEntityId = legalEntityId });
@@ -139,7 +139,7 @@ public sealed class TimeAttendanceQueryService
             FROM   payroll_period pp
             JOIN   payroll_context pc ON pc.payroll_context_id = pp.payroll_context_id
             WHERE  pc.legal_entity_id = @LegalEntityId
-              AND  pp.calendar_status IN ('CLOSED','FINALIZED')
+              AND  pp.calendar_status IN ('CLOSED','FINALIZED','LOCKED')
             ORDER  BY pp.period_start_date DESC
             """,
             new { LegalEntityId = legalEntityId });
@@ -169,7 +169,7 @@ public sealed class TimeAttendanceQueryService
             JOIN   assignment a  ON a.employment_id = @EmploymentId
             JOIN   org_unit   ou ON ou.org_unit_id  = a.department_id
             WHERE  ou.legal_entity_id = pc.legal_entity_id
-              AND  pp.calendar_status NOT IN ('CLOSED','FINALIZED')
+              AND  pp.calendar_status NOT IN ('CLOSED','FINALIZED','LOCKED')
             ORDER  BY pp.period_start_date DESC
             """,
             new { EmploymentId = employmentId });

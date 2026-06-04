@@ -182,8 +182,13 @@ public sealed class PayrollRunJob : BackgroundService
         if (run.RunStatusId == releasingStatus)
         {
             await runRepo.UpdateStatusAsync(runId, releasedStatus, run.InitiatedBy);
-            await contextRepo.UpdatePeriodStatusAsync(run.PeriodId, "CLOSED", run.InitiatedBy);
-            _logger.LogInformation("Run {RunId} released; period {PeriodId} closed", runId, run.PeriodId);
+            // ADR-027 D8: release LOCKS the period, it does not CLOSE it. LOCKED keeps the period
+            // out of routine time entry and the "current open period" but still selectable for a
+            // Supplemental/Correction run (GetOpenPeriodsAsync includes LOCKED), so an already-paid
+            // period stays correction-eligible. The true close (LOCKED → CLOSED) is a separate,
+            // later step (correction-window close / admin action) — see ADR-027 D8 / ToDo #54.
+            await contextRepo.UpdatePeriodStatusAsync(run.PeriodId, "LOCKED", run.InitiatedBy);
+            _logger.LogInformation("Run {RunId} released; period {PeriodId} locked (correction window open)", runId, run.PeriodId);
             return;
         }
 

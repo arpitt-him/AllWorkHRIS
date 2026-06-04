@@ -49,8 +49,12 @@ public sealed class TimeEntryService : ITimeEntryService
         var periodStatus = await _repository.GetPeriodStatusAsync(command.PayrollPeriodId);
         if (periodStatus is null)
             throw new DomainException("Payroll period not found.");
-        if (string.Equals(periodStatus, "CLOSED", StringComparison.OrdinalIgnoreCase))
-            throw new DomainException("Cannot submit time for a closed payroll period.")
+        // CLOSED = period closed; LOCKED = payroll released (ADR-027 D8 correction window) — neither
+        // accepts routine time entry. A correction re-pays from existing approved hours; it does not
+        // re-open the period for general entry.
+        if (string.Equals(periodStatus, "CLOSED", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(periodStatus, "LOCKED", StringComparison.OrdinalIgnoreCase))
+            throw new DomainException("Cannot submit time for a closed or locked (already-released) payroll period.")
                 { ExceptionCode = "EXC-TIM-004" };
 
         if (string.Equals(flsaStatus, "EXEMPT", StringComparison.OrdinalIgnoreCase)
