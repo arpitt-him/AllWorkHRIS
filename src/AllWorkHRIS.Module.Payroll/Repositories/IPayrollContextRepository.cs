@@ -27,6 +27,14 @@ public interface IPayrollContextRepository
     /// </summary>
     Task<(int Deleted, int Skipped)> DeletePeriodsForYearAsync(Guid contextId, int year);
     Task UpdatePeriodStatusAsync(Guid periodId, string status, Guid updatedBy);
+
+    /// <summary>
+    /// Closes a released period (LOCKED → CLOSED), ending its correction window (ADR-027 D8 /
+    /// ToDo #54). Only a LOCKED period may be closed — an OPEN period hasn't been released and an
+    /// already CLOSED/FINALIZED period is past it. Returns null on success, or a reason string if
+    /// blocked (period missing or not LOCKED). The inverse of the release path, which sets LOCKED.
+    /// </summary>
+    Task<string?> ClosePeriodAsync(Guid periodId, Guid closedBy);
     /// <summary>
     /// Updates the calculation (run) date for a single period. Pass null to clear.
     /// </summary>

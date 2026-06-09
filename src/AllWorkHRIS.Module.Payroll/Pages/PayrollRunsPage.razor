@@ -456,8 +456,14 @@
     private DateOnly? _lastReleasedDate     => _runs.Where(r => r.RunStatusId == _releasedStatus)
                                                     .Select(r => (DateOnly?)r.PayDate)
                                                     .DefaultIfEmpty(null).Max();
-    private DateOnly? _nextPayDate          => _openPeriods.Select(p => (DateOnly?)p.PayDate)
-                                                           .DefaultIfEmpty(null).Min();
+    // "Next open" = the earliest period not yet released. A LOCKED period is already paid
+    // (release → LOCKED keeps it in _openPeriods for the supplemental picker, but it is not a
+    // *next* pay date), so the stat counts OPEN periods only — else a just-released period shows
+    // as both Last Pay Date and Next Open Pay Date.
+    private DateOnly? _nextPayDate          => _openPeriods
+                                                  .Where(p => string.Equals(p.CalendarStatus, "OPEN", StringComparison.OrdinalIgnoreCase))
+                                                  .Select(p => (DateOnly?)p.PayDate)
+                                                  .DefaultIfEmpty(null).Min();
 
     protected override async Task OnInitializedAsync()
     {
@@ -476,7 +482,7 @@
 
     private async Task LoadForEntityAsync()
     {
-        if (!SessionState.HasEntity) return;
+        if (!SessionState.HasEntity) { _loading = false; return; }
 
         _contexts          = _allContexts.Where(c => c.LegalEntityId == SessionState.SelectedLegalEntityId).ToList();
         _selectedContextId = _contexts.FirstOrDefault()?.PayrollContextId ?? Guid.Empty;
@@ -496,17 +502,31 @@
     private async Task LoadRunsAsync()
     {
         if (_selectedContextId == Guid.Empty) { _loading = false; return; }
-        _loading = true;
+        _loading     = true;
+        _errorMessage = null;
+        try
+        {
+            var runs = await RunService.GetRunsByContextAsync(_selectedContextId);
+            _runs = [.. runs];
 
-        var runs = await RunService.GetRunsByContextAsync(_selectedContextId);
-        _runs = [.. runs];
-
-        var operativeYear    = TemporalContext.GetOperativeDate().Year;
-        var yearPeriods      = await ContextRepo.GetPeriodsByContextAsync(_selectedContextId, operativeYear);
-        var prevYearPeriods  = await ContextRepo.GetPeriodsByContextAsync(_selectedContextId, operativeYear - 1);
-        _periods = yearPeriods.Concat(prevYearPeriods).ToDictionary(p => p.PeriodId);
-
-        _loading = false;
+            var operativeYear    = TemporalContext.GetOperativeDate().Year;
+            var yearPeriods      = await ContextRepo.GetPeriodsByContextAsync(_selectedContextId, operativeYear);
+            var prevYearPeriods  = await ContextRepo.GetPeriodsByContextAsync(_selectedContextId, operativeYear - 1);
+            // De-dupe defensively before keying — a duplicate PeriodId would otherwise throw and
+            // (without this try/finally) hang the page on "Loading…".
+            _periods = yearPeriods.Concat(prevYearPeriods)
+                .GroupBy(p => p.PeriodId)
+                .ToDictionary(g => g.Key, g => g.First());
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Failed to load payroll runs: {ex.Message}";
+            _runs = [];
+        }
+        finally
+        {
+            _loading = false;
+        }
     }
 
     private async Task OnContextChangedAsync(ChangeEventArgs<Guid, PayrollContext> args)

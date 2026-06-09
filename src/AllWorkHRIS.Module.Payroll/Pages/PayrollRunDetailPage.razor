@@ -183,16 +183,21 @@
                 <Authorized>
                     <div class="panel-card">
                         <h3 class="panel-title">Actions</h3>
+                        @if (_finalizeBlock is not null
+                             && (_run.RunStatusId == _calculatedStatus || _run.RunStatusId == _approvedStatus))
+                        {
+                            <div class="alert-warning" style="margin-bottom:var(--space-3);">@_finalizeBlock</div>
+                        }
                         <div class="form-actions">
                             @if (_run.RunStatusId == _calculatedStatus)
                             {
-                                <button class="btn-primary" @onclick="ApproveAsync" disabled="@_submitting">
+                                <button class="btn-primary" @onclick="ApproveAsync" disabled="@(_submitting || _finalizeBlock is not null)">
                                     @(_submitting ? "Working…" : "Approve")
                                 </button>
                             }
                             @if (_run.RunStatusId == _approvedStatus)
                             {
-                                <button class="btn-primary" @onclick="ReleaseAsync" disabled="@_submitting">
+                                <button class="btn-primary" @onclick="ReleaseAsync" disabled="@(_submitting || _finalizeBlock is not null)">
                                     @(_submitting ? "Working…" : "Release")
                                 </button>
                                 <button class="btn-danger" style="border:1px solid var(--color-danger);border-radius:var(--radius-md);padding:var(--space-2) var(--space-4);"
@@ -406,6 +411,7 @@
     private bool    _registerLoading;
     private bool    _submitting;
     private string? _errorMessage;
+    private string? _finalizeBlock;   // ADR-027 D8: ordered-commit block reason (null = free to proceed)
     private string  _activeTab      = "summary";
     private Guid    _currentUserId;
 
@@ -492,6 +498,9 @@
             _period  = await ContextRepo.GetPeriodByIdAsync(_run.PeriodId);
 
             _runScope = _run.RunScopeId is Guid sid ? await RunService.GetRunScopeAsync(sid) : null;
+
+            // ADR-027 D8: is this run blocked from its next finalize step by an earlier-pay-date run?
+            _finalizeBlock = await RunService.GetOrderedCommitBlockAsync(RunId);
 
             if (HasResultsToShow(_run.RunStatusId))
                 await LoadResultsAsync();

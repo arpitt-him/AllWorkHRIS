@@ -17,6 +17,13 @@ public interface IPayrollRunService
     Task CancelRunAsync(CancelPayrollRunCommand command);
 
     /// <summary>
+    /// ADR-027 D8 (ordered-commit): a message if this run is blocked from its next finalize
+    /// step (approval when CALCULATED, release when APPROVED) by an earlier-pay-date run in the
+    /// same context that must finalize first; null if free to proceed. UI pre-check for the gate.
+    /// </summary>
+    Task<string?> GetOrderedCommitBlockAsync(Guid runId);
+
+    /// <summary>
     /// Reverse an APPROVED run (ADR-027): the UI/command path — delegates to the standalone
     /// <see cref="IPayrollCorrectionService"/>. Returns the structured reversal outcome.
     /// </summary>

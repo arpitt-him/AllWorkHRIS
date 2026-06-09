@@ -698,8 +698,32 @@
                     <GridColumn Field="PayDate" HeaderText="Pay Date" Width="120">
                         <Template>@{ var p = (PayrollPeriod)context; }@p.PayDate.ToString("yyyy-MM-dd")</Template>
                     </GridColumn>
-                    <GridColumn HeaderText="Status" Width="100">
-                        <Template>@{ var p = (PayrollPeriod)context; }<span class="badge @PeriodStatusClass(p.CalendarStatus)">@p.CalendarStatus</span></Template>
+                    <GridColumn HeaderText="Status" Width="200">
+                        <Template>
+                            @{ var p = (PayrollPeriod)context; }
+                            <span class="badge @PeriodStatusClass(p.CalendarStatus)">@p.CalendarStatus</span>
+                            @* ADR-027 D8 / #54 — close a released (LOCKED) period to end its correction window. *@
+                            @if (p.CalendarStatus == "LOCKED")
+                            {
+                                @if (_pendingClosePeriodId == p.PeriodId)
+                                {
+                                    <button class="btn-link" style="font-size:var(--font-size-sm);margin-left:var(--space-2)"
+                                            @onclick="() => ConfirmClosePeriodAsync(p)">confirm close</button>
+                                    <button class="btn-link" style="font-size:var(--font-size-sm)"
+                                            @onclick="CancelClosePeriod">cancel</button>
+                                    @if (_closeHadError && _closeMessage is not null)
+                                    {
+                                        <div class="text-sm" style="color:var(--color-danger,#dc2626)">@_closeMessage</div>
+                                    }
+                                }
+                                else
+                                {
+                                    <button class="btn-link" style="font-size:var(--font-size-sm);margin-left:var(--space-2)"
+                                            title="End the correction window — no more supplementals/corrections for this period"
+                                            @onclick="() => BeginClosePeriod(p)">close</button>
+                                }
+                            }
+                        </Template>
                     </GridColumn>
                 </GridColumns>
             </SfGrid>
@@ -970,6 +994,63 @@
     {
         _showClearConfirm   = false;
         _clearResultMessage = null;
+    }
+
+    // ADR-027 D8 / #54 — close a released (LOCKED) period (LOCKED → CLOSED), ending its
+    // correction window. Inline per-row confirm in the Status column.
+    private Guid?   _pendingClosePeriodId;
+    private string? _closeMessage;
+    private bool    _closeHadError;
+
+    private void BeginClosePeriod(PayrollPeriod p)
+    {
+        _pendingClosePeriodId = p.PeriodId;
+        _closeMessage         = null;
+        _closeHadError        = false;
+    }
+
+    private void CancelClosePeriod()
+    {
+        _pendingClosePeriodId = null;
+        _closeMessage         = null;
+        _closeHadError        = false;
+    }
+
+    private async Task ConfirmClosePeriodAsync(PayrollPeriod p)
+    {
+        _closeMessage  = null;
+        _closeHadError = false;
+        try
+        {
+            var reason = await ContextRepo.ClosePeriodAsync(p.PeriodId, _currentUserId);
+            if (reason is not null)
+            {
+                _closeMessage  = reason;
+                _closeHadError = true;
+                return;
+            }
+            await AuditService.LogAsync(new AuditEventRecord(
+                EventType:        "STATUS_CHANGE",
+                EntityType:       "PayrollPeriod",
+                EntityId:         p.PeriodId,
+                ModuleName:       "PAYROLL",
+                ChangeSummary:    $"Period {p.PeriodYear} P{p.PeriodNumber} closed (LOCKED → CLOSED) — correction window ended.",
+                ParentEntityType: "PayrollContext",
+                ParentEntityId:   ContextId,
+                AfterJson:        System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    period_year   = p.PeriodYear,
+                    period_number = p.PeriodNumber,
+                    calendar_status = "CLOSED"
+                })));
+            _pendingClosePeriodId = null;
+            await LoadPeriodsAsync();
+        }
+        catch (Exception ex)
+        {
+            _closeMessage  = ex.Message;
+            _closeHadError = true;
+        }
     }
 
     private async Task ShowDeleteConfirmAsync()

@@ -211,6 +211,14 @@ public sealed class PayrollRunService : IPayrollRunService
         // This mirrors the existing Releasing → Released backgrounding pattern.
         var run = await RequireRunAsync(command.RunId);
         RequireStatus(run, "CALCULATED", "approve");
+
+        // ADR-027 D8 (ordered-commit): approval is the YTD-commit point, so a run cannot
+        // commit while an EARLIER-pay-date run in the same context is still un-approved —
+        // that would post YTD out of pay-date order. CANCELLED/REVERSED/FAILED don't block.
+        var earlierUnapproved = await FindEarlierBlockingRunAsync(run, BlocksApproval);
+        if (earlierUnapproved is not null)
+            throw new InvalidOperationException(OrderedCommitMessage(run, earlierUnapproved, "approve"));
+
         await _runRepo.UpdateStatusAsync(command.RunId, StatusId("APPROVING"), command.ApprovedBy);
         _queue.Writer.TryWrite(command.RunId);
         _logger.LogInformation("Run {RunId} approval initiated by {UserId} — posting accumulators in background",
@@ -232,6 +240,16 @@ public sealed class PayrollRunService : IPayrollRunService
     {
         var run = await RequireRunAsync(command.RunId);
         RequireStatus(run, "APPROVED", "release");
+
+        // ADR-027 D8 (ordered-commit): runs finalize (release) in pay-date order, so a run
+        // cannot release while an EARLIER-pay-date run in the same context is not yet RELEASED.
+        // Release-order is its own gate, not merely a corollary of approval-order: two runs can
+        // both be APPROVED, and nothing else stops the later-dated one releasing first.
+        // CANCELLED/REVERSED/FAILED don't block.
+        var earlierUnreleased = await FindEarlierBlockingRunAsync(run, BlocksRelease);
+        if (earlierUnreleased is not null)
+            throw new InvalidOperationException(OrderedCommitMessage(run, earlierUnreleased, "release"));
+
         await _runRepo.UpdateStatusAsync(command.RunId, StatusId("RELEASING"), command.ReleasedBy);
         _queue.Writer.TryWrite(command.RunId);
         _logger.LogInformation("Run {RunId} release initiated by {UserId}", command.RunId, command.ReleasedBy);
@@ -393,5 +411,104 @@ public sealed class PayrollRunService : IPayrollRunService
             throw new InvalidOperationException(
                 $"Run {run.RunId} must be in {requiredCode} state to {action}. Current: {currentCode}");
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // ADR-027 D8 — ordered-commit gate (finalize runs in pay-date order)
+    // -----------------------------------------------------------------------
+
+    // Per-context run order: pay date asc → Regular before a same-date Supplemental/correction
+    // → creation time → run id (deterministic total order). The same key drives both gates.
+    private (DateOnly Pay, int TypeRank, DateTimeOffset Created, Guid Id) OrderKey(PayrollRun r)
+        => (r.PayDate, TypeRank(r), r.CreationTimestamp, r.RunId);
+
+    // Regular sorts ahead of any other run type sharing a pay date (a Supplemental/correction is
+    // typically a re-pay or top-up of that pay date's Regular, so the Regular finalizes first).
+    private int TypeRank(PayrollRun r)
+        => r.RunTypeId == _lookup.GetId(LookupTables.RunType, "REGULAR") ? 0 : 1;
+
+    private string RunTypeLabel(int runTypeId)
+        => _lookup.GetAll(LookupTables.RunType).FirstOrDefault(e => e.Id == runTypeId)?.Label
+           ?? _lookup.GetCode(LookupTables.RunType, runTypeId);
+
+    private static int CompareKey(
+        (DateOnly Pay, int TypeRank, DateTimeOffset Created, Guid Id) a,
+        (DateOnly Pay, int TypeRank, DateTimeOffset Created, Guid Id) b)
+    {
+        int c = a.Pay.CompareTo(b.Pay);          if (c != 0) return c;
+        c = a.TypeRank.CompareTo(b.TypeRank);    if (c != 0) return c;
+        c = a.Created.CompareTo(b.Created);      if (c != 0) return c;
+        return a.Id.CompareTo(b.Id);
+    }
+
+    // An earlier run still pending its YTD commit (un-approved) blocks a later run's APPROVAL.
+    private static bool BlocksApproval(string statusCode)
+        => statusCode is "DRAFT" or "OPEN" or "CALCULATING" or "CALCULATED" or "UNDER_REVIEW" or "APPROVING";
+
+    // An earlier run not yet finalized (released) and not void blocks a later run's RELEASE.
+    // RELEASED is done; CANCELLED/REVERSED/FAILED are void — none of these block.
+    private static bool BlocksRelease(string statusCode)
+        => statusCode is "DRAFT" or "OPEN" or "CALCULATING" or "CALCULATED" or "UNDER_REVIEW"
+                      or "APPROVING" or "APPROVED" or "RELEASING";
+
+    // Returns the EARLIEST strictly-earlier same-context run whose status satisfies `blocks`,
+    // or null if `run` is free to proceed. Earliest blocker → clearest "do X first" message.
+    private async Task<PayrollRun?> FindEarlierBlockingRunAsync(PayrollRun run, Func<string, bool> blocks)
+    {
+        var siblings = await _runRepo.GetByContextAsync(run.PayrollContextId);
+        var runKey   = OrderKey(run);
+
+        PayrollRun? blocker = null;
+        foreach (var s in siblings)
+        {
+            if (s.RunId == run.RunId) continue;
+            if (CompareKey(OrderKey(s), runKey) >= 0) continue;   // strictly-earlier runs only
+            if (!blocks(_lookup.GetCode(LookupTables.RunStatus, s.RunStatusId))) continue;
+            if (blocker is null || CompareKey(OrderKey(s), OrderKey(blocker)) < 0)
+                blocker = s;
+        }
+        return blocker;
+    }
+
+    // Builds the blocked message, naming the criterion that actually ordered `blocker` ahead of
+    // `current` (earlier pay date, OR same pay date with the run-type or creation-order tiebreak) —
+    // important because when both share a pay date, "finalize in pay-date order" alone reads as a
+    // contradiction. `verb` is "approve" | "release" (past form derived as verb + "d").
+    private string OrderedCommitMessage(PayrollRun current, PayrollRun blocker, string verb)
+    {
+        var name = string.IsNullOrWhiteSpace(blocker.RunDescription) ? blocker.RunId.ToString() : blocker.RunDescription;
+        var done = verb + "d";   // approve → approved, release → released
+
+        string why;
+        if (blocker.PayDate < current.PayDate)
+            why = $"it has an earlier pay date ({blocker.PayDate:yyyy-MM-dd})";
+        else if (TypeRank(blocker) < TypeRank(current))
+            why = $"on the same pay date ({blocker.PayDate:yyyy-MM-dd}) a {RunTypeLabel(blocker.RunTypeId)} run " +
+                  $"finalizes before this {RunTypeLabel(current.RunTypeId)} run";
+        else
+            why = $"on the same pay date ({blocker.PayDate:yyyy-MM-dd}) it was created earlier";
+
+        return $"Can't {verb} this run yet: {name} must be {done} first because {why}. " +
+               $"Runs in a context finalize in a fixed order — pay date, then run type " +
+               $"(Regular before a same-date Supplemental), then creation order.";
+    }
+
+    // UI pre-check: a message if this run is blocked from its next finalize step by an earlier
+    // run (approval when CALCULATED, release when APPROVED), else null. Lets the run-detail page
+    // disable the Approve/Release action and show why, rather than only throwing on click.
+    public async Task<string?> GetOrderedCommitBlockAsync(Guid runId)
+    {
+        var run = await RequireRunAsync(runId);
+        if (run.RunStatusId == StatusId("CALCULATED"))
+        {
+            var b = await FindEarlierBlockingRunAsync(run, BlocksApproval);
+            return b is null ? null : OrderedCommitMessage(run, b, "approve");
+        }
+        if (run.RunStatusId == StatusId("APPROVED"))
+        {
+            var b = await FindEarlierBlockingRunAsync(run, BlocksRelease);
+            return b is null ? null : OrderedCommitMessage(run, b, "release");
+        }
+        return null;
     }
 }

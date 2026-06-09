@@ -623,6 +623,132 @@ public sealed class PayrollGateTests : IDisposable
     }
 
     // ---------------------------------------------------------------------------
+    // TC-PAY-REPAY-SAMEPERIOD: posting a re-pay into a period that ALREADY carries a
+    // balance row for the employee (the reverse-then-re-pay path) must upsert that
+    // existing per-(EE,period) balance in place — no PK collision, no duplicate row.
+    // Regression guard for the 23505 accumulator_balance_pkey failure that occurred
+    // when the balance upsert relied on a NULLS-NOT-DISTINCT ON CONFLICT arbiter that
+    // does not fire for employee-scoped rows (employer_id IS NULL). The explicit
+    // UPDATE-by-accumulator_id-else-INSERT posts cleanly regardless of the index.
+    // ---------------------------------------------------------------------------
+
+    [Fact]
+    public async Task RepayAfterReverse_PostsIntoExistingSamePeriodBalance_UpsertsSingleRow()
+    {
+        var emp    = await HireAndEnrollAsync("REPAY-SP", blockingCleared: true);
+        var userId = Guid.NewGuid();
+
+        using var conn = _connectionFactory.CreateConnection();
+        int BalanceRows() => conn.ExecuteScalar<int>(
+            "SELECT COUNT(*) FROM accumulator_balance WHERE participant_id = @Emp", new { Emp = emp });
+        decimal Ytd() => conn.ExecuteScalar<decimal>(
+            "SELECT COALESCE(SUM(current_value), 0) FROM accumulator_balance WHERE participant_id = @Emp",
+            new { Emp = emp });
+
+        // Run 1 (period A) → APPROVED: creates the per-(EE,period) balance rows.
+        var run1          = await CalculateAndApproveAsync(AcumPeriod2026A, userId);
+        var rowsAfterRun1 = BalanceRows();
+        var ytdAfterRun1  = Ytd();
+        Assert.True(rowsAfterRun1 > 0, "run 1 should create balance rows");
+        Assert.True(ytdAfterRun1 > 0m, "run 1 should post a positive YTD");
+
+        // Reverse run 1 → balance rows are REVERTED (not deleted: they persist at the prior
+        // value), and the period reopens for a fresh run. This is what leaves a pre-existing
+        // same-period balance for the re-pay to post into.
+        var correction = BuildCorrectionService();
+        await correction.ReverseRunAsync(
+            new ReverseRunRequest { RunId = run1, ReversedBy = userId, Reason = "repay setup" });
+        Assert.Equal(rowsAfterRun1, BalanceRows());                          // rows still present, just reverted
+        Assert.Null(await _runRepo.GetActiveRegularRunForPeriodAsync(AcumPeriod2026A));
+
+        // Re-pay: a SECOND run into the SAME period posts into those PRE-EXISTING balance rows
+        // (the path that regressed). It must approve and must NOT create duplicate rows.
+        var run2    = await CalculateAndApproveAsync(AcumPeriod2026A, userId);
+        var run2Row = await _runRepo.GetByIdAsync(run2);
+
+        Assert.Equal(_lookupCache.GetId(LookupTables.RunStatus, "APPROVED"), run2Row!.RunStatusId); // no PK collision
+        Assert.Equal(rowsAfterRun1, BalanceRows());                          // upserted in place — no duplicate rows
+        Assert.Equal(ytdAfterRun1,  Ytd());                                  // re-paid YTD restored, not doubled
+    }
+
+    // ---------------------------------------------------------------------------
+    // TC-PAY-ORDERED-COMMIT: ADR-027 D8 — runs in one context finalize in pay-date
+    // order. A later-pay-date run cannot RELEASE while an earlier-pay-date run in the
+    // same context is not yet released; cannot APPROVE while an earlier is un-approved;
+    // a same-date Supplemental finalizes after its Regular; void (REVERSED) earlier runs
+    // don't block. (The screenshot case: Feb-13 Released while Jan-30 only Approved.)
+    // ---------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ReleaseOutOfPayDateOrder_IsBlocked_UntilEarlierReleased()
+    {
+        await HireAndEnrollAsync("ORD-REL", blockingCleared: true);
+        var userId = Guid.NewGuid();
+
+        // Two runs in one context, both driven to APPROVED: A (pay 2026-06-19) earlier than B (pay 2026-07-19).
+        var runA = await CalculateAndApproveAsync(AcumPeriod2026A, userId);
+        var runB = await CalculateAndApproveAsync(AcumPeriod2026B, userId);
+
+        // Releasing the LATER run while the EARLIER is only APPROVED is blocked (the reported bug).
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            _runService.ReleaseRunAsync(new ReleasePayrollRunCommand { RunId = runB, ReleasedBy = userId }));
+        Assert.Contains("must be released first", ex.Message);
+        Assert.Contains("earlier pay date", ex.Message);
+
+        // Release the earlier run first → the later one is then free to release.
+        await ReleaseRunToCompletionAsync(runA, userId);
+        await ReleaseRunToCompletionAsync(runB, userId);
+
+        var releasedId = _lookupCache.GetId(LookupTables.RunStatus, "RELEASED");
+        Assert.Equal(releasedId, (await _runRepo.GetByIdAsync(runA))!.RunStatusId);
+        Assert.Equal(releasedId, (await _runRepo.GetByIdAsync(runB))!.RunStatusId);
+    }
+
+    [Fact]
+    public async Task ApproveOutOfPayDateOrder_IsBlocked_UnlessEarlierRunIsVoid()
+    {
+        var userId = Guid.NewGuid();
+        var t0     = DateTimeOffset.UtcNow;
+
+        // An earlier-pay-date sibling left un-approved (CALCULATED) + a later-pay-date target also CALCULATED.
+        // Inserted directly because the single-in-flight guard won't allow two un-approved runs via InitiateRunAsync.
+        var earlier = await InsertBareRunAsync(AcumPeriod2026A, new DateOnly(2026, 6, 19), "REGULAR", "CALCULATED", "ORD-A", t0);
+        var target  = await InsertBareRunAsync(AcumPeriod2026B, new DateOnly(2026, 7, 19), "REGULAR", "CALCULATED", "ORD-B", t0.AddMinutes(1));
+
+        // Approving the later run is blocked while the earlier is un-approved.
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            _runService.ApproveRunAsync(new ApprovePayrollRunCommand { RunId = target, ApprovedBy = userId }));
+        Assert.Contains("must be approved first", ex.Message);
+        Assert.Contains("earlier pay date", ex.Message);
+        Assert.NotNull(await _runService.GetOrderedCommitBlockAsync(target));
+
+        // A VOID earlier run (REVERSED) does not block — the gate skips CANCELLED/REVERSED/FAILED.
+        await _runRepo.UpdateStatusAsync(earlier, _lookupCache.GetId(LookupTables.RunStatus, "REVERSED"), userId);
+        Assert.Null(await _runService.GetOrderedCommitBlockAsync(target));
+    }
+
+    [Fact]
+    public async Task SameDateSupplemental_MustFinalizeAfterItsRegular()
+    {
+        var userId  = Guid.NewGuid();
+        var t0      = DateTimeOffset.UtcNow;
+        var payDate = new DateOnly(2026, 6, 19);
+
+        // Same pay date: a Regular still only APPROVED, and a Supplemental also APPROVED.
+        var regular = await InsertBareRunAsync(AcumPeriod2026A, payDate, "REGULAR",      "APPROVED", "SD-REG",  t0);
+        var supp    = await InsertBareRunAsync(AcumPeriod2026A, payDate, "SUPPLEMENTAL", "APPROVED", "SD-SUPP", t0.AddMinutes(1));
+
+        // The Supplemental can't release until its same-date Regular releases (Regular sorts first),
+        // and the message must explain the same-date run-type tiebreak (not just "pay-date order").
+        var block = await _runService.GetOrderedCommitBlockAsync(supp);
+        Assert.NotNull(block);
+        Assert.Contains("same pay date", block);
+        Assert.Contains("Regular run finalizes before", block);
+        // The Regular is free to release — nothing earlier in the order.
+        Assert.Null(await _runService.GetOrderedCommitBlockAsync(regular));
+    }
+
+    // ---------------------------------------------------------------------------
     // Helpers
     // ---------------------------------------------------------------------------
 
@@ -639,6 +765,47 @@ public sealed class PayrollGateTests : IDisposable
         await RunJobAsync(runId);                                   // DRAFT → CALCULATED
         await _runService.ApproveRunAsync(new ApprovePayrollRunCommand { RunId = runId, ApprovedBy = userId });
         await RunJobAsync(runId);                                   // APPROVING → APPROVED (+ reset detection)
+        return runId;
+    }
+
+    // Releases an APPROVED run all the way to RELEASED (RELEASING → RELEASED via the job).
+    private async Task ReleaseRunToCompletionAsync(Guid runId, Guid userId)
+    {
+        await _runService.ReleaseRunAsync(new ReleasePayrollRunCommand { RunId = runId, ReleasedBy = userId });
+        await DriveJobAsync(runId);                                 // RELEASING → RELEASED (emits no progress)
+    }
+
+    // Inserts a bare run row directly (no results), bypassing InitiateRunAsync's single-in-flight
+    // guard — needed to construct ordered-commit scenarios the normal flow won't allow.
+    private async Task<Guid> InsertBareRunAsync(
+        Guid periodId, DateOnly payDate, string runTypeCode, string statusCode, string description, DateTimeOffset created)
+    {
+        var runId  = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        await _runRepo.InsertAsync(new PayrollRun
+        {
+            RunId                      = runId,
+            PayrollContextId           = ContextId,
+            PeriodId                   = periodId,
+            PayDate                    = payDate,
+            RunTypeId                  = _lookupCache.GetId(LookupTables.RunType, runTypeCode),
+            RunStatusId                = _lookupCache.GetId(LookupTables.RunStatus, statusCode),
+            RunDescription             = description,
+            ParentRunId                = null,
+            RelatedRunGroupId          = null,
+            RunScopeId                 = null,
+            RuleAndConfigVersionRef    = null,
+            TemporalOverrideActiveFlag = false,
+            TemporalOverrideDate       = null,
+            InitiatedBy                = userId,
+            RunStartTimestamp          = null,
+            RunEndTimestamp            = null,
+            CreatedBy                  = userId,
+            CreationTimestamp          = created,
+            LastUpdatedBy              = userId,
+            LastUpdateTimestamp        = created
+        });
+        _runIds.Add(runId);
         return runId;
     }
 
@@ -718,6 +885,12 @@ public sealed class PayrollGateTests : IDisposable
         };
 
     private async Task<RunProgress> RunJobAsync(Guid runId, IPayrollHoursSource? hoursSource = null)
+        => await DriveJobAsync(runId, hoursSource)
+           ?? throw new InvalidOperationException("Job completed with no progress update.");
+
+    // Drives the background job for one run through whatever status it is in, returning the last
+    // progress update (null if the path emits none — e.g. the release path is a pure status flip).
+    private async Task<RunProgress?> DriveJobAsync(Guid runId, IPayrollHoursSource? hoursSource = null)
     {
         var channel = Channel.CreateBounded<Guid>(new BoundedChannelOptions(1)
         {
@@ -744,7 +917,7 @@ public sealed class PayrollGateTests : IDisposable
         await job.ExecuteTask!;
         await job.StopAsync(CancellationToken.None);
 
-        return progress.Last ?? throw new InvalidOperationException("Job completed with no progress update.");
+        return progress.Last;
     }
 
     // ---------------------------------------------------------------------------

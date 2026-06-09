@@ -1203,7 +1203,26 @@ public sealed class AccumulatorRepository : IAccumulatorRepository
             )
             """;
 
-        const string balanceSql = """
+        // Balance write: explicit UPDATE-by-PK, else INSERT. accumulator_id is the
+        // authoritative row key — AccumulatorService.ApplyChainAsync reuses the existing
+        // row's id when a balance for this (definition, participant, period) already exists
+        // (e.g. a re-pay into a period that already carries a balance after a reversal) and
+        // mints a fresh id only when none does. So this upsert is portable and NULL-safe: it
+        // does NOT depend on a NULLS-NOT-DISTINCT natural-key index for an ON CONFLICT arbiter
+        // to fire — which it does NOT for employee-scoped rows where employer_id IS NULL, the
+        // gap that surfaced as a 23505 accumulator_balance_pkey collision on same-period
+        // re-pay. Posting is single-threaded at approval (ADR-017), so read-then-write is
+        // race-free; the natural-key UNIQUE remains as a duplicate-row safety net.
+        const string balanceUpdateSql = """
+            UPDATE accumulator_balance SET
+                current_value              = @CurrentValue,
+                balance_status_id          = @BalanceStatusId,
+                last_updated_run_id        = @LastUpdatedRunId,
+                last_updated_result_set_id = @LastUpdatedResultSetId,
+                last_update_timestamp      = @LastUpdateTimestamp
+            WHERE accumulator_id = @AccumulatorId
+            """;
+        const string balanceInsertSql = """
             INSERT INTO accumulator_balance (
                 accumulator_id, accumulator_definition_id, accumulator_family_id,
                 scope_type_id, participant_id, employer_id, jurisdiction_id, plan_id,
@@ -1217,21 +1236,14 @@ public sealed class AccumulatorRepository : IAccumulatorRepository
                 @BalanceStatusId, @LastUpdatedRunId, @LastUpdatedResultSetId,
                 @LastUpdateTimestamp
             )
-            ON CONFLICT (accumulator_definition_id, participant_id, employer_id, calendar_context_id) DO UPDATE SET
-                current_value              = EXCLUDED.current_value,
-                balance_status_id          = EXCLUDED.balance_status_id,
-                last_updated_run_id        = EXCLUDED.last_updated_run_id,
-                last_updated_result_set_id = EXCLUDED.last_updated_result_set_id,
-                last_update_timestamp      = EXCLUDED.last_update_timestamp
             """;
-        // ON CONFLICT targets the natural-key UNIQUE supplied by
-        // schemas/ddl/postgres/post-dbml/001_accumulator_balance_unique_natural_key.sql
-        // so concurrent inserts collapse to UPDATE rather than producing duplicate
-        // balance rows. Requires accumulator_balance_natural_key_uq present.
 
         await uow.Connection.ExecuteAsync(impactSql,       impact,       uow.Transaction);
         await uow.Connection.ExecuteAsync(contributionSql, contribution, uow.Transaction);
-        await uow.Connection.ExecuteAsync(balanceSql,      balance,      uow.Transaction);
+
+        var balanceRowsAffected = await uow.Connection.ExecuteAsync(balanceUpdateSql, balance, uow.Transaction);
+        if (balanceRowsAffected == 0)
+            await uow.Connection.ExecuteAsync(balanceInsertSql, balance, uow.Transaction);
     }
 }
 
@@ -1808,6 +1820,27 @@ public sealed class PayrollContextRepository : IPayrollContextRepository
             """;
         using var conn = _connectionFactory.CreateConnection();
         await conn.ExecuteAsync(sql, new { PeriodId = periodId, Status = status, UpdatedBy = updatedBy });
+    }
+
+    public async Task<string?> ClosePeriodAsync(Guid periodId, Guid closedBy)
+    {
+        var period = await GetPeriodByIdAsync(periodId);
+        if (period is null) return "Period not found.";
+        if (!string.Equals(period.CalendarStatus, "LOCKED", StringComparison.OrdinalIgnoreCase))
+            return $"Only a released (LOCKED) period can be closed — this period is {period.CalendarStatus}.";
+
+        // Guarded UPDATE (only flips LOCKED → CLOSED) so a concurrent status change can't be clobbered.
+        const string sql = """
+            UPDATE payroll_period
+            SET calendar_status       = 'CLOSED',
+                last_updated_by       = @ClosedBy,
+                last_update_timestamp = CURRENT_TIMESTAMP
+            WHERE period_id = @PeriodId
+              AND calendar_status = 'LOCKED'
+            """;
+        using var conn = _connectionFactory.CreateConnection();
+        var rows = await conn.ExecuteAsync(sql, new { PeriodId = periodId, ClosedBy = closedBy });
+        return rows == 0 ? "Period could not be closed (its status changed concurrently)." : null;
     }
 
     public async Task UpdatePeriodRunDateAsync(Guid periodId, DateOnly? runDate, Guid updatedBy)
